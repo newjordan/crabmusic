@@ -207,6 +207,16 @@ impl Application {
         )?;
         tracing::info!("Audio capture device initialized successfully");
 
+        // Get the actual sample rate from the audio device
+        let actual_sample_rate = audio_device.get_config().sample_rate;
+        if actual_sample_rate != config.audio.sample_rate {
+            tracing::warn!(
+                "Audio device sample rate ({} Hz) differs from config ({} Hz). Using device sample rate.",
+                actual_sample_rate,
+                config.audio.sample_rate
+            );
+        }
+
         // Initialize audio output (optional, with graceful degradation)
         let audio_output = if no_audio_output {
             tracing::info!("Audio output disabled by CLI flag");
@@ -228,15 +238,15 @@ impl Application {
             }
         };
 
-        // Initialize DSP processor
+        // Initialize DSP processor with actual sample rate from audio device
         tracing::debug!("Initializing DSP processor...");
         let dsp_processor = DspProcessor::new(
-            config.audio.sample_rate,
+            actual_sample_rate,
             config.dsp.fft_size,
         )
         .context("Failed to initialize DSP processor")?;
         tracing::info!("DSP processor initialized: sample_rate={}, fft_size={}",
-            config.audio.sample_rate, config.dsp.fft_size);
+            actual_sample_rate, config.dsp.fft_size);
 
         // Initialize visualizer
         tracing::debug!("Initializing visualizer...");

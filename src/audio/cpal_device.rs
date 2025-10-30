@@ -170,9 +170,14 @@ impl AudioCaptureDevice for CpalAudioDevice {
         info!("Starting audio capture");
 
         let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .ok_or(AudioError::DeviceNotAvailable)?;
+
+        // Get the device (either by name or default)
+        let device = if let Some(ref name) = self.device_name {
+            Self::find_device_by_name(&host, name)?
+        } else {
+            host.default_input_device()
+                .ok_or(AudioError::DeviceNotAvailable)?
+        };
 
         let config: cpal::StreamConfig = cpal::StreamConfig {
             channels: self.config.channels,
