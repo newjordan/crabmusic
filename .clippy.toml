@@ -1,0 +1,15 @@
+# Clippy configuration for CrabMusic
+
+# Cognitive complexity threshold
+cognitive-complexity-threshold = 30
+
+# Documentation
+missing-docs-in-crate-items = false
+
+# Performance
+too-many-arguments-threshold = 8
+type-complexity-threshold = 500
+
+# Style
+single-char-binding-names-threshold = 5
+

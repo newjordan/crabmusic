@@ -3,8 +3,10 @@
 
 #![allow(dead_code)]
 
+pub mod character_sets;
 mod sine_wave;
 
+pub use character_sets::{CharacterSet, CharacterSetType, get_character_set, get_all_character_sets};
 pub use sine_wave::{SineWaveConfig, SineWaveVisualizer};
 
 use crate::dsp::AudioParameters;
@@ -166,6 +168,9 @@ pub fn lerp(current: f32, target: f32, factor: f32) -> f32 {
 /// Represents a 2D grid of characters that will be rendered to the terminal.
 /// Each cell contains a character and optional styling information.
 ///
+/// Supports differential rendering by tracking which cells have changed since
+/// the last render, allowing for optimized updates.
+///
 /// # Examples
 ///
 /// ```
@@ -182,6 +187,10 @@ pub struct GridBuffer {
     height: usize,
     /// Flat array of cells (row-major order)
     cells: Vec<GridCell>,
+    /// Dirty flags for changed cells (for differential rendering)
+    dirty: Vec<bool>,
+    /// Whether the entire grid needs to be redrawn
+    full_redraw: bool,
 }
 
 impl GridBuffer {
@@ -204,11 +213,15 @@ impl GridBuffer {
     /// assert_eq!(grid.height(), 24);
     /// ```
     pub fn new(width: usize, height: usize) -> Self {
-        let cells = vec![GridCell::empty(); width * height];
+        let size = width * height;
+        let cells = vec![GridCell::empty(); size];
+        let dirty = vec![false; size];
         Self {
             width,
             height,
             cells,
+            dirty,
+            full_redraw: true, // First render needs full redraw
         }
     }
 
@@ -261,13 +274,24 @@ impl GridBuffer {
             y,
             self.height
         );
-        self.cells[y * self.width + x] = GridCell::new(character);
+        let index = y * self.width + x;
+        let new_cell = GridCell::new(character);
+
+        // Only mark as dirty if the cell actually changed
+        if self.cells[index] != new_cell {
+            self.cells[index] = new_cell;
+            self.dirty[index] = true;
+        }
     }
 
     /// Clear the grid buffer (fill with spaces)
     pub fn clear(&mut self) {
-        for cell in &mut self.cells {
-            *cell = GridCell::empty();
+        let empty = GridCell::empty();
+        for (i, cell) in self.cells.iter_mut().enumerate() {
+            if *cell != empty {
+                *cell = empty;
+                self.dirty[i] = true;
+            }
         }
     }
 
@@ -279,6 +303,51 @@ impl GridBuffer {
     /// Get the height of the grid
     pub fn height(&self) -> usize {
         self.height
+    }
+
+    /// Check if a cell is dirty (changed since last render)
+    ///
+    /// # Arguments
+    /// * `x` - X coordinate (column)
+    /// * `y` - Y coordinate (row)
+    ///
+    /// # Returns
+    /// True if the cell has changed since the last render
+    pub fn is_dirty(&self, x: usize, y: usize) -> bool {
+        if self.full_redraw {
+            return true;
+        }
+        if x >= self.width || y >= self.height {
+            return false;
+        }
+        self.dirty[y * self.width + x]
+    }
+
+    /// Mark all cells as clean (called after rendering)
+    pub fn mark_clean(&mut self) {
+        self.dirty.fill(false);
+        self.full_redraw = false;
+    }
+
+    /// Force a full redraw on the next render
+    pub fn mark_full_redraw(&mut self) {
+        self.full_redraw = true;
+    }
+
+    /// Check if a full redraw is needed
+    pub fn needs_full_redraw(&self) -> bool {
+        self.full_redraw
+    }
+
+    /// Get the number of dirty cells
+    ///
+    /// # Returns
+    /// Count of cells that have changed since last render
+    pub fn dirty_count(&self) -> usize {
+        if self.full_redraw {
+            return self.cells.len();
+        }
+        self.dirty.iter().filter(|&&d| d).count()
     }
 }
 
@@ -588,5 +657,100 @@ mod tests {
         }
 
         assert_eq!(viz.update_count, 10);
+    }
+
+    // Differential rendering tests
+    #[test]
+    fn test_grid_buffer_initial_full_redraw() {
+        let grid = GridBuffer::new(10, 10);
+        assert!(grid.needs_full_redraw());
+        assert_eq!(grid.dirty_count(), 100); // All cells dirty on first render
+    }
+
+    #[test]
+    fn test_grid_buffer_mark_clean() {
+        let mut grid = GridBuffer::new(10, 10);
+        grid.mark_clean();
+
+        assert!(!grid.needs_full_redraw());
+        assert_eq!(grid.dirty_count(), 0);
+    }
+
+    #[test]
+    fn test_grid_buffer_dirty_tracking() {
+        let mut grid = GridBuffer::new(10, 10);
+        grid.mark_clean();
+
+        // Set a cell - should mark it dirty
+        grid.set_cell(5, 5, '█');
+        assert!(grid.is_dirty(5, 5));
+        assert_eq!(grid.dirty_count(), 1);
+
+        // Set another cell
+        grid.set_cell(3, 3, '▓');
+        assert!(grid.is_dirty(3, 3));
+        assert_eq!(grid.dirty_count(), 2);
+
+        // Clean cells should not be dirty
+        assert!(!grid.is_dirty(0, 0));
+    }
+
+    #[test]
+    fn test_grid_buffer_no_change_no_dirty() {
+        let mut grid = GridBuffer::new(10, 10);
+        grid.mark_clean();
+
+        // Set a cell
+        grid.set_cell(5, 5, '█');
+        assert_eq!(grid.dirty_count(), 1);
+
+        grid.mark_clean();
+        assert_eq!(grid.dirty_count(), 0);
+
+        // Set the same character again - should not mark as dirty
+        grid.set_cell(5, 5, '█');
+        assert_eq!(grid.dirty_count(), 0);
+        assert!(!grid.is_dirty(5, 5));
+    }
+
+    #[test]
+    fn test_grid_buffer_clear_marks_dirty() {
+        let mut grid = GridBuffer::new(10, 10);
+
+        // Fill with characters
+        for y in 0..10 {
+            for x in 0..10 {
+                grid.set_cell(x, y, '█');
+            }
+        }
+
+        grid.mark_clean();
+        assert_eq!(grid.dirty_count(), 0);
+
+        // Clear should mark all non-empty cells as dirty
+        grid.clear();
+        assert_eq!(grid.dirty_count(), 100);
+    }
+
+    #[test]
+    fn test_grid_buffer_force_full_redraw() {
+        let mut grid = GridBuffer::new(10, 10);
+        grid.mark_clean();
+
+        assert!(!grid.needs_full_redraw());
+
+        grid.mark_full_redraw();
+        assert!(grid.needs_full_redraw());
+        assert_eq!(grid.dirty_count(), 100);
+    }
+
+    #[test]
+    fn test_grid_buffer_is_dirty_bounds() {
+        let mut grid = GridBuffer::new(10, 10);
+        grid.mark_clean(); // Clear full_redraw flag
+
+        // Out of bounds should return false
+        assert!(!grid.is_dirty(10, 10));
+        assert!(!grid.is_dirty(100, 100));
     }
 }

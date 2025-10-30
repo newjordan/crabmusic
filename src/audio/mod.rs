@@ -5,9 +5,11 @@
 #![allow(unused_imports)]
 
 mod cpal_device;
+mod output_device;
 mod ring_buffer;
 
 pub use cpal_device::CpalAudioDevice;
+pub use output_device::AudioOutputDevice;
 pub use ring_buffer::AudioRingBuffer;
 
 use crate::error::AudioError;

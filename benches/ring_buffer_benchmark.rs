@@ -1,5 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use crabmusic::audio::{AudioBuffer, AudioRingBuffer};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 fn bench_push(c: &mut Criterion) {
     c.bench_function("ring_buffer_push", |b| {
@@ -41,4 +41,3 @@ fn bench_push_pop_cycle(c: &mut Criterion) {
 
 criterion_group!(benches, bench_push, bench_pop, bench_push_pop_cycle);
 criterion_main!(benches);
-

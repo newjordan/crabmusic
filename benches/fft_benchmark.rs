@@ -1,8 +1,8 @@
 // FFT performance benchmarks
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use crabmusic::audio::AudioBuffer;
 use crabmusic::dsp::DspProcessor;
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 /// Helper function to generate synthetic sine wave for benchmarking
 fn generate_sine_wave(
@@ -48,5 +48,10 @@ fn fft_benchmark_4096(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, fft_benchmark, fft_benchmark_1024, fft_benchmark_4096);
+criterion_group!(
+    benches,
+    fft_benchmark,
+    fft_benchmark_1024,
+    fft_benchmark_4096
+);
 criterion_main!(benches);

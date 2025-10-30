@@ -3,6 +3,9 @@
 
 #![allow(dead_code)]
 
+pub mod smoothing;
+pub mod windowing;
+
 use crate::audio::AudioBuffer;
 use crate::error::DspError;
 use rustfft::num_complex::Complex;
@@ -122,8 +125,7 @@ impl DspProcessor {
 
         // 1. Apply Hann window to reduce spectral leakage
         for i in 0..num_samples {
-            self.scratch_buffer[i] =
-                Complex::new(buffer.samples[i] * self.hann_window[i], 0.0);
+            self.scratch_buffer[i] = Complex::new(buffer.samples[i] * self.hann_window[i], 0.0);
         }
 
         // Zero-pad if buffer is smaller than window size
@@ -405,10 +407,14 @@ mod tests {
 
         // Spectrum should be normalized to 0.0-1.0 range
         let max_val = spectrum.iter().cloned().fold(0.0f32, f32::max);
-        assert!((max_val - 1.0).abs() < 0.001, "Max should be ~1.0, got {}", max_val);
+        assert!(
+            (max_val - 1.0).abs() < 0.001,
+            "Max should be ~1.0, got {}",
+            max_val
+        );
 
         // All values should be in range
-        assert!(spectrum.iter().all(|&s| s >= 0.0 && s <= 1.0));
+        assert!(spectrum.iter().all(|&s| (0.0..=1.0).contains(&s)));
     }
 
     #[test]
@@ -525,11 +531,7 @@ mod tests {
         // RMS = sqrt((0 + 1 + 0 + 1) / 4) = sqrt(0.5) ≈ 0.707
         let samples = vec![0.0, 1.0, 0.0, -1.0];
         let rms = processor.calculate_rms(&samples);
-        assert!(
-            (rms - 0.707).abs() < 0.01,
-            "Expected ~0.707, got {}",
-            rms
-        );
+        assert!((rms - 0.707).abs() < 0.01, "Expected ~0.707, got {}", rms);
 
         // Test with silence
         let silence = vec![0.0; 100];

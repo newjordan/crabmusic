@@ -65,15 +65,16 @@ impl CpalAudioDevice {
             .default_input_device()
             .ok_or(AudioError::DeviceNotAvailable)?;
 
-        info!("Using audio device: {}", device.name().unwrap_or_else(|_| "Unknown".to_string()));
+        info!(
+            "Using audio device: {}",
+            device.name().unwrap_or_else(|_| "Unknown".to_string())
+        );
 
         // Get default input config
-        let supported_config = device
-            .default_input_config()
-            .map_err(|e| {
-                error!("Failed to get default input config: {}", e);
-                AudioError::ConfigError(format!("Failed to get device config: {}", e))
-            })?;
+        let supported_config = device.default_input_config().map_err(|e| {
+            error!("Failed to get default input config: {}", e);
+            AudioError::ConfigError(format!("Failed to get device config: {}", e))
+        })?;
 
         debug!("Supported config: {:?}", supported_config);
 
@@ -247,4 +248,3 @@ mod tests {
     // Note: Testing actual device initialization requires audio hardware
     // and is better suited for integration tests
 }
-

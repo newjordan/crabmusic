@@ -257,4 +257,3 @@ mod tests {
         assert!(ring1.is_empty());
     }
 }
-

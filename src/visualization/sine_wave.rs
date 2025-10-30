@@ -25,12 +25,12 @@ pub struct SineWaveConfig {
 impl Default for SineWaveConfig {
     fn default() -> Self {
         Self {
-            amplitude_sensitivity: 10.0,  // Increased from 2.0 - much more sensitive
-            frequency_sensitivity: 3.0,   // Increased from 2.0
-            thickness_sensitivity: 8.0,   // Increased from 5.0 for thicker, more visible lines
+            amplitude_sensitivity: 10.0, // Increased from 2.0 - much more sensitive
+            frequency_sensitivity: 3.0,  // Increased from 2.0
+            thickness_sensitivity: 8.0,  // Increased from 5.0 for thicker, more visible lines
             base_frequency: 2.0,
-            smoothing_factor: 0.5,        // Good balance between smooth and responsive
-            phase_speed: 0.15,            // Slightly faster animation
+            smoothing_factor: 0.5, // Good balance between smooth and responsive
+            phase_speed: 0.15,     // Slightly faster animation
         }
     }
 }
@@ -201,12 +201,12 @@ mod tests {
     #[test]
     fn test_sine_wave_config_default() {
         let config = SineWaveConfig::default();
-        assert_eq!(config.amplitude_sensitivity, 0.4);
-        assert_eq!(config.frequency_sensitivity, 2.0);
-        assert_eq!(config.thickness_sensitivity, 3.0);
+        assert_eq!(config.amplitude_sensitivity, 10.0);
+        assert_eq!(config.frequency_sensitivity, 3.0);
+        assert_eq!(config.thickness_sensitivity, 8.0);
         assert_eq!(config.base_frequency, 2.0);
-        assert_eq!(config.smoothing_factor, 0.2);
-        assert_eq!(config.phase_speed, 0.1);
+        assert_eq!(config.smoothing_factor, 0.5);
+        assert_eq!(config.phase_speed, 0.15);
     }
 
     #[test]
@@ -303,4 +303,3 @@ mod tests {
         assert!(amp2 < 1.0 * viz.config.amplitude_sensitivity);
     }
 }
-

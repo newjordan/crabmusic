@@ -16,10 +16,13 @@ mod error;
 mod rendering;
 mod visualization;
 
-use audio::{AudioCaptureDevice, AudioRingBuffer, CpalAudioDevice};
+use audio::{AudioCaptureDevice, AudioOutputDevice, AudioRingBuffer, CpalAudioDevice};
 use dsp::DspProcessor;
 use rendering::TerminalRenderer;
-use visualization::{GridBuffer, SineWaveConfig, SineWaveVisualizer, Visualizer};
+use visualization::{
+    character_sets::{get_all_character_sets, get_character_set, CharacterSet, CharacterSetType},
+    GridBuffer, SineWaveConfig, SineWaveVisualizer, Visualizer,
+};
 
 /// Global shutdown flag
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
@@ -77,12 +80,15 @@ fn main() -> Result<()> {
 /// Application state
 struct Application {
     audio_device: CpalAudioDevice,
+    audio_output: AudioOutputDevice,
     dsp_processor: DspProcessor,
     visualizer: SineWaveVisualizer,
     renderer: TerminalRenderer,
     #[allow(dead_code)] // Held for lifetime management
     ring_buffer: Arc<AudioRingBuffer>,
     target_fps: u32,
+    current_charset: CharacterSet,
+    charset_index: usize,
 }
 
 impl Application {
@@ -98,29 +104,92 @@ impl Application {
         let audio_device = CpalAudioDevice::new(ring_buffer.clone())
             .context("Failed to initialize audio capture")?;
 
+        // Initialize audio output
+        let audio_output =
+            AudioOutputDevice::new().context("Failed to initialize audio output")?;
+
         // Initialize DSP processor
-        let dsp_processor = DspProcessor::new(44100, 2048)
-            .context("Failed to initialize DSP processor")?;
+        let dsp_processor =
+            DspProcessor::new(44100, 2048).context("Failed to initialize DSP processor")?;
 
         // Initialize visualizer with custom sensitivity
-        let mut config = SineWaveConfig::default();
-        config.amplitude_sensitivity = sensitivity;
+        let config = SineWaveConfig {
+            amplitude_sensitivity: sensitivity,
+            ..Default::default()
+        };
         let visualizer = SineWaveVisualizer::new(config);
 
         // Initialize terminal renderer
-        let renderer = TerminalRenderer::new()
-            .context("Failed to initialize terminal renderer")?;
+        let renderer = TerminalRenderer::new().context("Failed to initialize terminal renderer")?;
 
         tracing::info!("All components initialized successfully");
 
         Ok(Self {
             audio_device,
+            audio_output,
             dsp_processor,
             visualizer,
             renderer,
             ring_buffer,
             target_fps,
+            current_charset: get_character_set(CharacterSetType::Blocks),
+            charset_index: 2, // Start with blocks (index 2)
         })
+    }
+
+    /// Cycle to the next character set
+    fn next_charset(&mut self) {
+        let charsets = get_all_character_sets();
+        self.charset_index = (self.charset_index + 1) % charsets.len();
+        self.current_charset = charsets[self.charset_index].clone();
+        tracing::info!(
+            "Switched to character set: {}",
+            self.current_charset.name
+        );
+    }
+
+    /// Apply character set mapping to the grid
+    fn apply_charset_to_grid(&self, grid: &mut GridBuffer) {
+        for y in 0..grid.height() {
+            for x in 0..grid.width() {
+                let cell = grid.get_cell(x, y);
+                // Map intensity (0.0 = space, 1.0 = filled) based on character
+                let intensity = match cell.character {
+                    ' ' => 0.0,
+                    '.' => 0.1,
+                    ':' => 0.2,
+                    '-' => 0.3,
+                    '=' => 0.4,
+                    '+' => 0.5,
+                    '*' => 0.6,
+                    '#' => 0.7,
+                    '%' => 0.8,
+                    '@' => 0.9,
+                    '█' => 1.0,
+                    '▓' => 0.75,
+                    '▒' => 0.5,
+                    '░' => 0.25,
+                    _ => 0.5, // Default for unknown characters
+                };
+                let new_char = self.current_charset.get_char(intensity);
+                grid.set_cell(x, y, new_char);
+            }
+        }
+    }
+
+    /// Add UI overlay with character set name and controls
+    fn add_ui_overlay(&self, grid: &mut GridBuffer) {
+        let charset_name = &self.current_charset.name;
+        let info_text = format!(" {} | Press 'C' to change | 'Q' to quit ", charset_name);
+
+        // Draw info bar at the top
+        let start_x = (grid.width().saturating_sub(info_text.len())) / 2;
+        for (i, ch) in info_text.chars().enumerate() {
+            let x = start_x + i;
+            if x < grid.width() {
+                grid.set_cell(x, 0, ch);
+            }
+        }
     }
 
     /// Run the main application loop
@@ -128,8 +197,14 @@ impl Application {
         tracing::info!("Starting main loop at {} FPS", self.target_fps);
 
         // Start audio capture
-        self.audio_device.start_capture()
+        self.audio_device
+            .start_capture()
             .context("Failed to start audio capture")?;
+
+        // Start audio output (playback)
+        self.audio_output
+            .start_playback()
+            .context("Failed to start audio playback")?;
 
         // Calculate frame time
         let frame_duration = Duration::from_secs_f32(1.0 / self.target_fps as f32);
@@ -147,7 +222,7 @@ impl Application {
                 break;
             }
 
-            // Check for keyboard input (Ctrl+C or 'q' to quit)
+            // Check for keyboard input (Ctrl+C or 'q' to quit, 'c' to change charset)
             if event::poll(Duration::from_millis(0)).unwrap_or(false) {
                 if let Ok(Event::Key(KeyEvent { code, .. })) = event::read() {
                     match code {
@@ -155,10 +230,8 @@ impl Application {
                             tracing::info!("Quit key pressed");
                             break;
                         }
-                        KeyCode::Char('c') => {
-                            // Ctrl+C might come through as 'c' in raw mode
-                            tracing::info!("Exit requested");
-                            break;
+                        KeyCode::Char('c') | KeyCode::Char('C') => {
+                            self.next_charset();
                         }
                         _ => {}
                     }
@@ -167,6 +240,9 @@ impl Application {
 
             // 1. Read audio samples from ring buffer
             if let Some(audio_buffer) = self.audio_device.read_samples() {
+                // 1a. Pass audio through to output (so you can hear it)
+                self.audio_output.write_samples(&audio_buffer);
+
                 // 2. Process audio → extract parameters
                 let audio_params = self.dsp_processor.process(&audio_buffer);
 
@@ -190,8 +266,15 @@ impl Application {
             let mut grid = GridBuffer::new(width as usize, height as usize);
             self.visualizer.render(&mut grid);
 
-            // 5. Update terminal display
-            self.renderer.render(&grid)
+            // 5. Apply character set mapping to grid
+            self.apply_charset_to_grid(&mut grid);
+
+            // 6. Add UI overlay (character set name and controls)
+            self.add_ui_overlay(&mut grid);
+
+            // 7. Update terminal display
+            self.renderer
+                .render(&grid)
                 .context("Failed to render frame")?;
 
             // Frame timing
@@ -218,11 +301,18 @@ impl Application {
         }
 
         // Stop audio capture
-        self.audio_device.stop_capture()
+        self.audio_device
+            .stop_capture()
             .context("Failed to stop audio capture")?;
 
+        // Stop audio output
+        self.audio_output
+            .stop_playback()
+            .context("Failed to stop audio playback")?;
+
         // Cleanup terminal
-        self.renderer.cleanup()
+        self.renderer
+            .cleanup()
             .context("Failed to cleanup terminal")?;
 
         Ok(())
@@ -278,9 +368,9 @@ impl Application {
                             let center_y = grid.height() / 2;
                             for x in 0..grid.width() {
                                 let norm_x = x as f32 / grid.width() as f32;
-                                let wave_y = center_y as f32 +
-                                    (norm_x * 4.0 * std::f32::consts::PI + phase).sin() *
-                                    (grid.height() as f32 * 0.3);
+                                let wave_y = center_y as f32
+                                    + (norm_x * 4.0 * std::f32::consts::PI + phase).sin()
+                                        * (grid.height() as f32 * 0.3);
                                 let y = wave_y as usize;
                                 if y < grid.height() {
                                     grid.set_cell(x, y, '█');

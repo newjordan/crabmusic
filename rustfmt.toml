@@ -1,0 +1,19 @@
+# Rustfmt configuration for CrabMusic
+# Only stable features to ensure CI compatibility
+
+# Edition
+edition = "2021"
+
+# Maximum line width
+max_width = 100
+
+# Indentation
+tab_spaces = 4
+hard_tabs = false
+
+# Misc
+newline_style = "Auto"
+remove_nested_parens = true
+use_field_init_shorthand = true
+use_try_shorthand = true
+

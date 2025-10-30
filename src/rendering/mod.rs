@@ -9,19 +9,15 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{
-    backend::CrosstermBackend,
-    layout::Rect,
-    text::Line,
-    widgets::Paragraph,
-    Terminal,
-};
+use ratatui::{backend::CrosstermBackend, layout::Rect, text::Line, widgets::Paragraph, Terminal};
 use std::io::{self, Stdout};
 
 /// Terminal renderer
 ///
 /// Manages terminal state and renders GridBuffer to the terminal display.
 /// Uses ratatui and crossterm for cross-platform terminal manipulation.
+///
+/// Supports automatic resize detection and handling.
 ///
 /// # Examples
 ///
@@ -36,6 +32,7 @@ use std::io::{self, Stdout};
 /// ```
 pub struct TerminalRenderer {
     terminal: Terminal<CrosstermBackend<Stdout>>,
+    last_size: (u16, u16),
 }
 
 impl TerminalRenderer {
@@ -61,8 +58,8 @@ impl TerminalRenderer {
         let mut stdout = io::stdout();
 
         // Check terminal size (minimum 40x12 for basic functionality)
-        let (width, height) = crossterm::terminal::size()
-            .map_err(|_| RenderError::InitializationFailed)?;
+        let (width, height) =
+            crossterm::terminal::size().map_err(|_| RenderError::InitializationFailed)?;
 
         if width < 40 || height < 12 {
             return Err(RenderError::TerminalTooSmall {
@@ -75,8 +72,7 @@ impl TerminalRenderer {
         enable_raw_mode().map_err(|_| RenderError::InitializationFailed)?;
 
         // Enter alternate screen
-        execute!(stdout, EnterAlternateScreen)
-            .map_err(|_| RenderError::InitializationFailed)?;
+        execute!(stdout, EnterAlternateScreen).map_err(|_| RenderError::InitializationFailed)?;
 
         // Set up panic handler to restore terminal
         let original_hook = std::panic::take_hook();
@@ -87,10 +83,12 @@ impl TerminalRenderer {
 
         // Create Ratatui terminal
         let backend = CrosstermBackend::new(stdout);
-        let terminal =
-            Terminal::new(backend).map_err(|_| RenderError::InitializationFailed)?;
+        let terminal = Terminal::new(backend).map_err(|_| RenderError::InitializationFailed)?;
 
-        Ok(Self { terminal })
+        Ok(Self {
+            terminal,
+            last_size: (width, height),
+        })
     }
 
     /// Render a grid buffer to the terminal
@@ -171,6 +169,39 @@ impl TerminalRenderer {
         (size.width, size.height)
     }
 
+    /// Check if the terminal has been resized since last check
+    ///
+    /// # Returns
+    /// True if the terminal size has changed
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use crabmusic::rendering::TerminalRenderer;
+    ///
+    /// let mut renderer = TerminalRenderer::new().expect("Failed to initialize");
+    /// if renderer.check_resize() {
+    ///     println!("Terminal was resized!");
+    /// }
+    /// ```
+    pub fn check_resize(&mut self) -> bool {
+        let current_size = self.dimensions();
+        if current_size != self.last_size {
+            self.last_size = current_size;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Get the last known terminal size
+    ///
+    /// # Returns
+    /// A tuple of (width, height) in characters
+    pub fn last_size(&self) -> (u16, u16) {
+        self.last_size
+    }
+
     /// Restore terminal to original state (static for panic handler)
     fn restore_terminal() -> Result<(), RenderError> {
         let mut stdout = io::stdout();
@@ -209,8 +240,23 @@ mod tests {
     fn test_terminal_dimensions() {
         let renderer = TerminalRenderer::new().expect("Failed to initialize terminal");
         let (width, height) = renderer.dimensions();
-        assert!(width >= 80, "Terminal width should be at least 80");
-        assert!(height >= 24, "Terminal height should be at least 24");
+        assert!(width >= 40, "Terminal width should be at least 40");
+        assert!(height >= 12, "Terminal height should be at least 12");
+    }
+
+    #[test]
+    #[ignore] // Requires actual terminal - run with `cargo test -- --ignored`
+    fn test_terminal_resize_detection() {
+        let mut renderer = TerminalRenderer::new().expect("Failed to initialize terminal");
+
+        // First check should return false (no resize yet)
+        let resized = renderer.check_resize();
+        assert!(!resized, "Should not detect resize on first check");
+
+        // Get initial size
+        let initial_size = renderer.last_size();
+        assert!(initial_size.0 >= 40);
+        assert!(initial_size.1 >= 12);
     }
 
     #[test]
@@ -255,10 +301,6 @@ mod tests {
         let elapsed = start.elapsed();
 
         // Should render 60 frames in < 1 second
-        assert!(
-            elapsed.as_secs() < 1,
-            "Rendering too slow: {:?}",
-            elapsed
-        );
+        assert!(elapsed.as_secs() < 1, "Rendering too slow: {:?}", elapsed);
     }
 }
