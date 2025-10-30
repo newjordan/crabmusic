@@ -32,40 +32,126 @@ static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Path to configuration file
-    #[arg(short, long, default_value = "config/default.yaml")]
-    config: String,
+    #[arg(short, long, value_name = "FILE")]
+    config: Option<String>,
 
-    /// Target FPS
-    #[arg(short, long, default_value_t = 60)]
-    fps: u32,
+    /// Target FPS (overrides config file)
+    #[arg(short, long, value_name = "FPS")]
+    fps: Option<u32>,
 
     /// Enable verbose logging
     #[arg(short, long)]
     verbose: bool,
 
+    /// Enable debug logging (more verbose than -v)
+    #[arg(short, long)]
+    debug: bool,
+
     /// Test mode: render test pattern instead of audio visualization
     #[arg(short, long)]
     test: bool,
 
-    /// Amplitude sensitivity multiplier (default: 10.0)
-    #[arg(long, default_value_t = 10.0)]
-    sensitivity: f32,
+    /// Amplitude sensitivity multiplier (overrides config file)
+    #[arg(long, value_name = "FLOAT")]
+    sensitivity: Option<f32>,
+
+    /// Audio device name (overrides config file)
+    #[arg(long, value_name = "NAME")]
+    device: Option<String>,
+
+    /// List available audio devices and exit
+    #[arg(long)]
+    list_devices: bool,
+
+    /// Character set to use (basic, extended, blocks, shading, dots, lines, braille)
+    #[arg(long, value_name = "SET")]
+    charset: Option<String>,
+
+    /// Sample rate in Hz (overrides config file)
+    #[arg(long, value_name = "HZ")]
+    sample_rate: Option<u32>,
+
+    /// FFT size (must be power of 2: 512, 1024, 2048, 4096, 8192)
+    #[arg(long, value_name = "SIZE")]
+    fft_size: Option<usize>,
+
+    /// Enable hot-reload of configuration file
+    #[arg(long)]
+    hot_reload: bool,
+
+    /// Disable audio output (visualization only, no playback)
+    #[arg(long)]
+    no_audio_output: bool,
+
+    /// Show version information
+    #[arg(long)]
+    version_info: bool,
 }
 
 fn main() -> Result<()> {
     // Parse command-line arguments
     let args = Args::parse();
 
+    // Handle version info
+    if args.version_info {
+        print_version_info();
+        return Ok(());
+    }
+
+    // Handle list devices
+    if args.list_devices {
+        list_audio_devices()?;
+        return Ok(());
+    }
+
     // Initialize logging
-    init_logging(args.verbose)?;
+    init_logging(args.verbose, args.debug)?;
 
     tracing::info!("CrabMusic v{} starting...", env!("CARGO_PKG_VERSION"));
+
+    // Load configuration
+    let config_path = args.config.as_deref().unwrap_or("config.yaml");
+    let mut config = config::AppConfig::load_or_default(config_path)?;
+
+    // Apply CLI overrides
+    if let Some(fps) = args.fps {
+        config.rendering.target_fps = fps;
+        tracing::info!("Overriding FPS from CLI: {}", fps);
+    }
+
+    if let Some(sensitivity) = args.sensitivity {
+        config.visualization.sine_wave.amplitude = sensitivity;
+        tracing::info!("Overriding sensitivity from CLI: {}", sensitivity);
+    }
+
+    if let Some(device) = args.device {
+        config.audio.device_name = Some(device.clone());
+        tracing::info!("Overriding audio device from CLI: {}", device);
+    }
+
+    if let Some(sample_rate) = args.sample_rate {
+        config.audio.sample_rate = sample_rate;
+        tracing::info!("Overriding sample rate from CLI: {}", sample_rate);
+    }
+
+    if let Some(fft_size) = args.fft_size {
+        config.dsp.fft_size = fft_size;
+        tracing::info!("Overriding FFT size from CLI: {}", fft_size);
+    }
+
+    if let Some(charset) = args.charset.as_ref() {
+        config.visualization.character_set = charset.clone();
+        tracing::info!("Overriding character set from CLI: {}", charset);
+    }
+
+    // Validate configuration
+    config.validate().context("Invalid configuration")?;
 
     // Setup Ctrl+C handler
     setup_shutdown_handler()?;
 
     // Create and run application
-    let app = Application::new(args.fps, args.sensitivity)?;
+    let app = Application::new_with_config(config, args.no_audio_output)?;
 
     if args.test {
         app.run_test_mode()?;
@@ -80,7 +166,7 @@ fn main() -> Result<()> {
 /// Application state
 struct Application {
     audio_device: CpalAudioDevice,
-    audio_output: AudioOutputDevice,
+    audio_output: Option<AudioOutputDevice>,
     dsp_processor: DspProcessor,
     visualizer: SineWaveVisualizer,
     renderer: TerminalRenderer,
@@ -92,35 +178,81 @@ struct Application {
 }
 
 impl Application {
-    /// Create a new application instance
-    fn new(target_fps: u32, sensitivity: f32) -> Result<Self> {
-        tracing::info!("Initializing components...");
-        tracing::info!("Amplitude sensitivity: {}", sensitivity);
+    /// Create a new application instance with configuration
+    fn new_with_config(config: config::AppConfig, no_audio_output: bool) -> Result<Self> {
+        tracing::info!("Initializing components with configuration...");
+        tracing::debug!("Configuration: sample_rate={}, fft_size={}, fps={}",
+            config.audio.sample_rate, config.dsp.fft_size, config.rendering.target_fps);
 
         // Create ring buffer for audio pipeline
+        // Use a reasonable default of 10 buffers if buffer_size is not available
         let ring_buffer = Arc::new(AudioRingBuffer::new(10));
+        tracing::debug!("Ring buffer created with capacity: 10");
 
         // Initialize audio capture
+        tracing::debug!("Initializing audio capture device...");
         let audio_device = CpalAudioDevice::new(ring_buffer.clone())
             .context("Failed to initialize audio capture")?;
+        tracing::info!("Audio capture device initialized successfully");
 
-        // Initialize audio output
-        let audio_output =
-            AudioOutputDevice::new().context("Failed to initialize audio output")?;
+        // Initialize audio output (optional)
+        let audio_output = if no_audio_output {
+            tracing::info!("Audio output disabled by CLI flag");
+            None
+        } else {
+            tracing::debug!("Initializing audio output device...");
+            let output = AudioOutputDevice::new().context("Failed to initialize audio output")?;
+            tracing::info!("Audio output device initialized successfully");
+            Some(output)
+        };
 
         // Initialize DSP processor
-        let dsp_processor =
-            DspProcessor::new(44100, 2048).context("Failed to initialize DSP processor")?;
+        tracing::debug!("Initializing DSP processor...");
+        let dsp_processor = DspProcessor::new(
+            config.audio.sample_rate,
+            config.dsp.fft_size,
+        )
+        .context("Failed to initialize DSP processor")?;
+        tracing::info!("DSP processor initialized: sample_rate={}, fft_size={}",
+            config.audio.sample_rate, config.dsp.fft_size);
 
-        // Initialize visualizer with custom sensitivity
-        let config = SineWaveConfig {
-            amplitude_sensitivity: sensitivity,
+        // Initialize visualizer
+        tracing::debug!("Initializing visualizer...");
+        let viz_config = SineWaveConfig {
+            amplitude_sensitivity: config.visualization.sine_wave.amplitude,
             ..Default::default()
         };
-        let visualizer = SineWaveVisualizer::new(config);
+        let visualizer = SineWaveVisualizer::new(viz_config);
+        tracing::info!("Visualizer initialized: type=sine_wave, sensitivity={}",
+            config.visualization.sine_wave.amplitude);
 
         // Initialize terminal renderer
+        tracing::debug!("Initializing terminal renderer...");
         let renderer = TerminalRenderer::new().context("Failed to initialize terminal renderer")?;
+        let (width, height) = renderer.dimensions();
+        tracing::info!("Terminal renderer initialized: {}x{}", width, height);
+
+        // Determine initial character set
+        let charset_type = match config.visualization.character_set.as_str() {
+            "basic" => CharacterSetType::Basic,
+            "extended" => CharacterSetType::Extended,
+            "blocks" => CharacterSetType::Blocks,
+            "shading" => CharacterSetType::Shading,
+            "dots" => CharacterSetType::Dots,
+            "lines" => CharacterSetType::Lines,
+            "braille" => CharacterSetType::Braille,
+            _ => CharacterSetType::Blocks,
+        };
+        let current_charset = get_character_set(charset_type);
+        let charset_index = match charset_type {
+            CharacterSetType::Basic => 0,
+            CharacterSetType::Extended => 1,
+            CharacterSetType::Blocks => 2,
+            CharacterSetType::Shading => 3,
+            CharacterSetType::Dots => 4,
+            CharacterSetType::Lines => 5,
+            CharacterSetType::Braille => 6,
+        };
 
         tracing::info!("All components initialized successfully");
 
@@ -131,10 +263,19 @@ impl Application {
             visualizer,
             renderer,
             ring_buffer,
-            target_fps,
-            current_charset: get_character_set(CharacterSetType::Blocks),
-            charset_index: 2, // Start with blocks (index 2)
+            target_fps: config.rendering.target_fps,
+            current_charset,
+            charset_index,
         })
+    }
+
+    /// Create a new application instance (legacy method for backward compatibility)
+    #[allow(dead_code)]
+    fn new(target_fps: u32, sensitivity: f32) -> Result<Self> {
+        let mut config = config::AppConfig::default();
+        config.rendering.target_fps = target_fps;
+        config.visualization.sine_wave.amplitude = sensitivity;
+        Self::new_with_config(config, false)
     }
 
     /// Cycle to the next character set
@@ -201,10 +342,12 @@ impl Application {
             .start_capture()
             .context("Failed to start audio capture")?;
 
-        // Start audio output (playback)
-        self.audio_output
-            .start_playback()
-            .context("Failed to start audio playback")?;
+        // Start audio output (playback) if enabled
+        if let Some(audio_output) = self.audio_output.as_mut() {
+            audio_output
+                .start_playback()
+                .context("Failed to start audio playback")?;
+        }
 
         // Calculate frame time
         let frame_duration = Duration::from_secs_f32(1.0 / self.target_fps as f32);
@@ -212,6 +355,9 @@ impl Application {
         // Performance tracking
         let mut frame_count = 0;
         let mut fps_timer = Instant::now();
+        let mut total_frame_time = Duration::ZERO;
+        let mut max_frame_time = Duration::ZERO;
+        let mut min_frame_time = Duration::from_secs(1);
 
         loop {
             let frame_start = Instant::now();
@@ -240,8 +386,10 @@ impl Application {
 
             // 1. Read audio samples from ring buffer
             if let Some(audio_buffer) = self.audio_device.read_samples() {
-                // 1a. Pass audio through to output (so you can hear it)
-                self.audio_output.write_samples(&audio_buffer);
+                // 1a. Pass audio through to output (so you can hear it) if enabled
+                if let Some(ref audio_output) = self.audio_output {
+                    audio_output.write_samples(&audio_buffer);
+                }
 
                 // 2. Process audio → extract parameters
                 let audio_params = self.dsp_processor.process(&audio_buffer);
@@ -281,39 +429,93 @@ impl Application {
             frame_count += 1;
             let frame_elapsed = frame_start.elapsed();
 
-            // FPS tracking (log every second)
+            // Track performance metrics
+            total_frame_time += frame_elapsed;
+            max_frame_time = max_frame_time.max(frame_elapsed);
+            min_frame_time = min_frame_time.min(frame_elapsed);
+
+            // FPS tracking and diagnostics (log every second)
             if fps_timer.elapsed() >= Duration::from_secs(1) {
                 let actual_fps = frame_count;
-                tracing::debug!(
-                    "FPS: {} (target: {}), frame time: {:?}",
-                    actual_fps,
-                    self.target_fps,
-                    frame_elapsed
-                );
+                let avg_frame_time = total_frame_time / frame_count;
+                let target_frame_time = frame_duration;
+
+                // Log performance metrics
+                if actual_fps < self.target_fps * 9 / 10 {
+                    // Warn if FPS drops below 90% of target
+                    tracing::warn!(
+                        "Performance: FPS={} (target={}), avg={:.2}ms, min={:.2}ms, max={:.2}ms",
+                        actual_fps,
+                        self.target_fps,
+                        avg_frame_time.as_secs_f32() * 1000.0,
+                        min_frame_time.as_secs_f32() * 1000.0,
+                        max_frame_time.as_secs_f32() * 1000.0
+                    );
+                } else {
+                    tracing::debug!(
+                        "Performance: FPS={} (target={}), avg={:.2}ms, min={:.2}ms, max={:.2}ms",
+                        actual_fps,
+                        self.target_fps,
+                        avg_frame_time.as_secs_f32() * 1000.0,
+                        min_frame_time.as_secs_f32() * 1000.0,
+                        max_frame_time.as_secs_f32() * 1000.0
+                    );
+                }
+
+                // Warn if frame time exceeds target significantly
+                if max_frame_time > target_frame_time * 2 {
+                    tracing::warn!(
+                        "Frame time spike detected: {:.2}ms (target: {:.2}ms)",
+                        max_frame_time.as_secs_f32() * 1000.0,
+                        target_frame_time.as_secs_f32() * 1000.0
+                    );
+                }
+
+                // Reset counters
                 frame_count = 0;
                 fps_timer = Instant::now();
+                total_frame_time = Duration::ZERO;
+                max_frame_time = Duration::ZERO;
+                min_frame_time = Duration::from_secs(1);
             }
 
             // Sleep to maintain target FPS
             if let Some(sleep_time) = frame_duration.checked_sub(frame_elapsed) {
                 std::thread::sleep(sleep_time);
+            } else {
+                // Frame took longer than target - log at trace level
+                tracing::trace!(
+                    "Frame overrun: {:.2}ms (target: {:.2}ms)",
+                    frame_elapsed.as_secs_f32() * 1000.0,
+                    frame_duration.as_secs_f32() * 1000.0
+                );
             }
         }
 
+        tracing::info!("Shutting down application...");
+
         // Stop audio capture
+        tracing::debug!("Stopping audio capture...");
         self.audio_device
             .stop_capture()
             .context("Failed to stop audio capture")?;
+        tracing::info!("Audio capture stopped");
 
-        // Stop audio output
-        self.audio_output
-            .stop_playback()
-            .context("Failed to stop audio playback")?;
+        // Stop audio output if enabled
+        if let Some(audio_output) = self.audio_output.as_mut() {
+            tracing::debug!("Stopping audio output...");
+            audio_output
+                .stop_playback()
+                .context("Failed to stop audio playback")?;
+            tracing::info!("Audio output stopped");
+        }
 
         // Cleanup terminal
+        tracing::debug!("Cleaning up terminal...");
         self.renderer
             .cleanup()
             .context("Failed to cleanup terminal")?;
+        tracing::info!("Terminal cleanup complete");
 
         Ok(())
     }
@@ -411,21 +613,27 @@ impl Application {
 }
 
 /// Initialize logging based on verbosity level
-fn init_logging(verbose: bool) -> Result<()> {
+fn init_logging(verbose: bool, debug: bool) -> Result<()> {
     use tracing_subscriber::{fmt, EnvFilter};
 
-    let filter = if verbose {
+    // Determine log level
+    let filter = if debug {
+        EnvFilter::new("crabmusic=trace,debug")
+    } else if verbose {
         EnvFilter::new("crabmusic=debug,info")
     } else {
         EnvFilter::new("crabmusic=info")
     };
 
+    // Configure logging format
     fmt()
         .with_env_filter(filter)
         .with_target(false)
         .with_thread_ids(false)
         .with_file(false)
         .with_line_number(false)
+        .with_timer(fmt::time::uptime())  // Show time since start
+        .with_level(true)
         .init();
 
     Ok(())
@@ -438,6 +646,83 @@ fn setup_shutdown_handler() -> Result<()> {
         SHUTDOWN.store(true, Ordering::Relaxed);
     })
     .context("Failed to set Ctrl+C handler")?;
+
+    Ok(())
+}
+
+/// Print version information
+fn print_version_info() {
+    println!("CrabMusic v{}", env!("CARGO_PKG_VERSION"));
+    println!("Real-time ASCII music visualizer for terminal");
+    println!();
+    println!("Build information:");
+    println!("  Rust version: {}", env!("CARGO_PKG_RUST_VERSION"));
+    println!("  Target: {}", std::env::consts::ARCH);
+    println!("  OS: {}", std::env::consts::OS);
+    println!();
+    println!("Features:");
+    println!("  - Real-time audio capture and visualization");
+    println!("  - 7 character sets (basic, extended, blocks, shading, dots, lines, braille)");
+    println!("  - Audio passthrough (hear what you visualize)");
+    println!("  - Hot-reload configuration");
+    println!("  - Cross-platform (Linux, macOS, Windows)");
+    println!();
+    println!("Repository: {}", env!("CARGO_PKG_REPOSITORY"));
+    println!("License: {}", env!("CARGO_PKG_LICENSE"));
+}
+
+/// List available audio devices
+fn list_audio_devices() -> Result<()> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+
+    println!("Available audio devices:");
+    println!();
+
+    let host = cpal::default_host();
+
+    // List input devices
+    println!("Input devices:");
+    let input_devices = host
+        .input_devices()
+        .context("Failed to enumerate input devices")?;
+
+    for (i, device) in input_devices.enumerate() {
+        let name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+        let is_default = host
+            .default_input_device()
+            .and_then(|d| d.name().ok())
+            .map(|n| n == name)
+            .unwrap_or(false);
+
+        if is_default {
+            println!("  {}. {} (default)", i + 1, name);
+        } else {
+            println!("  {}. {}", i + 1, name);
+        }
+    }
+
+    println!();
+
+    // List output devices
+    println!("Output devices:");
+    let output_devices = host
+        .output_devices()
+        .context("Failed to enumerate output devices")?;
+
+    for (i, device) in output_devices.enumerate() {
+        let name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+        let is_default = host
+            .default_output_device()
+            .and_then(|d| d.name().ok())
+            .map(|n| n == name)
+            .unwrap_or(false);
+
+        if is_default {
+            println!("  {}. {} (default)", i + 1, name);
+        } else {
+            println!("  {}. {}", i + 1, name);
+        }
+    }
 
     Ok(())
 }

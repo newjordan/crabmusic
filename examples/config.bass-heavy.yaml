@@ -1,0 +1,36 @@
+# CrabMusic Bass-Heavy Configuration
+# Optimized for bass-heavy music (EDM, hip-hop, dubstep)
+# Emphasizes low frequencies
+
+audio:
+  sample_rate: 44100
+  channels: 2
+  buffer_size: 2048
+  buffer_capacity: 8192
+  device_name: null
+
+dsp:
+  fft_size: 4096         # Larger FFT for better bass resolution
+  hop_size: 512
+  window_type: blackman  # Good for bass frequencies
+  frequency_range:
+    min: 20.0            # Capture sub-bass
+    max: 8000.0          # Focus on bass and mids
+  smoothing: 0.15
+
+visualization:
+  sine_wave:
+    amplitude_scale: 1.5   # Emphasize amplitude
+    frequency_scale: 0.5   # Slower wave cycles for bass
+    phase_offset: 0.0
+    smoothing_factor: 0.85 # Smooth out bass hits
+    character_set: blocks  # Bold characters for impact
+    thickness: 3           # Thick lines for bass
+
+rendering:
+  target_fps: 60
+  enable_differential: true
+  enable_double_buffer: true
+  min_width: 80
+  min_height: 24
+

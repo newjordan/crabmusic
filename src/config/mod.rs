@@ -216,8 +216,75 @@ impl AppConfig {
     /// # Errors
     /// Returns `ConfigError` if file cannot be read or parsed
     pub fn load(path: &str) -> Result<Self, ConfigError> {
-        // TODO: Implement in CONFIG-002
-        Err(ConfigError::FileNotFound(path.to_string()))
+        use std::fs;
+        use std::path::Path;
+
+        // Check if file exists
+        if !Path::new(path).exists() {
+            return Err(ConfigError::FileNotFound(path.to_string()));
+        }
+
+        // Read file contents
+        let contents = fs::read_to_string(path).map_err(|e| {
+            ConfigError::InvalidFormat(format!("Failed to read file {}: {}", path, e))
+        })?;
+
+        // Parse YAML
+        let config: Self = serde_yaml::from_str(&contents).map_err(|e| {
+            ConfigError::InvalidFormat(format!("Failed to parse YAML: {}", e))
+        })?;
+
+        // Validate configuration
+        config.validate()?;
+
+        Ok(config)
+    }
+
+    /// Load configuration from a YAML file, or return default if file doesn't exist
+    ///
+    /// # Arguments
+    /// * `path` - Path to the configuration file
+    ///
+    /// # Returns
+    /// Loaded and validated AppConfig, or default config if file doesn't exist
+    ///
+    /// # Errors
+    /// Returns `ConfigError` if file exists but cannot be parsed or is invalid
+    pub fn load_or_default(path: &str) -> Result<Self, ConfigError> {
+        use std::path::Path;
+
+        if !Path::new(path).exists() {
+            tracing::info!("Config file {} not found, using defaults", path);
+            return Ok(Self::default());
+        }
+
+        Self::load(path)
+    }
+
+    /// Save configuration to a YAML file
+    ///
+    /// # Arguments
+    /// * `path` - Path to save the configuration file
+    ///
+    /// # Errors
+    /// Returns `ConfigError` if file cannot be written
+    pub fn save(&self, path: &str) -> Result<(), ConfigError> {
+        use std::fs;
+
+        // Validate before saving
+        self.validate()?;
+
+        // Serialize to YAML
+        let yaml = serde_yaml::to_string(self).map_err(|e| {
+            ConfigError::InvalidFormat(format!("Failed to serialize to YAML: {}", e))
+        })?;
+
+        // Write to file
+        fs::write(path, yaml).map_err(|e| {
+            ConfigError::InvalidFormat(format!("Failed to write file {}: {}", path, e))
+        })?;
+
+        Ok(())
     }
 
     /// Get default configuration
@@ -349,12 +416,10 @@ impl Default for AppConfig {
 ///
 /// Manages configuration loading, validation, and hot-reload watching.
 pub struct ConfigManager {
-    // TODO: Define fields in CONFIG-001
-    // Will include:
-    // - current_config: AppConfig
-    // - config_path: PathBuf
-    // - watcher: Option<FileWatcher> (for hot-reload)
-    current_config: AppConfig,
+    current_config: std::sync::Arc<std::sync::RwLock<AppConfig>>,
+    config_path: std::path::PathBuf,
+    #[allow(dead_code)]
+    watcher: Option<Box<dyn std::any::Any + Send>>,
 }
 
 impl ConfigManager {
@@ -368,17 +433,29 @@ impl ConfigManager {
     ///
     /// # Errors
     /// Returns `ConfigError` if configuration cannot be loaded
-    pub fn new(_config_path: &str) -> Result<Self, ConfigError> {
-        // TODO: Implement in CONFIG-001
+    pub fn new(config_path: &str) -> Result<Self, ConfigError> {
+        let config = AppConfig::load_or_default(config_path)?;
         Ok(Self {
-            current_config: AppConfig::default(),
+            current_config: std::sync::Arc::new(std::sync::RwLock::new(config)),
+            config_path: std::path::PathBuf::from(config_path),
+            watcher: None,
         })
     }
 
     /// Get the current configuration
-    pub fn config(&self) -> &AppConfig {
-        // TODO: Implement in CONFIG-001
-        &self.current_config
+    pub fn config(&self) -> AppConfig {
+        self.current_config.read().unwrap().clone()
+    }
+
+    /// Reload configuration from file
+    ///
+    /// # Errors
+    /// Returns `ConfigError` if configuration cannot be reloaded
+    pub fn reload(&mut self) -> Result<(), ConfigError> {
+        let new_config = AppConfig::load(self.config_path.to_str().unwrap())?;
+        *self.current_config.write().unwrap() = new_config;
+        tracing::info!("Configuration reloaded from {:?}", self.config_path);
+        Ok(())
     }
 
     /// Enable hot-reload watching
@@ -387,10 +464,56 @@ impl ConfigManager {
     ///
     /// # Errors
     /// Returns `ConfigError` if file watching cannot be set up
-    #[cfg(feature = "hot-reload")]
     pub fn enable_hot_reload(&mut self) -> Result<(), ConfigError> {
-        // TODO: Implement in CONFIG-003
+        use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+        use std::time::Duration;
+
+        let config_arc = self.current_config.clone();
+        let config_path = self.config_path.clone();
+
+        // Create watcher
+        let mut watcher: RecommendedWatcher = Watcher::new(
+            move |res: Result<Event, notify::Error>| {
+                if let Ok(event) = res {
+                    // Only reload on modify events
+                    if matches!(event.kind, EventKind::Modify(_)) {
+                        tracing::debug!("Config file modified, reloading...");
+                        match AppConfig::load(config_path.to_str().unwrap()) {
+                            Ok(new_config) => {
+                                *config_arc.write().unwrap() = new_config;
+                                tracing::info!("Configuration hot-reloaded successfully");
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to reload configuration: {}", e);
+                            }
+                        }
+                    }
+                }
+            },
+            notify::Config::default().with_poll_interval(Duration::from_secs(1)),
+        )
+        .map_err(|e| {
+            ConfigError::InvalidFormat(format!("Failed to create file watcher: {}", e))
+        })?;
+
+        // Watch the config file
+        watcher
+            .watch(&self.config_path, RecursiveMode::NonRecursive)
+            .map_err(|e| {
+                ConfigError::InvalidFormat(format!("Failed to watch config file: {}", e))
+            })?;
+
+        tracing::info!("Hot-reload enabled for {:?}", self.config_path);
+
+        // Store watcher to keep it alive
+        self.watcher = Some(Box::new(watcher));
+
         Ok(())
+    }
+
+    /// Check if hot-reload is enabled
+    pub fn is_hot_reload_enabled(&self) -> bool {
+        self.watcher.is_some()
     }
 }
 
@@ -553,5 +676,372 @@ mod tests {
         let manager = ConfigManager::new("test.yaml").unwrap();
         let config = manager.config();
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_load_valid_yaml() {
+        use std::fs;
+        use std::io::Write;
+
+        let temp_file = "test_config_valid.yaml";
+        let yaml_content = r#"
+audio:
+  sample_rate: 48000
+  channels: 2
+  buffer_size: 2048
+  buffer_capacity: 8192
+  device_name: "default"
+
+dsp:
+  fft_size: 2048
+  hop_size: 512
+  window_type: "hann"
+  frequency_range:
+    min: 20.0
+    max: 20000.0
+
+visualization:
+  sine_wave:
+    amplitude_scale: 1.0
+    frequency_scale: 1.0
+    phase_offset: 0.0
+    smoothing_factor: 0.8
+    character_set: "blocks"
+
+rendering:
+  target_fps: 60
+  enable_differential: true
+  enable_double_buffer: true
+"#;
+
+        // Write test file
+        let mut file = fs::File::create(temp_file).unwrap();
+        file.write_all(yaml_content.as_bytes()).unwrap();
+
+        // Load and validate
+        let config = AppConfig::load(temp_file);
+        assert!(config.is_ok());
+
+        let config = config.unwrap();
+        assert_eq!(config.audio.sample_rate, 48000);
+        assert_eq!(config.audio.channels, 2);
+        assert_eq!(config.dsp.fft_size, 2048);
+        assert_eq!(config.rendering.target_fps, 60);
+
+        // Cleanup
+        fs::remove_file(temp_file).ok();
+    }
+
+    #[test]
+    fn test_load_invalid_yaml() {
+        use std::fs;
+        use std::io::Write;
+
+        let temp_file = "test_config_invalid.yaml";
+        let yaml_content = "invalid: yaml: content: [[[";
+
+        // Write test file
+        let mut file = fs::File::create(temp_file).unwrap();
+        file.write_all(yaml_content.as_bytes()).unwrap();
+
+        // Try to load
+        let config = AppConfig::load(temp_file);
+        assert!(config.is_err());
+
+        // Cleanup
+        fs::remove_file(temp_file).ok();
+    }
+
+    #[test]
+    fn test_load_nonexistent_file() {
+        let config = AppConfig::load("nonexistent_file.yaml");
+        assert!(config.is_err());
+        match config {
+            Err(ConfigError::FileNotFound(_)) => (),
+            _ => panic!("Expected FileNotFound error"),
+        }
+    }
+
+    #[test]
+    fn test_load_or_default_nonexistent() {
+        let config = AppConfig::load_or_default("nonexistent_file.yaml");
+        assert!(config.is_ok());
+        let config = config.unwrap();
+        assert_eq!(config.audio.sample_rate, 44100); // Default value
+    }
+
+    #[test]
+    fn test_load_or_default_existing() {
+        use std::fs;
+        use std::io::Write;
+
+        let temp_file = "test_config_or_default.yaml";
+        let yaml_content = r#"
+audio:
+  sample_rate: 44100
+  channels: 1
+  buffer_size: 1024
+  buffer_capacity: 4096
+  device_name: "test"
+
+dsp:
+  fft_size: 1024
+  hop_size: 256
+  window_type: "hamming"
+  frequency_range:
+    min: 20.0
+    max: 20000.0
+
+visualization:
+  sine_wave:
+    amplitude_scale: 1.0
+    frequency_scale: 1.0
+    phase_offset: 0.0
+    smoothing_factor: 0.8
+    character_set: "basic"
+
+rendering:
+  target_fps: 30
+  enable_differential: false
+  enable_double_buffer: false
+"#;
+
+        // Write test file
+        let mut file = fs::File::create(temp_file).unwrap();
+        file.write_all(yaml_content.as_bytes()).unwrap();
+
+        // Load
+        let config = AppConfig::load_or_default(temp_file);
+        assert!(config.is_ok());
+
+        let config = config.unwrap();
+        assert_eq!(config.audio.sample_rate, 44100); // Custom value
+        assert_eq!(config.rendering.target_fps, 30); // Custom value
+
+        // Cleanup
+        fs::remove_file(temp_file).ok();
+    }
+
+    #[test]
+    fn test_save_config() {
+        use std::fs;
+
+        let temp_file = "test_config_save.yaml";
+        let config = AppConfig::default();
+
+        // Save
+        let result = config.save(temp_file);
+        assert!(result.is_ok());
+
+        // Load back
+        let loaded = AppConfig::load(temp_file);
+        assert!(loaded.is_ok());
+
+        let loaded = loaded.unwrap();
+        assert_eq!(loaded.audio.sample_rate, config.audio.sample_rate);
+        assert_eq!(loaded.dsp.fft_size, config.dsp.fft_size);
+
+        // Cleanup
+        fs::remove_file(temp_file).ok();
+    }
+
+    #[test]
+    fn test_save_invalid_config() {
+        let mut config = AppConfig::default();
+        config.audio.sample_rate = 1000; // Invalid
+
+        let result = config.save("test_invalid_save.yaml");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_config_manager_new() {
+        use std::fs;
+        use std::io::Write;
+
+        let temp_file = "test_manager_new.yaml";
+        let yaml_content = r#"
+audio:
+  sample_rate: 48000
+  channels: 2
+  buffer_size: 2048
+  buffer_capacity: 8192
+  device_name: "default"
+
+dsp:
+  fft_size: 2048
+  hop_size: 512
+  window_type: "hann"
+  frequency_range:
+    min: 20.0
+    max: 20000.0
+
+visualization:
+  sine_wave:
+    amplitude_scale: 1.0
+    frequency_scale: 1.0
+    phase_offset: 0.0
+    smoothing_factor: 0.8
+    character_set: "blocks"
+
+rendering:
+  target_fps: 60
+  enable_differential: true
+  enable_double_buffer: true
+"#;
+
+        // Write test file
+        let mut file = fs::File::create(temp_file).unwrap();
+        file.write_all(yaml_content.as_bytes()).unwrap();
+
+        // Create manager
+        let manager = ConfigManager::new(temp_file);
+        assert!(manager.is_ok());
+
+        let manager = manager.unwrap();
+        let config = manager.config();
+        assert_eq!(config.audio.sample_rate, 48000);
+
+        // Cleanup
+        fs::remove_file(temp_file).ok();
+    }
+
+    #[test]
+    fn test_config_manager_reload() {
+        use std::fs;
+        use std::io::Write;
+
+        let temp_file = "test_manager_reload.yaml";
+        let yaml_content_1 = r#"
+audio:
+  sample_rate: 44100
+  channels: 2
+  buffer_size: 2048
+  buffer_capacity: 8192
+  device_name: "default"
+
+dsp:
+  fft_size: 2048
+  hop_size: 512
+  window_type: "hann"
+  frequency_range:
+    min: 20.0
+    max: 20000.0
+
+visualization:
+  sine_wave:
+    amplitude_scale: 1.0
+    frequency_scale: 1.0
+    phase_offset: 0.0
+    smoothing_factor: 0.8
+    character_set: "blocks"
+
+rendering:
+  target_fps: 60
+  enable_differential: true
+  enable_double_buffer: true
+"#;
+
+        // Write initial file
+        let mut file = fs::File::create(temp_file).unwrap();
+        file.write_all(yaml_content_1.as_bytes()).unwrap();
+
+        // Create manager
+        let mut manager = ConfigManager::new(temp_file).unwrap();
+        assert_eq!(manager.config().audio.sample_rate, 44100);
+
+        // Modify file
+        let yaml_content_2 = r#"
+audio:
+  sample_rate: 48000
+  channels: 2
+  buffer_size: 2048
+  buffer_capacity: 8192
+  device_name: "default"
+
+dsp:
+  fft_size: 2048
+  hop_size: 512
+  window_type: "hann"
+  frequency_range:
+    min: 20.0
+    max: 20000.0
+
+visualization:
+  sine_wave:
+    amplitude_scale: 1.0
+    frequency_scale: 1.0
+    phase_offset: 0.0
+    smoothing_factor: 0.8
+    character_set: "blocks"
+
+rendering:
+  target_fps: 60
+  enable_differential: true
+  enable_double_buffer: true
+"#;
+        let mut file = fs::File::create(temp_file).unwrap();
+        file.write_all(yaml_content_2.as_bytes()).unwrap();
+
+        // Reload
+        let result = manager.reload();
+        assert!(result.is_ok());
+        assert_eq!(manager.config().audio.sample_rate, 48000);
+
+        // Cleanup
+        fs::remove_file(temp_file).ok();
+    }
+
+    #[test]
+    fn test_config_manager_hot_reload_enabled() {
+        use std::fs;
+        use std::io::Write;
+
+        let temp_file = "test_manager_hot_reload.yaml";
+        let yaml_content = r#"
+audio:
+  sample_rate: 44100
+  channels: 2
+  buffer_size: 2048
+  buffer_capacity: 8192
+  device_name: "default"
+
+dsp:
+  fft_size: 2048
+  hop_size: 512
+  window_type: "hann"
+  frequency_range:
+    min: 20.0
+    max: 20000.0
+
+visualization:
+  sine_wave:
+    amplitude_scale: 1.0
+    frequency_scale: 1.0
+    phase_offset: 0.0
+    smoothing_factor: 0.8
+    character_set: "blocks"
+
+rendering:
+  target_fps: 60
+  enable_differential: true
+  enable_double_buffer: true
+"#;
+
+        // Write test file
+        let mut file = fs::File::create(temp_file).unwrap();
+        file.write_all(yaml_content.as_bytes()).unwrap();
+
+        // Create manager
+        let mut manager = ConfigManager::new(temp_file).unwrap();
+        assert!(!manager.is_hot_reload_enabled());
+
+        // Enable hot-reload
+        let result = manager.enable_hot_reload();
+        assert!(result.is_ok());
+        assert!(manager.is_hot_reload_enabled());
+
+        // Cleanup
+        fs::remove_file(temp_file).ok();
     }
 }

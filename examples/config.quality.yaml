@@ -1,0 +1,36 @@
+# CrabMusic Quality Configuration
+# Optimized for best visual quality and responsiveness
+# Requires modern hardware with good CPU
+
+audio:
+  sample_rate: 48000     # Higher sample rate
+  channels: 2
+  buffer_size: 1024      # Smaller buffer = lower latency
+  buffer_capacity: 4096
+  device_name: null
+
+dsp:
+  fft_size: 4096         # Larger FFT = better frequency resolution
+  hop_size: 256          # Smaller hop = smoother updates
+  window_type: blackman_harris  # Best frequency separation
+  frequency_range:
+    min: 20.0
+    max: 20000.0
+  smoothing: 0.05        # Minimal smoothing for fast response
+
+visualization:
+  sine_wave:
+    amplitude_scale: 1.2
+    frequency_scale: 1.0
+    phase_offset: 0.0
+    smoothing_factor: 0.7  # Balanced smoothing
+    character_set: braille  # High resolution character set
+    thickness: 2
+
+rendering:
+  target_fps: 60         # Smooth 60 FPS
+  enable_differential: true
+  enable_double_buffer: true
+  min_width: 80
+  min_height: 24
+

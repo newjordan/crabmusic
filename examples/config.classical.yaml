@@ -1,0 +1,36 @@
+# CrabMusic Classical Configuration
+# Optimized for classical music and acoustic instruments
+# Emphasizes mid and high frequencies with smooth transitions
+
+audio:
+  sample_rate: 48000     # Higher quality for classical
+  channels: 2
+  buffer_size: 2048
+  buffer_capacity: 8192
+  device_name: null
+
+dsp:
+  fft_size: 2048
+  hop_size: 512
+  window_type: hann      # Smooth window for classical
+  frequency_range:
+    min: 80.0            # Focus on instrument range
+    max: 16000.0         # Include harmonics
+  smoothing: 0.2         # More smoothing for gentle transitions
+
+visualization:
+  sine_wave:
+    amplitude_scale: 0.8   # Subtle amplitude
+    frequency_scale: 1.2   # More detail in frequency
+    phase_offset: 0.0
+    smoothing_factor: 0.9  # Very smooth for classical
+    character_set: extended  # Detailed character set
+    thickness: 1
+
+rendering:
+  target_fps: 60
+  enable_differential: true
+  enable_double_buffer: true
+  min_width: 80
+  min_height: 24
+

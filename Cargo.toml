@@ -41,6 +41,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Async runtime (optional, for config hot-reload)
 tokio = { version = "1.35", features = ["fs", "time"], optional = true }
 ctrlc = "3.5.1"
+notify = { version = "7.0.0", features = ["serde"] }
 
 [dev-dependencies]
 criterion = "0.5"

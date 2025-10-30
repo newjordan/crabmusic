@@ -1,0 +1,36 @@
+# CrabMusic Performance Configuration
+# Optimized for low CPU usage and battery life
+# Suitable for older hardware or when running in background
+
+audio:
+  sample_rate: 44100
+  channels: 2
+  buffer_size: 4096      # Larger buffer = lower CPU
+  buffer_capacity: 16384
+  device_name: null
+
+dsp:
+  fft_size: 1024         # Smaller FFT = faster processing
+  hop_size: 1024         # Larger hop = fewer updates
+  window_type: hann
+  frequency_range:
+    min: 20.0
+    max: 20000.0
+  smoothing: 0.2         # More smoothing = less jitter
+
+visualization:
+  sine_wave:
+    amplitude_scale: 1.0
+    frequency_scale: 1.0
+    phase_offset: 0.0
+    smoothing_factor: 0.9  # High smoothing for stable visuals
+    character_set: basic   # Simple character set
+    thickness: 1
+
+rendering:
+  target_fps: 30         # Lower FPS = less CPU
+  enable_differential: true
+  enable_double_buffer: false  # Disable for lower memory usage
+  min_width: 80
+  min_height: 24
+

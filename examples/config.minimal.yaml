@@ -1,0 +1,18 @@
+# CrabMusic Minimal Configuration
+# This is a minimal configuration file with only essential settings
+# All other settings will use defaults
+
+audio:
+  sample_rate: 44100
+  channels: 2
+
+dsp:
+  fft_size: 2048
+
+visualization:
+  sine_wave:
+    character_set: blocks
+
+rendering:
+  target_fps: 60
+

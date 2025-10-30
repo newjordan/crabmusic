@@ -1,0 +1,101 @@
+# CrabMusic Default Configuration
+# This is the default configuration file for CrabMusic
+# Copy this file to config.yaml and customize as needed
+
+# Audio capture configuration
+audio:
+  # Sample rate in Hz (common values: 44100, 48000)
+  sample_rate: 44100
+  
+  # Number of audio channels (1 = mono, 2 = stereo)
+  # Note: Stereo is automatically converted to mono for visualization
+  channels: 2
+  
+  # Audio buffer size in samples
+  # Smaller = lower latency, higher CPU usage
+  # Larger = higher latency, lower CPU usage
+  buffer_size: 2048
+  
+  # Ring buffer capacity in samples
+  # Should be at least 2x buffer_size, typically 4-8x
+  buffer_capacity: 8192
+  
+  # Audio device name (null = use system default)
+  # Run with --list-devices to see available devices
+  device_name: null
+
+# DSP (Digital Signal Processing) configuration
+dsp:
+  # FFT window size (must be power of 2: 512, 1024, 2048, 4096, 8192)
+  # Larger = better frequency resolution, slower updates
+  # Smaller = faster updates, lower frequency resolution
+  fft_size: 2048
+  
+  # Hop size for FFT processing (samples between FFT windows)
+  # Smaller = smoother updates, higher CPU usage
+  hop_size: 512
+  
+  # Window function type for FFT
+  # Options: rectangular, hann, hamming, blackman, blackman_harris
+  # hann is a good default for most music
+  window_type: hann
+  
+  # Frequency range to analyze (Hz)
+  frequency_range:
+    min: 20.0      # Human hearing lower limit
+    max: 20000.0   # Human hearing upper limit
+  
+  # Smoothing factor for audio parameters (0.0-1.0)
+  # Higher = smoother but slower response
+  # Lower = faster response but more jittery
+  smoothing: 0.1
+
+# Visualization configuration
+visualization:
+  # Sine wave visualizer settings
+  sine_wave:
+    # Amplitude scaling factor (0.1-10.0)
+    # Higher = taller waves
+    amplitude_scale: 1.0
+    
+    # Frequency scaling factor (0.1-10.0)
+    # Higher = more wave cycles visible
+    frequency_scale: 1.0
+    
+    # Phase offset in radians (0.0-6.28)
+    # Shifts the wave horizontally
+    phase_offset: 0.0
+    
+    # Smoothing factor for wave animation (0.0-1.0)
+    # Higher = smoother transitions
+    smoothing_factor: 0.8
+    
+    # Character set to use for rendering
+    # Options: basic, extended, blocks, shading, dots, lines, braille
+    # Press 'C' during playback to cycle through character sets
+    character_set: blocks
+    
+    # Wave thickness in pixels (1-10)
+    # Higher = thicker lines
+    thickness: 1
+
+# Rendering configuration
+rendering:
+  # Target frames per second (1-120)
+  # 60 is recommended for smooth animation
+  # Lower values reduce CPU usage
+  target_fps: 60
+  
+  # Enable differential rendering (only update changed cells)
+  # Significantly improves performance
+  enable_differential: true
+  
+  # Enable double buffering
+  # Reduces screen tearing
+  enable_double_buffer: true
+  
+  # Minimum terminal dimensions
+  # Application will warn if terminal is smaller
+  min_width: 80
+  min_height: 24
+
