@@ -45,9 +45,13 @@ pub struct AudioConfig {
     #[serde(default = "default_buffer_capacity")]
     pub buffer_capacity: usize,
 
-    /// Device name (None = default device)
+    /// Input device name (None = default input device)
     #[serde(default)]
     pub device_name: Option<String>,
+
+    /// Output device name (None = default output device)
+    #[serde(default)]
+    pub output_device_name: Option<String>,
 }
 
 /// DSP processing configuration
@@ -156,6 +160,7 @@ impl Default for AudioConfig {
             channels: default_channels(),
             buffer_capacity: default_buffer_capacity(),
             device_name: None,
+            output_device_name: None,
         }
     }
 }

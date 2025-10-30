@@ -21,6 +21,8 @@ pub struct AudioOutputDevice {
     is_playing: Arc<AtomicBool>,
     /// Shared buffer for audio samples to play
     playback_buffer: Arc<Mutex<Vec<f32>>>,
+    /// Optional device name to use (None = default)
+    device_name: Option<String>,
 }
 
 impl AudioOutputDevice {
@@ -30,15 +32,31 @@ impl AudioOutputDevice {
     /// Returns `AudioError::DeviceNotAvailable` if no output device found
     /// Returns `AudioError::ConfigError` if device configuration fails
     pub fn new() -> Result<Self, AudioError> {
+        Self::new_with_device(None)
+    }
+
+    /// Create a new audio output device with a specific device name
+    ///
+    /// # Arguments
+    /// * `device_name` - Optional device name to use (None = default output device)
+    ///
+    /// # Errors
+    /// Returns `AudioError::DeviceNotAvailable` if no audio device found
+    /// Returns `AudioError::ConfigError` if device configuration fails
+    pub fn new_with_device(device_name: Option<String>) -> Result<Self, AudioError> {
         info!("Initializing audio output device");
 
         let host = cpal::default_host();
         debug!("Using audio host: {:?}", host.id());
 
-        // Get default output device
-        let device = host
-            .default_output_device()
-            .ok_or(AudioError::DeviceNotAvailable)?;
+        // Get the specified device or default output device
+        let device = if let Some(ref name) = device_name {
+            info!("Looking for output device: {}", name);
+            Self::find_device_by_name(&host, name)?
+        } else {
+            host.default_output_device()
+                .ok_or(AudioError::DeviceNotAvailable)?
+        };
 
         info!(
             "Using output device: {}",
@@ -70,7 +88,28 @@ impl AudioOutputDevice {
             config,
             is_playing: Arc::new(AtomicBool::new(false)),
             playback_buffer: Arc::new(Mutex::new(Vec::new())),
+            device_name,
         })
+    }
+
+    /// Find an output device by name
+    fn find_device_by_name(
+        host: &cpal::Host,
+        name: &str,
+    ) -> Result<cpal::Device, AudioError> {
+        if let Ok(devices) = host.output_devices() {
+            for device in devices {
+                if let Ok(device_name) = device.name() {
+                    if device_name.to_lowercase().contains(&name.to_lowercase()) {
+                        info!("Found matching output device: {}", device_name);
+                        return Ok(device);
+                    }
+                }
+            }
+        }
+
+        error!("Output device not found: {}", name);
+        Err(AudioError::DeviceNotAvailable)
     }
 
     /// Start audio playback

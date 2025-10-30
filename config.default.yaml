@@ -20,9 +20,14 @@ audio:
   # Should be at least 2x buffer_size, typically 4-8x
   buffer_capacity: 8192
   
-  # Audio device name (null = use system default)
+  # Input audio device name (null = use system default input)
   # Run with --list-devices to see available devices
+  # For system audio capture, use loopback/monitor devices
   device_name: null
+
+  # Output audio device name (null = use system default output)
+  # This is where audio playback will be sent (speakers/headphones)
+  output_device_name: null
 
 # DSP (Digital Signal Processing) configuration
 dsp:

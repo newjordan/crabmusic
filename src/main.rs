@@ -55,9 +55,13 @@ struct Args {
     #[arg(long, value_name = "FLOAT")]
     sensitivity: Option<f32>,
 
-    /// Audio device name (overrides config file)
+    /// Input audio device name (overrides config file)
     #[arg(long, value_name = "NAME")]
     device: Option<String>,
+
+    /// Output audio device name for playback (overrides config file)
+    #[arg(long, value_name = "NAME")]
+    output_device: Option<String>,
 
     /// List available audio devices and exit
     #[arg(long)]
@@ -126,7 +130,12 @@ fn main() -> Result<()> {
 
     if let Some(device) = args.device {
         config.audio.device_name = Some(device.clone());
-        tracing::info!("Overriding audio device from CLI: {}", device);
+        tracing::info!("Overriding input audio device from CLI: {}", device);
+    }
+
+    if let Some(output_device) = args.output_device {
+        config.audio.output_device_name = Some(output_device.clone());
+        tracing::info!("Overriding output audio device from CLI: {}", output_device);
     }
 
     if let Some(sample_rate) = args.sample_rate {
@@ -204,7 +213,7 @@ impl Application {
             None
         } else {
             tracing::debug!("Initializing audio output device...");
-            match AudioOutputDevice::new() {
+            match AudioOutputDevice::new_with_device(config.audio.output_device_name.clone()) {
                 Ok(output) => {
                     tracing::info!("Audio output device initialized successfully");
                     Some(output)
