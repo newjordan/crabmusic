@@ -175,6 +175,7 @@ struct Application {
     target_fps: u32,
     current_charset: CharacterSet,
     charset_index: usize,
+    microphone_enabled: bool,
 }
 
 impl Application {
@@ -275,6 +276,7 @@ impl Application {
             target_fps: config.rendering.target_fps,
             current_charset,
             charset_index,
+            microphone_enabled: true, // Start with microphone enabled
         })
     }
 
@@ -343,6 +345,13 @@ impl Application {
         );
     }
 
+    /// Toggle microphone on/off
+    fn toggle_microphone(&mut self) {
+        self.microphone_enabled = !self.microphone_enabled;
+        let status = if self.microphone_enabled { "ON" } else { "OFF" };
+        tracing::info!("Microphone toggled: {}", status);
+    }
+
     /// Apply character set mapping to the grid
     fn apply_charset_to_grid(&self, grid: &mut GridBuffer) {
         for y in 0..grid.height() {
@@ -375,7 +384,9 @@ impl Application {
     /// Add UI overlay with character set name and controls
     fn add_ui_overlay(&self, grid: &mut GridBuffer) {
         let charset_name = &self.current_charset.name;
-        let info_text = format!(" {} | Press 'C' to change | 'Q' to quit ", charset_name);
+        let mic_status = if self.microphone_enabled { "MIC:ON" } else { "MIC:OFF" };
+        let info_text = format!(" {} | {} | Press 'C' to change charset | 'M' to toggle mic | 'Q' to quit ",
+            charset_name, mic_status);
 
         // Draw info bar at the top
         let start_x = (grid.width().saturating_sub(info_text.len())) / 2;
@@ -422,7 +433,7 @@ impl Application {
                 break;
             }
 
-            // Check for keyboard input (Ctrl+C or 'q' to quit, 'c' to change charset)
+            // Check for keyboard input (Ctrl+C or 'q' to quit, 'c' to change charset, 'm' to toggle mic)
             if event::poll(Duration::from_millis(0)).unwrap_or(false) {
                 if let Ok(Event::Key(KeyEvent { code, .. })) = event::read() {
                     match code {
@@ -432,6 +443,9 @@ impl Application {
                         }
                         KeyCode::Char('c') | KeyCode::Char('C') => {
                             self.next_charset();
+                        }
+                        KeyCode::Char('m') | KeyCode::Char('M') => {
+                            self.toggle_microphone();
                         }
                         _ => {}
                     }
@@ -448,29 +462,32 @@ impl Application {
                 break;
             }
 
-            // 1. Read audio samples from ring buffer
+            // 1. Read audio samples from ring buffer (only if microphone is enabled)
             if let Some(audio_buffer) = self.audio_device.read_samples() {
-                // 1a. Pass audio through to output (so you can hear it) if enabled
-                if let Some(ref audio_output) = self.audio_output {
-                    audio_output.write_samples(&audio_buffer);
+                // Only process audio if microphone is enabled
+                if self.microphone_enabled {
+                    // 1a. Pass audio through to output (so you can hear it) if enabled
+                    if let Some(ref audio_output) = self.audio_output {
+                        audio_output.write_samples(&audio_buffer);
+                    }
+
+                    // 2. Process audio → extract parameters
+                    let audio_params = self.dsp_processor.process(&audio_buffer);
+
+                    // Debug: Log audio parameters occasionally
+                    if frame_count % 60 == 0 {
+                        tracing::debug!(
+                            "Audio params - amp: {:.3}, bass: {:.3}, mid: {:.3}, treble: {:.3}",
+                            audio_params.amplitude,
+                            audio_params.bass,
+                            audio_params.mid,
+                            audio_params.treble
+                        );
+                    }
+
+                    // 3. Update visualizer with audio parameters
+                    self.visualizer.update(&audio_params);
                 }
-
-                // 2. Process audio → extract parameters
-                let audio_params = self.dsp_processor.process(&audio_buffer);
-
-                // Debug: Log audio parameters occasionally
-                if frame_count % 60 == 0 {
-                    tracing::debug!(
-                        "Audio params - amp: {:.3}, bass: {:.3}, mid: {:.3}, treble: {:.3}",
-                        audio_params.amplitude,
-                        audio_params.bass,
-                        audio_params.mid,
-                        audio_params.treble
-                    );
-                }
-
-                // 3. Update visualizer with audio parameters
-                self.visualizer.update(&audio_params);
             }
 
             // 4. Render visualization to grid
