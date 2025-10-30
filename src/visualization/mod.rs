@@ -5,9 +5,13 @@
 
 pub mod character_sets;
 mod sine_wave;
+mod spectrum;
+mod oscilloscope;
 
-// Re-export character_sets module for external use
+// Re-export visualizers for external use
 pub use sine_wave::{SineWaveConfig, SineWaveVisualizer};
+pub use spectrum::{SpectrumConfig, SpectrumVisualizer};
+pub use oscilloscope::{OscilloscopeConfig, OscilloscopeVisualizer};
 
 use crate::dsp::AudioParameters;
 

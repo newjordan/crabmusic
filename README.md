@@ -73,7 +73,11 @@ cargo run --release -- --help
 
 - **`Q`** or **`ESC`** - Quit the application
 - **`C`** - Cycle through character sets (basic → extended → blocks → shading → dots → lines → braille)
+- **`V`** - Cycle through visualizer modes (sine wave → spectrum analyzer → oscilloscope)
 - **`M`** - Toggle microphone input on/off
+- **`+`** or **`=`** - Increase sensitivity by 10%
+- **`-`** or **`_`** - Decrease sensitivity by 10%
+- **`1-9`** - Set sensitivity preset (1=0.5x, 2=1.0x, 3=1.5x, ..., 9=4.5x)
 
 ## 📝 Configuration
 

@@ -23,7 +23,8 @@ use dsp::DspProcessor;
 use rendering::TerminalRenderer;
 use visualization::{
     character_sets::{get_all_character_sets, get_character_set, CharacterSet, CharacterSetType},
-    GridBuffer, SineWaveConfig, SineWaveVisualizer, Visualizer,
+    GridBuffer, OscilloscopeConfig, OscilloscopeVisualizer, SineWaveConfig, SineWaveVisualizer,
+    SpectrumConfig, SpectrumVisualizer, Visualizer,
 };
 
 /// Global shutdown flag
@@ -185,12 +186,40 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+/// Visualizer mode enum
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VisualizerMode {
+    SineWave,
+    Spectrum,
+    Oscilloscope,
+}
+
+impl VisualizerMode {
+    /// Get the next visualizer mode in the cycle
+    fn next(&self) -> Self {
+        match self {
+            VisualizerMode::SineWave => VisualizerMode::Spectrum,
+            VisualizerMode::Spectrum => VisualizerMode::Oscilloscope,
+            VisualizerMode::Oscilloscope => VisualizerMode::SineWave,
+        }
+    }
+
+    /// Get the name of the visualizer mode
+    fn name(&self) -> &str {
+        match self {
+            VisualizerMode::SineWave => "Sine Wave",
+            VisualizerMode::Spectrum => "Spectrum Analyzer",
+            VisualizerMode::Oscilloscope => "Oscilloscope",
+        }
+    }
+}
+
 /// Application state
 struct Application {
     audio_device: Box<dyn AudioCaptureDevice>,
     audio_output: Option<AudioOutputDevice>,
     dsp_processor: DspProcessor,
-    visualizer: SineWaveVisualizer,
+    visualizer: Box<dyn Visualizer>,
     renderer: TerminalRenderer,
     #[allow(dead_code)] // Held for lifetime management
     ring_buffer: Arc<AudioRingBuffer>,
@@ -198,6 +227,8 @@ struct Application {
     current_charset: CharacterSet,
     charset_index: usize,
     microphone_enabled: bool,
+    sensitivity_multiplier: f32,
+    visualizer_mode: VisualizerMode,
 }
 
 impl Application {
@@ -262,13 +293,14 @@ impl Application {
         tracing::info!("DSP processor initialized: sample_rate={}, fft_size={}",
             actual_sample_rate, config.dsp.fft_size);
 
-        // Initialize visualizer
+        // Initialize visualizer (start with sine wave)
         tracing::debug!("Initializing visualizer...");
         let viz_config = SineWaveConfig {
             amplitude_sensitivity: config.visualization.sine_wave.amplitude,
             ..Default::default()
         };
-        let visualizer = SineWaveVisualizer::new(viz_config);
+        let visualizer: Box<dyn Visualizer> = Box::new(SineWaveVisualizer::new(viz_config.clone()));
+        let visualizer_mode = VisualizerMode::SineWave;
         tracing::info!("Visualizer initialized: type=sine_wave, sensitivity={}",
             config.visualization.sine_wave.amplitude);
 
@@ -313,6 +345,8 @@ impl Application {
             current_charset,
             charset_index,
             microphone_enabled: true, // Start with microphone enabled
+            sensitivity_multiplier: 1.0, // Start at 100% sensitivity
+            visualizer_mode,
         })
     }
 
@@ -415,6 +449,59 @@ impl Application {
         tracing::info!("Microphone toggled: {}", status);
     }
 
+    /// Increase sensitivity by 10%
+    fn increase_sensitivity(&mut self) {
+        self.sensitivity_multiplier = (self.sensitivity_multiplier + 0.1).min(5.0);
+        self.recreate_visualizer();
+        tracing::info!("Sensitivity increased to {:.1}x", self.sensitivity_multiplier);
+    }
+
+    /// Decrease sensitivity by 10%
+    fn decrease_sensitivity(&mut self) {
+        self.sensitivity_multiplier = (self.sensitivity_multiplier - 0.1).max(0.1);
+        self.recreate_visualizer();
+        tracing::info!("Sensitivity decreased to {:.1}x", self.sensitivity_multiplier);
+    }
+
+    /// Set sensitivity to a preset value (1-9 = 0.5x to 4.5x)
+    fn set_sensitivity_preset(&mut self, preset: u8) {
+        if preset >= 1 && preset <= 9 {
+            self.sensitivity_multiplier = 0.5 * preset as f32;
+            self.recreate_visualizer();
+            tracing::info!("Sensitivity preset {} set to {:.1}x", preset, self.sensitivity_multiplier);
+        }
+    }
+
+    /// Switch to the next visualizer mode
+    fn next_visualizer_mode(&mut self) {
+        self.visualizer_mode = self.visualizer_mode.next();
+        self.recreate_visualizer();
+        tracing::info!("Switched to visualizer: {}", self.visualizer_mode.name());
+    }
+
+    /// Recreate visualizer with current mode and sensitivity
+    fn recreate_visualizer(&mut self) {
+        self.visualizer = match self.visualizer_mode {
+            VisualizerMode::SineWave => {
+                let mut config = SineWaveConfig::default();
+                config.amplitude_sensitivity *= self.sensitivity_multiplier;
+                config.frequency_sensitivity *= self.sensitivity_multiplier;
+                config.thickness_sensitivity *= self.sensitivity_multiplier;
+                Box::new(SineWaveVisualizer::new(config))
+            }
+            VisualizerMode::Spectrum => {
+                let mut config = SpectrumConfig::default();
+                config.amplitude_sensitivity *= self.sensitivity_multiplier;
+                Box::new(SpectrumVisualizer::new(config))
+            }
+            VisualizerMode::Oscilloscope => {
+                let mut config = OscilloscopeConfig::default();
+                config.amplitude_sensitivity *= self.sensitivity_multiplier;
+                Box::new(OscilloscopeVisualizer::new(config))
+            }
+        };
+    }
+
     /// Apply character set mapping to the grid
     fn apply_charset_to_grid(&self, grid: &mut GridBuffer) {
         for y in 0..grid.height() {
@@ -496,7 +583,7 @@ impl Application {
                 break;
             }
 
-            // Check for keyboard input (Ctrl+C or 'q' to quit, 'c' to change charset, 'm' to toggle mic)
+            // Check for keyboard input
             if event::poll(Duration::from_millis(0)).unwrap_or(false) {
                 if let Ok(Event::Key(KeyEvent { code, .. })) = event::read() {
                     match code {
@@ -510,6 +597,24 @@ impl Application {
                         KeyCode::Char('m') | KeyCode::Char('M') => {
                             self.toggle_microphone();
                         }
+                        KeyCode::Char('v') | KeyCode::Char('V') => {
+                            self.next_visualizer_mode();
+                        }
+                        KeyCode::Char('+') | KeyCode::Char('=') => {
+                            self.increase_sensitivity();
+                        }
+                        KeyCode::Char('-') | KeyCode::Char('_') => {
+                            self.decrease_sensitivity();
+                        }
+                        KeyCode::Char('1') => self.set_sensitivity_preset(1),
+                        KeyCode::Char('2') => self.set_sensitivity_preset(2),
+                        KeyCode::Char('3') => self.set_sensitivity_preset(3),
+                        KeyCode::Char('4') => self.set_sensitivity_preset(4),
+                        KeyCode::Char('5') => self.set_sensitivity_preset(5),
+                        KeyCode::Char('6') => self.set_sensitivity_preset(6),
+                        KeyCode::Char('7') => self.set_sensitivity_preset(7),
+                        KeyCode::Char('8') => self.set_sensitivity_preset(8),
+                        KeyCode::Char('9') => self.set_sensitivity_preset(9),
                         _ => {}
                     }
                 }
