@@ -64,6 +64,8 @@ pub struct OscilloscopeVisualizer {
     thickness: f32,
     /// Configuration
     config: OscilloscopeConfig,
+    /// Beat flash effect (0.0-1.0, decays over time)
+    beat_flash: f32,
 }
 
 impl OscilloscopeVisualizer {
@@ -95,6 +97,7 @@ impl OscilloscopeVisualizer {
             amplitude: 0.0,
             thickness: config.line_thickness,
             config,
+            beat_flash: 0.0,
         }
     }
 
@@ -152,8 +155,8 @@ impl OscilloscopeVisualizer {
         
         // Convert distance to coverage based on thickness
         let half_thickness = self.thickness / height as f32 / 2.0;
-        
-        if distance < half_thickness {
+
+        let base_coverage = if distance < half_thickness {
             // Inside the line - full coverage
             1.0
         } else if distance < half_thickness * 2.0 {
@@ -162,7 +165,11 @@ impl OscilloscopeVisualizer {
         } else {
             // Outside the line
             0.0
-        }
+        };
+
+        // Apply beat flash effect (boost coverage on beat)
+        let flash_boost = self.beat_flash * 0.3; // Add up to 30% more coverage on beat
+        (base_coverage + flash_boost).min(1.0)
     }
 }
 
@@ -170,25 +177,32 @@ impl Visualizer for OscilloscopeVisualizer {
     fn update(&mut self, params: &AudioParameters) {
         // Apply smoothing to amplitude and thickness
         let smoothing = self.config.smoothing_factor;
-        
+
         self.amplitude = lerp(
             self.amplitude,
             params.amplitude * self.config.amplitude_sensitivity,
             smoothing,
         );
-        
+
         self.thickness = lerp(
             self.thickness,
             self.config.line_thickness + params.bass * 2.0,
             smoothing,
         );
-        
+
+        // Handle beat flash effect
+        if params.beat {
+            self.beat_flash = 1.0; // Trigger flash
+        } else {
+            self.beat_flash *= 0.85; // Decay flash over time
+        }
+
         // Add new samples to the buffer (simulate continuous waveform)
         // In a real implementation, we'd use actual audio samples
         for i in 0..5 {
             let phase = i as f32 / 5.0;
             let sample = self.generate_waveform_sample(params, phase);
-            
+
             // Remove oldest sample and add new one
             self.samples.pop_front();
             self.samples.push_back(sample);

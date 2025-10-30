@@ -10,6 +10,86 @@ use crate::audio::AudioBuffer;
 use crate::error::DspError;
 use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
+use std::time::Instant;
+
+/// Beat detector using energy-based onset detection
+///
+/// Detects beat onsets by tracking sudden increases in audio energy.
+/// Uses a threshold-based approach with cooldown to prevent false positives.
+#[derive(Debug)]
+struct BeatDetector {
+    /// Energy history for comparison
+    energy_history: Vec<f32>,
+    /// Maximum history size
+    history_size: usize,
+    /// Sensitivity multiplier (higher = more sensitive)
+    sensitivity: f32,
+    /// Minimum time between beats (in seconds)
+    cooldown_seconds: f32,
+    /// Last beat time
+    last_beat_time: Option<Instant>,
+}
+
+impl BeatDetector {
+    /// Create a new beat detector
+    ///
+    /// # Arguments
+    /// * `sensitivity` - Sensitivity multiplier (1.0 = normal, higher = more sensitive)
+    /// * `cooldown_seconds` - Minimum time between beats in seconds
+    fn new(sensitivity: f32, cooldown_seconds: f32) -> Self {
+        Self {
+            energy_history: Vec::with_capacity(10),
+            history_size: 10,
+            sensitivity,
+            cooldown_seconds,
+            last_beat_time: None,
+        }
+    }
+
+    /// Detect if a beat occurred based on current energy
+    ///
+    /// # Arguments
+    /// * `current_energy` - Current audio energy (RMS amplitude)
+    ///
+    /// # Returns
+    /// true if a beat was detected, false otherwise
+    fn detect(&mut self, current_energy: f32) -> bool {
+        // Check cooldown
+        if let Some(last_time) = self.last_beat_time {
+            let elapsed = last_time.elapsed().as_secs_f32();
+            if elapsed < self.cooldown_seconds {
+                return false;
+            }
+        }
+
+        // Add current energy to history
+        self.energy_history.push(current_energy);
+        if self.energy_history.len() > self.history_size {
+            self.energy_history.remove(0);
+        }
+
+        // Need at least 3 samples for comparison
+        if self.energy_history.len() < 3 {
+            return false;
+        }
+
+        // Calculate average energy of recent history (excluding current)
+        let history_avg = self.energy_history[..self.energy_history.len() - 1]
+            .iter()
+            .sum::<f32>()
+            / (self.energy_history.len() - 1) as f32;
+
+        // Detect beat if current energy is significantly higher than average
+        let threshold = history_avg * (1.5 / self.sensitivity);
+        let is_beat = current_energy > threshold && current_energy > 0.1;
+
+        if is_beat {
+            self.last_beat_time = Some(Instant::now());
+        }
+
+        is_beat
+    }
+}
 
 /// DSP processor for audio analysis
 ///
@@ -38,6 +118,8 @@ pub struct DspProcessor {
     hann_window: Vec<f32>,
     /// Pre-allocated scratch buffer for FFT computation
     scratch_buffer: Vec<Complex<f32>>,
+    /// Beat detection state
+    beat_detector: BeatDetector,
 }
 
 impl DspProcessor {
@@ -69,6 +151,7 @@ impl DspProcessor {
         let fft_planner = FftPlanner::new();
         let hann_window = Self::generate_hann_window(window_size);
         let scratch_buffer = vec![Complex::new(0.0, 0.0); window_size];
+        let beat_detector = BeatDetector::new(1.0, 0.1); // Normal sensitivity, 100ms cooldown
 
         Ok(Self {
             fft_planner,
@@ -76,6 +159,7 @@ impl DspProcessor {
             sample_rate,
             hann_window,
             scratch_buffer,
+            beat_detector,
         })
     }
 
@@ -206,12 +290,15 @@ impl DspProcessor {
         // 3. Calculate overall amplitude (RMS)
         let amplitude = self.calculate_rms(&buffer.samples);
 
+        // 4. Detect beat using energy-based onset detection
+        let beat = self.beat_detector.detect(amplitude);
+
         AudioParameters {
             bass,
             mid,
             treble,
             amplitude,
-            beat: false, // TODO: Implement in DSP-004
+            beat,
         }
     }
 

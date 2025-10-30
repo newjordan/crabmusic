@@ -61,6 +61,8 @@ pub struct SpectrumVisualizer {
     bar_heights: Vec<f32>,
     /// Configuration
     config: SpectrumConfig,
+    /// Beat flash effect (0.0-1.0, decays over time)
+    beat_flash: f32,
 }
 
 impl SpectrumVisualizer {
@@ -85,6 +87,7 @@ impl SpectrumVisualizer {
         Self {
             bar_heights,
             config,
+            beat_flash: 0.0,
         }
     }
 
@@ -135,11 +138,18 @@ impl Visualizer for SpectrumVisualizer {
     fn update(&mut self, params: &AudioParameters) {
         // Extract new bar heights from audio parameters
         let new_bars = self.extract_bars(params);
-        
+
         // Apply smoothing to prevent jitter
         let smoothing = self.config.smoothing_factor;
         for (i, &new_height) in new_bars.iter().enumerate() {
             self.bar_heights[i] = lerp(self.bar_heights[i], new_height, smoothing);
+        }
+
+        // Handle beat flash effect
+        if params.beat {
+            self.beat_flash = 1.0; // Trigger flash
+        } else {
+            self.beat_flash *= 0.85; // Decay flash over time
         }
     }
 
@@ -159,19 +169,20 @@ impl Visualizer for SpectrumVisualizer {
             let x_start = bar_idx * bar_width_with_spacing;
             let x_end = (x_start + bar_width).min(width);
             
-            // Calculate bar height in characters
-            let bar_height_chars = (bar_height * height as f32) as usize;
-            
+            // Calculate bar height in characters (with beat flash boost)
+            let boosted_height = (bar_height + self.beat_flash * 0.2).min(1.0);
+            let bar_height_chars = (boosted_height * height as f32) as usize;
+
             // Draw bar from bottom up
             for y in 0..height {
                 let y_from_bottom = height - 1 - y;
-                
+
                 for x in x_start..x_end {
                     if y_from_bottom < bar_height_chars {
                         // Full character for filled portion
                         let coverage = if y_from_bottom == bar_height_chars - 1 {
                             // Top of bar - use fractional coverage
-                            let fractional = (bar_height * height as f32) - bar_height_chars as f32;
+                            let fractional = (boosted_height * height as f32) - bar_height_chars as f32;
                             fractional.max(0.5) // At least 50% for visibility
                         } else {
                             // Full bar

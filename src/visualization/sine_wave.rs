@@ -68,6 +68,8 @@ pub struct SineWaveVisualizer {
     thickness: f32,
     /// Configuration
     config: SineWaveConfig,
+    /// Beat flash effect (0.0-1.0, decays over time)
+    beat_flash: f32,
 }
 
 impl SineWaveVisualizer {
@@ -94,6 +96,7 @@ impl SineWaveVisualizer {
             frequency: config.base_frequency,
             thickness: 1.0,
             config,
+            beat_flash: 0.0,
         }
     }
 
@@ -124,7 +127,7 @@ impl SineWaveVisualizer {
         // Convert distance to coverage based on thickness (anti-aliasing)
         let half_thickness = self.thickness / height as f32 / 2.0;
 
-        if distance < half_thickness {
+        let base_coverage = if distance < half_thickness {
             // Full coverage
             1.0
         } else if distance < half_thickness * 2.0 {
@@ -133,7 +136,11 @@ impl SineWaveVisualizer {
         } else {
             // No coverage
             0.0
-        }
+        };
+
+        // Apply beat flash effect (boost coverage on beat)
+        let flash_boost = self.beat_flash * 0.3; // Add up to 30% more coverage on beat
+        (base_coverage + flash_boost).min(1.0)
     }
 }
 
@@ -159,6 +166,13 @@ impl Visualizer for SineWaveVisualizer {
             1.0 + params.bass * self.config.thickness_sensitivity,
             smoothing,
         );
+
+        // Handle beat flash effect
+        if params.beat {
+            self.beat_flash = 1.0; // Trigger flash
+        } else {
+            self.beat_flash *= 0.85; // Decay flash over time
+        }
 
         // Advance phase for animation
         self.phase += self.config.phase_speed;
