@@ -192,7 +192,10 @@ impl Application {
 
         // Initialize audio capture with retry logic
         tracing::debug!("Initializing audio capture device...");
-        let audio_device = Self::init_audio_capture_with_retry(ring_buffer.clone())?;
+        let audio_device = Self::init_audio_capture_with_retry(
+            ring_buffer.clone(),
+            config.audio.device_name.clone(),
+        )?;
         tracing::info!("Audio capture device initialized successfully");
 
         // Initialize audio output (optional, with graceful degradation)
@@ -293,12 +296,15 @@ impl Application {
     ///
     /// Attempts to initialize audio capture with exponential backoff retry strategy.
     /// Retries 3 times with delays of 100ms, 500ms, and 1000ms.
-    fn init_audio_capture_with_retry(ring_buffer: Arc<AudioRingBuffer>) -> Result<CpalAudioDevice> {
+    fn init_audio_capture_with_retry(
+        ring_buffer: Arc<AudioRingBuffer>,
+        device_name: Option<String>,
+    ) -> Result<CpalAudioDevice> {
         const MAX_RETRIES: u32 = 3;
         const RETRY_DELAYS_MS: [u64; 3] = [100, 500, 1000];
 
         for attempt in 0..MAX_RETRIES {
-            match CpalAudioDevice::new(ring_buffer.clone()) {
+            match CpalAudioDevice::new_with_device(ring_buffer.clone(), device_name.clone()) {
                 Ok(device) => {
                     if attempt > 0 {
                         tracing::info!("Audio capture initialized successfully after {} retries", attempt);
@@ -760,9 +766,11 @@ fn list_audio_devices() -> Result<()> {
     println!();
 
     let host = cpal::default_host();
+    println!("Host: {:?}", host.id());
+    println!();
 
     // List input devices
-    println!("Input devices:");
+    println!("Input devices (microphones and loopback):");
     let input_devices = host
         .input_devices()
         .context("Failed to enumerate input devices")?;
@@ -775,17 +783,32 @@ fn list_audio_devices() -> Result<()> {
             .map(|n| n == name)
             .unwrap_or(false);
 
+        let name_lower = name.to_lowercase();
+        let is_loopback = name_lower.contains("stereo mix")
+            || name_lower.contains("loopback")
+            || name_lower.contains("monitor")
+            || name_lower.contains("what u hear")
+            || name_lower.contains("wave out");
+
+        let mut tags = Vec::new();
         if is_default {
-            println!("  {}. {} (default)", i + 1, name);
-        } else {
+            tags.push("default");
+        }
+        if is_loopback {
+            tags.push("LOOPBACK");
+        }
+
+        if tags.is_empty() {
             println!("  {}. {}", i + 1, name);
+        } else {
+            println!("  {}. {} [{}]", i + 1, name, tags.join(", "));
         }
     }
 
     println!();
 
     // List output devices
-    println!("Output devices:");
+    println!("Output devices (speakers/headphones):");
     let output_devices = host
         .output_devices()
         .context("Failed to enumerate output devices")?;
@@ -799,11 +822,15 @@ fn list_audio_devices() -> Result<()> {
             .unwrap_or(false);
 
         if is_default {
-            println!("  {}. {} (default)", i + 1, name);
+            println!("  {}. {} [default]", i + 1, name);
         } else {
             println!("  {}. {}", i + 1, name);
         }
     }
+
+    println!();
+    println!("To use a specific device, use: --device \"device name\"");
+    println!("For system audio capture, look for devices marked [LOOPBACK]");
 
     Ok(())
 }

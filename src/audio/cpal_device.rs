@@ -31,6 +31,8 @@ pub struct CpalAudioDevice {
     ring_buffer: Arc<AudioRingBuffer>,
     /// Flag indicating if currently capturing
     is_capturing: Arc<AtomicBool>,
+    /// Optional device name to use (None = default)
+    device_name: Option<String>,
 }
 
 impl CpalAudioDevice {
@@ -54,16 +56,35 @@ impl CpalAudioDevice {
     /// # Ok::<(), crabmusic::error::AudioError>(())
     /// ```
     pub fn new(ring_buffer: Arc<AudioRingBuffer>) -> Result<Self, AudioError> {
+        Self::new_with_device(ring_buffer, None)
+    }
+
+    /// Create a new CPAL audio capture device with a specific device name
+    ///
+    /// # Arguments
+    /// * `ring_buffer` - Shared ring buffer for audio samples
+    /// * `device_name` - Optional device name to use (None = default input device)
+    ///
+    /// # Errors
+    /// Returns `AudioError::DeviceNotAvailable` if no audio device found
+    /// Returns `AudioError::ConfigError` if device configuration fails
+    pub fn new_with_device(
+        ring_buffer: Arc<AudioRingBuffer>,
+        device_name: Option<String>,
+    ) -> Result<Self, AudioError> {
         info!("Initializing CPAL audio device");
 
         let host = cpal::default_host();
         debug!("Using audio host: {:?}", host.id());
 
-        // Get default input device (for capturing system audio)
-        // Note: On some systems, you may need to use a loopback device
-        let device = host
-            .default_input_device()
-            .ok_or(AudioError::DeviceNotAvailable)?;
+        // Get the specified device or default input device
+        let device = if let Some(ref name) = device_name {
+            info!("Looking for device: {}", name);
+            Self::find_device_by_name(&host, name)?
+        } else {
+            host.default_input_device()
+                .ok_or(AudioError::DeviceNotAvailable)?
+        };
 
         info!(
             "Using audio device: {}",
@@ -94,7 +115,40 @@ impl CpalAudioDevice {
             config,
             ring_buffer,
             is_capturing: Arc::new(AtomicBool::new(false)),
+            device_name,
         })
+    }
+
+    /// Find a device by name
+    fn find_device_by_name(
+        host: &cpal::Host,
+        name: &str,
+    ) -> Result<cpal::Device, AudioError> {
+        // Try input devices first
+        if let Ok(devices) = host.input_devices() {
+            for device in devices {
+                if let Ok(device_name) = device.name() {
+                    if device_name.to_lowercase().contains(&name.to_lowercase()) {
+                        info!("Found matching input device: {}", device_name);
+                        return Ok(device);
+                    }
+                }
+            }
+        }
+
+        // If not found, try output devices (for loopback)
+        if let Ok(devices) = host.output_devices() {
+            for device in devices {
+                if let Ok(device_name) = device.name() {
+                    if device_name.to_lowercase().contains(&name.to_lowercase()) {
+                        info!("Found matching output device: {}", device_name);
+                        return Ok(device);
+                    }
+                }
+            }
+        }
+
+        Err(AudioError::DeviceNotAvailable)
     }
 
     /// Convert stereo samples to mono by averaging channels
