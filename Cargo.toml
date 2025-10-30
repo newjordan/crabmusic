@@ -6,7 +6,7 @@ rust-version = "1.75"
 authors = ["CrabMusic Contributors"]
 description = "Real-time ASCII music visualizer for terminal"
 license = "MIT"
-repository = "https://github.com/yourusername/crabmusic"
+repository = "https://github.com/newjordan/crabmusic"
 keywords = ["audio", "visualization", "terminal", "music", "ascii"]
 categories = ["multimedia::audio", "visualization"]
 
