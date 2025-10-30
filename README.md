@@ -2,7 +2,7 @@
 
 **Real-time ASCII music visualizer for your terminal**
 
-CrabMusic captures system audio output and renders beautiful, audio-reactive ASCII visualizations directly in your terminal. No music player integration needed - it visualizes whatever audio is playing on your system.
+CrabMusic captures system audio output and renders ASCII visualizations directly in your terminal. No music player integration needed - it visualizes whatever audio is playing on your system.
 
 ## Features
 
