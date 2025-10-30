@@ -1,0 +1,67 @@
+# CrabMusic Default Configuration
+# This file will be fully defined in CONFIG-004
+
+# Audio capture settings
+audio:
+  # Sample rate in Hz (44100, 48000)
+  sample_rate: 44100
+  
+  # Buffer size in samples
+  buffer_size: 1024
+  
+  # Number of channels (1 = mono, 2 = stereo)
+  channels: 2
+
+# DSP processing settings
+dsp:
+  # FFT window size (must be power of 2)
+  window_size: 2048
+  
+  # Frequency band ranges in Hz
+  bass_range: [20, 250]
+  mid_range: [250, 4000]
+  treble_range: [4000, 20000]
+  
+  # Smoothing factor (0.0 = no smoothing, 1.0 = maximum smoothing)
+  smoothing: 0.8
+
+# Visualization settings
+visualization:
+  # Visualizer mode: sine_wave, spectrum, oscilloscope
+  mode: sine_wave
+  
+  # Target frame rate
+  fps: 60
+  
+  # Sine wave specific settings
+  sine_wave:
+    # Number of waves to display
+    wave_count: 3
+    
+    # Amplitude multiplier
+    amplitude_scale: 1.0
+    
+    # Frequency multiplier
+    frequency_scale: 1.0
+
+# Rendering settings
+rendering:
+  # Character set: ascii, unicode, blocks
+  character_set: unicode
+  
+  # Enable color (future feature)
+  color_enabled: false
+  
+  # Minimum terminal size
+  min_width: 80
+  min_height: 24
+
+# Logging settings
+logging:
+  # Log level: error, warn, info, debug, trace
+  level: info
+  
+  # Log to file
+  file_enabled: false
+  file_path: "crabmusic.log"
+

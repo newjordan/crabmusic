@@ -1,0 +1,70 @@
+[package]
+name = "crabmusic"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+authors = ["CrabMusic Contributors"]
+description = "Real-time ASCII music visualizer for terminal"
+license = "MIT"
+repository = "https://github.com/yourusername/crabmusic"
+keywords = ["audio", "visualization", "terminal", "music", "ascii"]
+categories = ["multimedia::audio", "visualization"]
+
+[dependencies]
+# Audio capture
+cpal = "0.15"
+ringbuf = "0.4.8"
+
+# DSP processing
+rustfft = "6.1"
+spectrum-analyzer = "1.0"
+
+# Terminal UI
+ratatui = "0.26"
+crossterm = "0.27"
+
+# Configuration
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Async runtime (optional, for config hot-reload)
+tokio = { version = "1.35", features = ["fs", "time"], optional = true }
+ctrlc = "3.5.1"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[profile.release]
+opt-level = 3           # Maximum optimization
+lto = "fat"             # Link-time optimization
+codegen-units = 1       # Single codegen unit for better optimization
+strip = true            # Strip symbols
+panic = "abort"         # Smaller binary, faster panic
+
+[features]
+default = []
+hot-reload = ["tokio"]
+
+[[bench]]
+name = "fft_benchmark"
+harness = false
+
+[[bench]]
+name = "render_benchmark"
+harness = false
+
+[[bench]]
+name = "ring_buffer_benchmark"
+harness = false
+
