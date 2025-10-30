@@ -9,7 +9,14 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{backend::CrosstermBackend, layout::Rect, text::Line, widgets::Paragraph, Terminal};
+use ratatui::{
+    backend::CrosstermBackend,
+    layout::Rect,
+    style::{Style, Stylize},
+    text::{Line, Span},
+    widgets::Paragraph,
+    Terminal,
+};
 use std::io::{self, Stdout};
 
 /// Terminal renderer
@@ -117,13 +124,45 @@ impl TerminalRenderer {
             .draw(|frame| {
                 let area = frame.size();
 
-                // Convert GridBuffer to Ratatui Lines
+                // Convert GridBuffer to Ratatui Lines with color support
                 let lines: Vec<Line> = (0..grid.height())
                     .map(|y| {
-                        let chars: String = (0..grid.width())
-                            .map(|x| grid.get_cell(x, y).character)
-                            .collect();
-                        Line::from(chars)
+                        let mut spans = Vec::new();
+                        let mut current_color: Option<ratatui::style::Color> = None;
+                        let mut current_text = String::new();
+
+                        for x in 0..grid.width() {
+                            let cell = grid.get_cell(x, y);
+                            let cell_color = cell.foreground_color.map(|c| c.to_ratatui_color());
+
+                            // If color changed, flush current span and start new one
+                            if cell_color != current_color {
+                                if !current_text.is_empty() {
+                                    let span = if let Some(color) = current_color {
+                                        Span::styled(current_text.clone(), Style::default().fg(color))
+                                    } else {
+                                        Span::raw(current_text.clone())
+                                    };
+                                    spans.push(span);
+                                    current_text.clear();
+                                }
+                                current_color = cell_color;
+                            }
+
+                            current_text.push(cell.character);
+                        }
+
+                        // Flush remaining text
+                        if !current_text.is_empty() {
+                            let span = if let Some(color) = current_color {
+                                Span::styled(current_text, Style::default().fg(color))
+                            } else {
+                                Span::raw(current_text)
+                            };
+                            spans.push(span);
+                        }
+
+                        Line::from(spans)
                     })
                     .collect();
 

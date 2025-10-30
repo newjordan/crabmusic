@@ -23,8 +23,9 @@ use dsp::DspProcessor;
 use rendering::TerminalRenderer;
 use visualization::{
     character_sets::{get_all_character_sets, get_character_set, CharacterSet, CharacterSetType},
-    GridBuffer, OscilloscopeConfig, OscilloscopeVisualizer, SineWaveConfig, SineWaveVisualizer,
-    SpectrumConfig, SpectrumVisualizer, Visualizer,
+    color_schemes::{ColorScheme, ColorSchemeType},
+    Color, GridBuffer, OscilloscopeConfig, OscilloscopeVisualizer, SineWaveConfig,
+    SineWaveVisualizer, SpectrumConfig, SpectrumVisualizer, Visualizer,
 };
 
 /// Global shutdown flag
@@ -229,6 +230,8 @@ struct Application {
     microphone_enabled: bool,
     sensitivity_multiplier: f32,
     visualizer_mode: VisualizerMode,
+    color_scheme: ColorScheme,
+    color_scheme_index: usize,
 }
 
 impl Application {
@@ -334,6 +337,10 @@ impl Application {
 
         tracing::info!("All components initialized successfully");
 
+        // Initialize color scheme (start with monochrome)
+        let color_scheme = ColorScheme::new(ColorSchemeType::Monochrome);
+        let color_scheme_index = 0;
+
         Ok(Self {
             audio_device,
             audio_output,
@@ -347,6 +354,8 @@ impl Application {
             microphone_enabled: true, // Start with microphone enabled
             sensitivity_multiplier: 1.0, // Start at 100% sensitivity
             visualizer_mode,
+            color_scheme,
+            color_scheme_index,
         })
     }
 
@@ -442,6 +451,15 @@ impl Application {
         );
     }
 
+    /// Cycle to the next color scheme
+    fn next_color_scheme(&mut self) {
+        let schemes = ColorSchemeType::all();
+        self.color_scheme_index = (self.color_scheme_index + 1) % schemes.len();
+        let scheme_type = schemes[self.color_scheme_index];
+        self.color_scheme = ColorScheme::new(scheme_type);
+        tracing::info!("Switched to color scheme: {}", scheme_type.name());
+    }
+
     /// Toggle microphone on/off
     fn toggle_microphone(&mut self) {
         self.microphone_enabled = !self.microphone_enabled;
@@ -502,7 +520,7 @@ impl Application {
         };
     }
 
-    /// Apply character set mapping to the grid
+    /// Apply character set mapping and colors to the grid
     fn apply_charset_to_grid(&self, grid: &mut GridBuffer) {
         for y in 0..grid.height() {
             for x in 0..grid.width() {
@@ -526,7 +544,13 @@ impl Application {
                     _ => 0.5, // Default for unknown characters
                 };
                 let new_char = self.current_charset.get_char(intensity);
-                grid.set_cell(x, y, new_char);
+
+                // Apply color based on intensity
+                if let Some(color) = self.color_scheme.get_color(intensity) {
+                    grid.set_cell_with_color(x, y, new_char, color);
+                } else {
+                    grid.set_cell(x, y, new_char);
+                }
             }
         }
     }
@@ -593,6 +617,9 @@ impl Application {
                         }
                         KeyCode::Char('c') | KeyCode::Char('C') => {
                             self.next_charset();
+                        }
+                        KeyCode::Char('o') | KeyCode::Char('O') => {
+                            self.next_color_scheme();
                         }
                         KeyCode::Char('m') | KeyCode::Char('M') => {
                             self.toggle_microphone();

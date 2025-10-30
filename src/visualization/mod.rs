@@ -4,6 +4,7 @@
 #![allow(dead_code)]
 
 pub mod character_sets;
+pub mod color_schemes;
 mod sine_wave;
 mod spectrum;
 mod oscilloscope;
@@ -288,6 +289,39 @@ impl GridBuffer {
         }
     }
 
+    /// Set a cell at the specified coordinates with color
+    ///
+    /// # Arguments
+    /// * `x` - X coordinate (column)
+    /// * `y` - Y coordinate (row)
+    /// * `character` - Character to set
+    /// * `color` - Foreground color
+    ///
+    /// # Panics
+    /// Panics if coordinates are out of bounds
+    pub fn set_cell_with_color(&mut self, x: usize, y: usize, character: char, color: Color) {
+        assert!(
+            x < self.width,
+            "x coordinate {} out of bounds (width: {})",
+            x,
+            self.width
+        );
+        assert!(
+            y < self.height,
+            "y coordinate {} out of bounds (height: {})",
+            y,
+            self.height
+        );
+        let index = y * self.width + x;
+        let new_cell = GridCell::with_color(character, color);
+
+        // Only mark as dirty if the cell actually changed
+        if self.cells[index] != new_cell {
+            self.cells[index] = new_cell;
+            self.dirty[index] = true;
+        }
+    }
+
     /// Clear the grid buffer (fill with spaces)
     pub fn clear(&mut self) {
         let empty = GridCell::empty();
@@ -355,6 +389,26 @@ impl GridBuffer {
     }
 }
 
+/// RGB color representation
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Color {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+}
+
+impl Color {
+    /// Create a new RGB color
+    pub const fn new(r: u8, g: u8, b: u8) -> Self {
+        Self { r, g, b }
+    }
+
+    /// Convert to ratatui Color
+    pub fn to_ratatui_color(&self) -> ratatui::style::Color {
+        ratatui::style::Color::Rgb(self.r, self.g, self.b)
+    }
+}
+
 /// A single cell in the grid buffer
 ///
 /// Contains a character and optional styling information (color, attributes).
@@ -362,10 +416,8 @@ impl GridBuffer {
 pub struct GridCell {
     /// The character to display
     pub character: char,
-    // Future: Add styling fields
-    // - foreground_color: Option<Color>
-    // - background_color: Option<Color>
-    // - attributes: Attributes (bold, italic, etc.)
+    /// Foreground color (optional)
+    pub foreground_color: Option<Color>,
 }
 
 impl GridCell {
@@ -380,7 +432,29 @@ impl GridCell {
     /// assert_eq!(cell.character, '█');
     /// ```
     pub fn new(character: char) -> Self {
-        Self { character }
+        Self {
+            character,
+            foreground_color: None,
+        }
+    }
+
+    /// Create a new grid cell with a character and color
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crabmusic::visualization::{GridCell, Color};
+    ///
+    /// let color = Color::new(255, 0, 0);
+    /// let cell = GridCell::with_color('█', color);
+    /// assert_eq!(cell.character, '█');
+    /// assert_eq!(cell.foreground_color, Some(color));
+    /// ```
+    pub fn with_color(character: char, color: Color) -> Self {
+        Self {
+            character,
+            foreground_color: Some(color),
+        }
     }
 
     /// Create an empty grid cell (space character)
@@ -394,7 +468,10 @@ impl GridCell {
     /// assert_eq!(cell.character, ' ');
     /// ```
     pub fn empty() -> Self {
-        Self { character: ' ' }
+        Self {
+            character: ' ',
+            foreground_color: None,
+        }
     }
 }
 

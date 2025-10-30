@@ -73,6 +73,7 @@ cargo run --release -- --help
 
 - **`Q`** or **`ESC`** - Quit the application
 - **`C`** - Cycle through character sets (basic → extended → blocks → shading → dots → lines → braille)
+- **`O`** - Cycle through color schemes (monochrome → rainbow → heat map → blue-purple → green-yellow → cyan-magenta)
 - **`V`** - Cycle through visualizer modes (sine wave → spectrum analyzer → oscilloscope)
 - **`M`** - Toggle microphone input on/off
 - **`+`** or **`=`** - Increase sensitivity by 10%
