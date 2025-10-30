@@ -527,6 +527,15 @@ impl Application {
 
             // 1. Read audio samples from ring buffer (only if microphone is enabled)
             if let Some(audio_buffer) = self.audio_device.read_samples() {
+                // Debug: Log that we're receiving audio
+                if frame_count % 60 == 0 {
+                    tracing::debug!(
+                        "Received audio buffer: {} samples, {} channels",
+                        audio_buffer.samples.len(),
+                        audio_buffer.channels
+                    );
+                }
+
                 // Only process audio if microphone is enabled
                 if self.microphone_enabled {
                     // 1a. Pass audio through to output (so you can hear it) if enabled
@@ -550,6 +559,11 @@ impl Application {
 
                     // 3. Update visualizer with audio parameters
                     self.visualizer.update(&audio_params);
+                }
+            } else {
+                // Debug: Log when no audio is available
+                if frame_count % 300 == 0 {
+                    tracing::debug!("No audio buffer available from ring buffer");
                 }
             }
 

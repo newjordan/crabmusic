@@ -199,6 +199,8 @@ impl WasapiLoopbackDevice {
             }
 
             // Convert bytes to f32 samples and push to ring buffer
+            // Collect all available samples into a single buffer
+            let mut all_samples = Vec::new();
             while sample_queue.len() >= blockalign as usize {
                 let mut frame_bytes = vec![0u8; blockalign as usize];
                 for byte in frame_bytes.iter_mut() {
@@ -208,14 +210,21 @@ impl WasapiLoopbackDevice {
                 // Convert to f32 samples
                 let samples = Self::convert_to_f32(&frame_bytes, &wave_format);
 
-                // Write to ring buffer
-                for sample in samples.iter() {
-                    // Create an AudioBuffer for each sample (mono conversion)
-                    let buffer = AudioBuffer::with_samples(vec![*sample], sample_rate, 1);
-                    if !ring_buffer.push(buffer) {
-                        debug!("Ring buffer full, dropping sample");
-                        break;
-                    }
+                // Convert stereo to mono if needed
+                if samples.len() == 2 {
+                    // Average left and right channels
+                    all_samples.push((samples[0] + samples[1]) / 2.0);
+                } else {
+                    // Already mono or use first channel
+                    all_samples.push(samples[0]);
+                }
+            }
+
+            // Push all samples as a single AudioBuffer (like CPAL does)
+            if !all_samples.is_empty() {
+                let buffer = AudioBuffer::with_samples(all_samples.clone(), sample_rate, 1);
+                if !ring_buffer.push(buffer) {
+                    debug!("Ring buffer full, dropped {} samples", all_samples.len());
                 }
             }
         }
