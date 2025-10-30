@@ -17,6 +17,8 @@ mod rendering;
 mod visualization;
 
 use audio::{AudioCaptureDevice, AudioOutputDevice, AudioRingBuffer, CpalAudioDevice};
+#[cfg(windows)]
+use audio::WasapiLoopbackDevice;
 use dsp::DspProcessor;
 use rendering::TerminalRenderer;
 use visualization::{
@@ -66,6 +68,11 @@ struct Args {
     /// List available audio devices and exit
     #[arg(long)]
     list_devices: bool,
+
+    /// Use Windows WASAPI loopback to capture system audio (Windows only, no virtual cable needed)
+    #[cfg(windows)]
+    #[arg(long)]
+    loopback: bool,
 
     /// Character set to use (basic, extended, blocks, shading, dots, lines, braille)
     #[arg(long, value_name = "SET")]
@@ -159,8 +166,14 @@ fn main() -> Result<()> {
     // Setup Ctrl+C handler
     setup_shutdown_handler()?;
 
+    // Determine if we should use loopback
+    #[cfg(windows)]
+    let use_loopback = args.loopback;
+    #[cfg(not(windows))]
+    let use_loopback = false;
+
     // Create and run application
-    let app = Application::new_with_config(config, args.no_audio_output)?;
+    let app = Application::new_with_config(config, args.no_audio_output, use_loopback)?;
 
     if args.test {
         app.run_test_mode()?;
@@ -174,7 +187,7 @@ fn main() -> Result<()> {
 
 /// Application state
 struct Application {
-    audio_device: CpalAudioDevice,
+    audio_device: Box<dyn AudioCaptureDevice>,
     audio_output: Option<AudioOutputDevice>,
     dsp_processor: DspProcessor,
     visualizer: SineWaveVisualizer,
@@ -189,7 +202,7 @@ struct Application {
 
 impl Application {
     /// Create a new application instance with configuration
-    fn new_with_config(config: config::AppConfig, no_audio_output: bool) -> Result<Self> {
+    fn new_with_config(config: config::AppConfig, no_audio_output: bool, use_loopback: bool) -> Result<Self> {
         tracing::info!("Initializing components with configuration...");
         tracing::debug!("Configuration: sample_rate={}, fft_size={}, fps={}",
             config.audio.sample_rate, config.dsp.fft_size, config.rendering.target_fps);
@@ -204,6 +217,7 @@ impl Application {
         let audio_device = Self::init_audio_capture_with_retry(
             ring_buffer.clone(),
             config.audio.device_name.clone(),
+            use_loopback,
         )?;
         tracing::info!("Audio capture device initialized successfully");
 
@@ -308,7 +322,7 @@ impl Application {
         let mut config = config::AppConfig::default();
         config.rendering.target_fps = target_fps;
         config.visualization.sine_wave.amplitude = sensitivity;
-        Self::new_with_config(config, false)
+        Self::new_with_config(config, false, false)
     }
 
     /// Initialize audio capture with retry logic
@@ -318,17 +332,41 @@ impl Application {
     fn init_audio_capture_with_retry(
         ring_buffer: Arc<AudioRingBuffer>,
         device_name: Option<String>,
-    ) -> Result<CpalAudioDevice> {
+        use_loopback: bool,
+    ) -> Result<Box<dyn AudioCaptureDevice>> {
         const MAX_RETRIES: u32 = 3;
         const RETRY_DELAYS_MS: [u64; 3] = [100, 500, 1000];
 
+        // Use WASAPI loopback on Windows if requested
+        #[cfg(windows)]
+        if use_loopback {
+            tracing::info!("Using Windows WASAPI loopback for system audio capture");
+            match WasapiLoopbackDevice::new(ring_buffer.clone()) {
+                Ok(device) => {
+                    tracing::info!("WASAPI loopback device initialized successfully");
+                    return Ok(Box::new(device));
+                }
+                Err(e) => {
+                    tracing::error!("Failed to initialize WASAPI loopback: {}", e);
+                    return Err(e).context(
+                        "Failed to initialize WASAPI loopback. \
+                         Please ensure:\n\
+                         - You are running on Windows\n\
+                         - An audio output device is active\n\
+                         - Audio is playing or will play soon"
+                    );
+                }
+            }
+        }
+
+        // Fall back to CPAL device (microphone or specified device)
         for attempt in 0..MAX_RETRIES {
             match CpalAudioDevice::new_with_device(ring_buffer.clone(), device_name.clone()) {
                 Ok(device) => {
                     if attempt > 0 {
                         tracing::info!("Audio capture initialized successfully after {} retries", attempt);
                     }
-                    return Ok(device);
+                    return Ok(Box::new(device));
                 }
                 Err(e) => {
                     if attempt < MAX_RETRIES - 1 {

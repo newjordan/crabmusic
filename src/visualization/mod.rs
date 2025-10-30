@@ -6,7 +6,7 @@
 pub mod character_sets;
 mod sine_wave;
 
-pub use character_sets::{CharacterSet, CharacterSetType, get_character_set, get_all_character_sets};
+// Re-export character_sets module for external use
 pub use sine_wave::{SineWaveConfig, SineWaveVisualizer};
 
 use crate::dsp::AudioParameters;

@@ -8,9 +8,15 @@ mod cpal_device;
 mod output_device;
 mod ring_buffer;
 
+#[cfg(windows)]
+mod wasapi_loopback;
+
 pub use cpal_device::CpalAudioDevice;
 pub use output_device::AudioOutputDevice;
 pub use ring_buffer::AudioRingBuffer;
+
+#[cfg(windows)]
+pub use wasapi_loopback::WasapiLoopbackDevice;
 
 use crate::error::AudioError;
 use std::time::Instant;

@@ -43,6 +43,10 @@ tokio = { version = "1.35", features = ["fs", "time"], optional = true }
 ctrlc = "3.5.1"
 notify = { version = "7.0.0", features = ["serde"] }
 
+# Windows WASAPI for native loopback capture
+[target.'cfg(windows)'.dependencies]
+wasapi = "0.21"
+
 [dev-dependencies]
 criterion = "0.5"
 
