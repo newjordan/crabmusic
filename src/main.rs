@@ -189,21 +189,30 @@ impl Application {
         let ring_buffer = Arc::new(AudioRingBuffer::new(10));
         tracing::debug!("Ring buffer created with capacity: 10");
 
-        // Initialize audio capture
+        // Initialize audio capture with retry logic
         tracing::debug!("Initializing audio capture device...");
-        let audio_device = CpalAudioDevice::new(ring_buffer.clone())
-            .context("Failed to initialize audio capture")?;
+        let audio_device = Self::init_audio_capture_with_retry(ring_buffer.clone())?;
         tracing::info!("Audio capture device initialized successfully");
 
-        // Initialize audio output (optional)
+        // Initialize audio output (optional, with graceful degradation)
         let audio_output = if no_audio_output {
             tracing::info!("Audio output disabled by CLI flag");
             None
         } else {
             tracing::debug!("Initializing audio output device...");
-            let output = AudioOutputDevice::new().context("Failed to initialize audio output")?;
-            tracing::info!("Audio output device initialized successfully");
-            Some(output)
+            match AudioOutputDevice::new() {
+                Ok(output) => {
+                    tracing::info!("Audio output device initialized successfully");
+                    Some(output)
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to initialize audio output: {}. Continuing without audio playback.",
+                        e
+                    );
+                    None
+                }
+            }
         };
 
         // Initialize DSP processor
@@ -276,6 +285,51 @@ impl Application {
         config.rendering.target_fps = target_fps;
         config.visualization.sine_wave.amplitude = sensitivity;
         Self::new_with_config(config, false)
+    }
+
+    /// Initialize audio capture with retry logic
+    ///
+    /// Attempts to initialize audio capture with exponential backoff retry strategy.
+    /// Retries 3 times with delays of 100ms, 500ms, and 1000ms.
+    fn init_audio_capture_with_retry(ring_buffer: Arc<AudioRingBuffer>) -> Result<CpalAudioDevice> {
+        const MAX_RETRIES: u32 = 3;
+        const RETRY_DELAYS_MS: [u64; 3] = [100, 500, 1000];
+
+        for attempt in 0..MAX_RETRIES {
+            match CpalAudioDevice::new(ring_buffer.clone()) {
+                Ok(device) => {
+                    if attempt > 0 {
+                        tracing::info!("Audio capture initialized successfully after {} retries", attempt);
+                    }
+                    return Ok(device);
+                }
+                Err(e) => {
+                    if attempt < MAX_RETRIES - 1 {
+                        let delay = RETRY_DELAYS_MS[attempt as usize];
+                        tracing::warn!(
+                            "Failed to initialize audio capture (attempt {}/{}): {}. Retrying in {}ms...",
+                            attempt + 1,
+                            MAX_RETRIES,
+                            e,
+                            delay
+                        );
+                        std::thread::sleep(Duration::from_millis(delay));
+                    } else {
+                        tracing::error!("Failed to initialize audio capture after {} attempts: {}", MAX_RETRIES, e);
+                        return Err(e).context(format!(
+                            "Failed to initialize audio capture after {} attempts. \
+                             Please ensure:\n\
+                             - An audio input device is connected and enabled\n\
+                             - Your audio system is running (PulseAudio/PipeWire on Linux)\n\
+                             - You have permission to access audio devices (check 'audio' group on Linux)",
+                            MAX_RETRIES
+                        ));
+                    }
+                }
+            }
+        }
+
+        unreachable!()
     }
 
     /// Cycle to the next character set
@@ -382,6 +436,16 @@ impl Application {
                         _ => {}
                     }
                 }
+            }
+
+            // Check if audio capture is still active
+            if !self.audio_device.is_capturing() {
+                tracing::error!("Audio capture stopped unexpectedly. This may indicate:");
+                tracing::error!("  - Audio device was disconnected");
+                tracing::error!("  - Audio system crashed or restarted");
+                tracing::error!("  - Permission was revoked");
+                tracing::error!("Exiting...");
+                break;
             }
 
             // 1. Read audio samples from ring buffer

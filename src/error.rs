@@ -34,11 +34,11 @@ pub enum CrabMusicError {
 #[derive(Error, Debug)]
 pub enum AudioError {
     /// Audio device not available
-    #[error("Audio device not available")]
+    #[error("Audio device not available. Please ensure an audio input device is connected and enabled.")]
     DeviceNotAvailable,
 
     /// Permission denied accessing audio device
-    #[error("Permission denied accessing audio device")]
+    #[error("Permission denied accessing audio device. On Linux, ensure your user is in the 'audio' group.")]
     PermissionDenied,
 
     /// Invalid audio format
@@ -46,7 +46,7 @@ pub enum AudioError {
     InvalidFormat(String),
 
     /// Buffer overflow
-    #[error("Audio buffer overflow")]
+    #[error("Audio buffer overflow. Try increasing buffer size in configuration.")]
     BufferOverflow,
 
     /// CPAL-specific error
@@ -58,7 +58,7 @@ pub enum AudioError {
     ConfigError(String),
 
     /// Audio stream error
-    #[error("Audio stream error: {0}")]
+    #[error("Audio stream error: {0}. The audio device may have been disconnected.")]
     StreamError(String),
 }
 
