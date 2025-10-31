@@ -12,7 +12,7 @@ use crossterm::{
 use ratatui::{
     backend::CrosstermBackend,
     layout::Rect,
-    style::{Style, Stylize},
+    style::Style,
     text::{Line, Span},
     widgets::Paragraph,
     Terminal,

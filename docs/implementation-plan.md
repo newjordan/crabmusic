@@ -69,8 +69,10 @@ This document provides a structured implementation plan for **crabmusic**, break
 1. [DSP-001](stories/DSP-001-fft-processor.md) - FFT Processor Implementation
 2. [DSP-002](stories/DSP-002-frequency-bands.md) - Frequency Band Extraction
 3. [DSP-003](stories/DSP-003-parameter-smoothing.md) - Parameter Smoothing & Windowing
-4. [DSP-004](stories/DSP-004-beat-detection.md) - Beat Detection (Post-MVP)
-5. [DSP-005](stories/DSP-005-dsp-testing.md) - DSP Testing with Synthetic Audio
+4. [DSP-004](stories/DSP-004-beat-detection.md) - Beat Detection ✅ Complete
+5. [DSP-005](stories/DSP-005-spectral-flux-beat-detection.md) - Spectral Flux Beat Detection (Post-MVP)
+6. [DSP-006](stories/DSP-006-tempo-detection-bpm.md) - Tempo Detection & BPM (Post-MVP)
+7. [DSP-007](stories/DSP-007-dsp-testing.md) - DSP Testing with Synthetic Audio
 
 **Dependencies**: AUDIO-003 must be complete (need audio buffers)
 
@@ -87,8 +89,9 @@ This document provides a structured implementation plan for **crabmusic**, break
 3. [VIZ-003](stories/VIZ-003-coverage-algorithm.md) - Character Coverage Algorithm
 4. [VIZ-004](stories/VIZ-004-visualizer-trait.md) - Visualizer Trait Design
 5. [VIZ-005](stories/VIZ-005-sine-wave-visualizer.md) - Sine Wave Visualizer (MVP)
-6. [VIZ-006](stories/VIZ-006-spectrum-visualizer.md) - Spectrum Analyzer Visualizer (Post-MVP)
-7. [VIZ-007](stories/VIZ-007-oscilloscope-visualizer.md) - Oscilloscope Visualizer (Post-MVP)
+6. [VIZ-006](stories/VIZ-006-spectrum-visualizer.md) - Spectrum Analyzer Visualizer ✅ Complete
+7. [VIZ-007](stories/VIZ-007-oscilloscope-visualizer.md) - Oscilloscope Visualizer ✅ Complete
+8. [VIZ-008](stories/VIZ-008-braille-video-playback.md) - Braille Video Playback (Experimental)
 
 **Dependencies**: DSP-002 must be complete (need audio parameters)
 
@@ -253,16 +256,27 @@ These stories can be developed **in parallel** to reduce overall time:
 
 After MVP validation, prioritize based on user feedback:
 
-**Phase 2 - Visualization Expansion**:
-- VIZ-006 (Spectrum Analyzer)
-- VIZ-007 (Oscilloscope modes)
-- DSP-004 (Beat Detection for reactive visuals)
+**Phase 2 - Enhanced Beat Detection & Visualization** ✅ **Complete**:
+- VIZ-006 (Spectrum Analyzer) ✅ Complete
+- VIZ-007 (Oscilloscope modes) ✅ Complete
+- DSP-004 (Beat Detection - Energy-based) ✅ Complete
+- **DSP-005 (Spectral Flux Beat Detection)** 🆕 - Harmonic onset detection for piano, guitar
+- **DSP-006 (Tempo Detection & BPM)** 🆕 - Musical timing awareness with confidence metric
+
+**Phase 2.5 - Experimental Features (Moonshots)** 🎬:
+- **VIZ-008 (Braille Video Playback)** 🆕 - Retro CRT-style video player
+  - Supports 512×512+ resolution for high-quality playback
+  - Floyd-Steinberg dithering for smooth gradients
+  - Color and monochrome modes
+  - 24-30 FPS target performance
+  - FFmpeg integration for broad format support (MP4, AVI, MKV, WebM)
 
 **Phase 3 - Advanced Features**:
-- Color support for modern terminals
+- Color schemes and palettes (CGA, EGA, phosphor effects)
 - Interactive controls (keyboard shortcuts)
 - Preset system for different music genres
 - Recording/export to file
+- Retro visual effects (scanlines, CRT curve, phosphor glow)
 
 **Phase 4 - Sacred Geometry**:
 - Flower of Life renderer

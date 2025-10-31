@@ -18,6 +18,12 @@ pub enum CharacterSetType {
     Lines,
     /// Braille patterns (high resolution)
     Braille,
+    /// Smooth gradient with 64 density levels
+    Smooth64,
+    /// Ultra-smooth gradient with 128 density levels
+    Smooth128,
+    /// Maximum smoothness with 256 Braille patterns
+    Smooth256,
 }
 
 /// Character set for ASCII visualization
@@ -102,6 +108,9 @@ pub fn get_character_set(set_type: CharacterSetType) -> CharacterSet {
         CharacterSetType::Dots => dots_set(),
         CharacterSetType::Lines => lines_set(),
         CharacterSetType::Braille => braille_set(),
+        CharacterSetType::Smooth64 => smooth64_set(),
+        CharacterSetType::Smooth128 => smooth128_set(),
+        CharacterSetType::Smooth256 => smooth256_set(),
     }
 }
 
@@ -175,6 +184,105 @@ fn braille_set() -> CharacterSet {
     )
 }
 
+/// Smooth 64-level gradient (64 levels)
+///
+/// Combines multiple character types ordered by perceptual density
+/// for smooth gradients without visible banding.
+fn smooth64_set() -> CharacterSet {
+    // Mix of dots, blocks, and Braille patterns ordered by density
+    let chars = vec![
+        ' ', '⠀', '⡀', '⢀', '⣀', '⠄', '⡄', '⢄', '⣄', '⠂', '⡂', '⢂', '⣂', '⠆', '⡆', '⢆',
+        '⣆', '⠁', '⡁', '⢁', '⣁', '⠅', '⡅', '⢅', '⣅', '⠃', '⡃', '⢃', '⣃', '⠇', '⡇', '⢇',
+        '⣇', '░', '⠈', '⡈', '⢈', '⣈', '⠌', '⡌', '⢌', '⣌', '⠊', '⡊', '⢊', '⣊', '⠎', '⡎',
+        '⢎', '⣎', '⠉', '⡉', '⢉', '⣉', '⠍', '⡍', '⢍', '⣍', '⠋', '⡋', '⢋', '⣋', '▒', '▓',
+    ];
+
+    CharacterSet::new(
+        "Smooth 64".to_string(),
+        chars,
+        CharacterSetType::Smooth64,
+    )
+}
+
+/// Ultra-smooth 128-level gradient (128 levels)
+///
+/// Extended Braille patterns with fine density control.
+/// Provides nearly imperceptible steps between gradient levels.
+fn smooth128_set() -> CharacterSet {
+    let mut chars = Vec::with_capacity(128);
+
+    // Generate 128 Braille patterns ordered by dot count (0-8 dots)
+    // This creates a smooth progression from empty to full
+    for dot_count in 0..=7 {
+        // For each dot count, generate patterns
+        let patterns_for_count = generate_braille_patterns_with_dots(dot_count);
+        for pattern in patterns_for_count.iter().take(16) {
+            if chars.len() < 128 {
+                chars.push(*pattern);
+            }
+        }
+    }
+
+    // Fill remaining with densest patterns
+    while chars.len() < 128 {
+        chars.push('⣿');
+    }
+
+    CharacterSet::new(
+        "Smooth 128".to_string(),
+        chars,
+        CharacterSetType::Smooth128,
+    )
+}
+
+/// Maximum smoothness 256-level gradient (256 levels)
+///
+/// All 256 Braille Unicode patterns (U+2800 to U+28FF) ordered by
+/// dot count for the smoothest possible gradient.
+fn smooth256_set() -> CharacterSet {
+    let mut chars = Vec::with_capacity(256);
+
+    // Generate all 256 Braille patterns ordered by dot count
+    for dots in 0..=255 {
+        let ch = std::char::from_u32(0x2800 + dots).unwrap_or('⠀');
+        chars.push(ch);
+    }
+
+    // Sort by dot count for proper density ordering
+    chars.sort_by_key(|&c| count_braille_dots(c));
+
+    CharacterSet::new(
+        "Smooth 256".to_string(),
+        chars,
+        CharacterSetType::Smooth256,
+    )
+}
+
+/// Helper: Generate Braille patterns with exactly N dots
+fn generate_braille_patterns_with_dots(dot_count: u8) -> Vec<char> {
+    let mut patterns = Vec::new();
+
+    for pattern in 0..=255u8 {
+        if pattern.count_ones() == dot_count as u32 {
+            let ch = std::char::from_u32(0x2800 + pattern as u32).unwrap_or('⠀');
+            patterns.push(ch);
+        }
+    }
+
+    patterns
+}
+
+/// Helper: Count dots in a Braille character
+fn count_braille_dots(ch: char) -> u32 {
+    let code = ch as u32;
+    if code >= 0x2800 && code <= 0x28FF {
+        let pattern = (code - 0x2800) as u8;
+        pattern.count_ones()
+    } else {
+        0
+    }
+}
+
 /// Get all available character sets
 ///
 /// # Returns
@@ -188,6 +296,9 @@ pub fn get_all_character_sets() -> Vec<CharacterSet> {
         dots_set(),
         lines_set(),
         braille_set(),
+        smooth64_set(),
+        smooth128_set(),
+        smooth256_set(),
     ]
 }
 

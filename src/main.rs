@@ -24,8 +24,8 @@ use rendering::TerminalRenderer;
 use visualization::{
     character_sets::{get_all_character_sets, get_character_set, CharacterSet, CharacterSetType},
     color_schemes::{ColorScheme, ColorSchemeType},
-    Color, GridBuffer, OscilloscopeConfig, OscilloscopeVisualizer, SineWaveConfig,
-    SineWaveVisualizer, SpectrumConfig, SpectrumVisualizer, Visualizer,
+    GridBuffer, OscilloscopeConfig, OscilloscopeVisualizer, SineWaveConfig,
+    SineWaveVisualizer, SpectrumConfig, SpectrumVisualizer, TriggerSlope, Visualizer, WaveformMode,
 };
 
 /// Global shutdown flag
@@ -95,6 +95,10 @@ struct Args {
     /// Disable audio output (visualization only, no playback)
     #[arg(long)]
     no_audio_output: bool,
+
+    /// Show frequency labels on spectrum analyzer for debugging/calibration
+    #[arg(long)]
+    show_labels: bool,
 
     /// Show version information
     #[arg(long)]
@@ -175,7 +179,7 @@ fn main() -> Result<()> {
     let use_loopback = false;
 
     // Create and run application
-    let app = Application::new_with_config(config, args.no_audio_output, use_loopback)?;
+    let app = Application::new_with_config(config, args.no_audio_output, use_loopback, args.show_labels)?;
 
     if args.test {
         app.run_test_mode()?;
@@ -225,18 +229,26 @@ struct Application {
     #[allow(dead_code)] // Held for lifetime management
     ring_buffer: Arc<AudioRingBuffer>,
     target_fps: u32,
+    sample_rate: u32,
     current_charset: CharacterSet,
     charset_index: usize,
     microphone_enabled: bool,
     sensitivity_multiplier: f32,
+    show_labels: bool,
     visualizer_mode: VisualizerMode,
     color_scheme: ColorScheme,
     color_scheme_index: usize,
+    last_key_press: Instant,
+    key_debounce_ms: u64,
+    // Oscilloscope configuration state
+    osc_show_grid: bool,
+    osc_waveform_mode: WaveformMode,
+    osc_trigger_slope: TriggerSlope,
 }
 
 impl Application {
     /// Create a new application instance with configuration
-    fn new_with_config(config: config::AppConfig, no_audio_output: bool, use_loopback: bool) -> Result<Self> {
+    fn new_with_config(config: config::AppConfig, no_audio_output: bool, use_loopback: bool, show_labels: bool) -> Result<Self> {
         tracing::info!("Initializing components with configuration...");
         tracing::debug!("Configuration: sample_rate={}, fft_size={}, fps={}",
             config.audio.sample_rate, config.dsp.fft_size, config.rendering.target_fps);
@@ -296,23 +308,6 @@ impl Application {
         tracing::info!("DSP processor initialized: sample_rate={}, fft_size={}",
             actual_sample_rate, config.dsp.fft_size);
 
-        // Initialize visualizer (start with sine wave)
-        tracing::debug!("Initializing visualizer...");
-        let viz_config = SineWaveConfig {
-            amplitude_sensitivity: config.visualization.sine_wave.amplitude,
-            ..Default::default()
-        };
-        let visualizer: Box<dyn Visualizer> = Box::new(SineWaveVisualizer::new(viz_config.clone()));
-        let visualizer_mode = VisualizerMode::SineWave;
-        tracing::info!("Visualizer initialized: type=sine_wave, sensitivity={}",
-            config.visualization.sine_wave.amplitude);
-
-        // Initialize terminal renderer
-        tracing::debug!("Initializing terminal renderer...");
-        let renderer = TerminalRenderer::new().context("Failed to initialize terminal renderer")?;
-        let (width, height) = renderer.dimensions();
-        tracing::info!("Terminal renderer initialized: {}x{}", width, height);
-
         // Determine initial character set
         let charset_type = match config.visualization.character_set.as_str() {
             "basic" => CharacterSetType::Basic,
@@ -322,7 +317,10 @@ impl Application {
             "dots" => CharacterSetType::Dots,
             "lines" => CharacterSetType::Lines,
             "braille" => CharacterSetType::Braille,
-            _ => CharacterSetType::Blocks,
+            "smooth64" | "smooth_64" => CharacterSetType::Smooth64,
+            "smooth128" | "smooth_128" => CharacterSetType::Smooth128,
+            "smooth256" | "smooth_256" => CharacterSetType::Smooth256,
+            _ => CharacterSetType::Smooth64, // Default to smooth gradients!
         };
         let current_charset = get_character_set(charset_type);
         let charset_index = match charset_type {
@@ -333,8 +331,27 @@ impl Application {
             CharacterSetType::Dots => 4,
             CharacterSetType::Lines => 5,
             CharacterSetType::Braille => 6,
+            CharacterSetType::Smooth64 => 7,
+            CharacterSetType::Smooth128 => 8,
+            CharacterSetType::Smooth256 => 9,
         };
 
+        // Initialize visualizer (start with sine wave)
+        tracing::debug!("Initializing visualizer...");
+        let viz_config = SineWaveConfig {
+            amplitude_sensitivity: config.visualization.sine_wave.amplitude,
+            ..Default::default()
+        };
+        let visualizer: Box<dyn Visualizer> = Box::new(SineWaveVisualizer::new(viz_config.clone(), current_charset.clone()));
+        let visualizer_mode = VisualizerMode::SineWave;
+        tracing::info!("Visualizer initialized: type=sine_wave, sensitivity={}",
+            config.visualization.sine_wave.amplitude);
+
+        // Initialize terminal renderer
+        tracing::debug!("Initializing terminal renderer...");
+        let renderer = TerminalRenderer::new().context("Failed to initialize terminal renderer")?;
+        let (width, height) = renderer.dimensions();
+        tracing::info!("Terminal renderer initialized: {}x{}", width, height);
         tracing::info!("All components initialized successfully");
 
         // Initialize color scheme (start with monochrome)
@@ -349,13 +366,21 @@ impl Application {
             renderer,
             ring_buffer,
             target_fps: config.rendering.target_fps,
+            sample_rate: actual_sample_rate,
             current_charset,
             charset_index,
             microphone_enabled: true, // Start with microphone enabled
             sensitivity_multiplier: 1.0, // Start at 100% sensitivity
+            show_labels,
             visualizer_mode,
             color_scheme,
             color_scheme_index,
+            last_key_press: Instant::now(),
+            key_debounce_ms: 200, // 200ms debounce = max 5 key presses per second
+            // Oscilloscope defaults
+            osc_show_grid: true,
+            osc_waveform_mode: WaveformMode::LineAndFill,
+            osc_trigger_slope: TriggerSlope::Positive,
         })
     }
 
@@ -365,7 +390,7 @@ impl Application {
         let mut config = config::AppConfig::default();
         config.rendering.target_fps = target_fps;
         config.visualization.sine_wave.amplitude = sensitivity;
-        Self::new_with_config(config, false, false)
+        Self::new_with_config(config, false, false, false)
     }
 
     /// Initialize audio capture with retry logic
@@ -457,6 +482,8 @@ impl Application {
         self.color_scheme_index = (self.color_scheme_index + 1) % schemes.len();
         let scheme_type = schemes[self.color_scheme_index];
         self.color_scheme = ColorScheme::new(scheme_type);
+        // Recreate visualizer to apply new color scheme
+        self.recreate_visualizer();
         tracing::info!("Switched to color scheme: {}", scheme_type.name());
     }
 
@@ -505,16 +532,25 @@ impl Application {
                 config.amplitude_sensitivity *= self.sensitivity_multiplier;
                 config.frequency_sensitivity *= self.sensitivity_multiplier;
                 config.thickness_sensitivity *= self.sensitivity_multiplier;
-                Box::new(SineWaveVisualizer::new(config))
+                let mut viz = SineWaveVisualizer::new(config, self.current_charset.clone());
+                viz.set_color_scheme(self.color_scheme.clone());
+                Box::new(viz)
             }
             VisualizerMode::Spectrum => {
                 let mut config = SpectrumConfig::default();
                 config.amplitude_sensitivity *= self.sensitivity_multiplier;
-                Box::new(SpectrumVisualizer::new(config))
+                config.show_labels = self.show_labels;
+                let mut viz = SpectrumVisualizer::new(config, self.sample_rate, self.current_charset.clone());
+                viz.set_color_scheme(self.color_scheme.clone());
+                Box::new(viz)
             }
             VisualizerMode::Oscilloscope => {
                 let mut config = OscilloscopeConfig::default();
                 config.amplitude_sensitivity *= self.sensitivity_multiplier;
+                // Apply oscilloscope-specific settings
+                config.show_grid = self.osc_show_grid;
+                config.waveform_mode = self.osc_waveform_mode;
+                config.trigger_slope = self.osc_trigger_slope;
                 Box::new(OscilloscopeVisualizer::new(config))
             }
         };
@@ -555,12 +591,20 @@ impl Application {
         }
     }
 
-    /// Add UI overlay with character set name and controls
+    /// Add UI overlay with renderer info and controls
     fn add_ui_overlay(&self, grid: &mut GridBuffer) {
-        let charset_name = &self.current_charset.name;
+        let visualizer_name = self.visualizer.name();
+        let scheme_type = self.color_scheme.scheme_type();
+        let color_scheme_name = scheme_type.name();
         let mic_status = if self.microphone_enabled { "MIC:ON" } else { "MIC:OFF" };
-        let info_text = format!(" {} | {} | Press 'C' to change charset | 'M' to toggle mic | 'Q' to quit ",
-            charset_name, mic_status);
+
+        let info_text = if self.visualizer_mode == VisualizerMode::Oscilloscope {
+            format!(" {} | {} | {} | V:mode O:color G:grid F:fill T:trigger M:mic Q:quit ",
+                visualizer_name, color_scheme_name, mic_status)
+        } else {
+            format!(" {} | {} | {} | V:mode O:color M:mic +/-:sens Q:quit ",
+                visualizer_name, color_scheme_name, mic_status)
+        };
 
         // Draw info bar at the top
         let start_x = (grid.width().saturating_sub(info_text.len())) / 2;
@@ -607,42 +651,97 @@ impl Application {
                 break;
             }
 
-            // Check for keyboard input
+            // Check for keyboard input with debouncing
             if event::poll(Duration::from_millis(0)).unwrap_or(false) {
                 if let Ok(Event::Key(KeyEvent { code, .. })) = event::read() {
-                    match code {
-                        KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
-                            tracing::info!("Quit key pressed");
-                            break;
+                    // Check if enough time has passed since last key press (debouncing)
+                    let now = Instant::now();
+                    let time_since_last_press = now.duration_since(self.last_key_press);
+
+                    // Always allow quit key without debouncing
+                    let is_quit_key = matches!(code, KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc);
+
+                    if is_quit_key || time_since_last_press.as_millis() >= self.key_debounce_ms as u128 {
+                        // Update last key press time for non-quit keys
+                        if !is_quit_key {
+                            self.last_key_press = now;
                         }
-                        KeyCode::Char('c') | KeyCode::Char('C') => {
-                            self.next_charset();
+
+                        match code {
+                            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
+                                tracing::info!("Quit key pressed");
+                                break;
+                            }
+                            // Charset cycling disabled - all visualizers now use Braille rendering
+                            // KeyCode::Char('c') | KeyCode::Char('C') => {
+                            //     self.next_charset();
+                            // }
+                            KeyCode::Char('o') | KeyCode::Char('O') => {
+                                self.next_color_scheme();
+                            }
+                            KeyCode::Char('m') | KeyCode::Char('M') => {
+                                self.toggle_microphone();
+                            }
+                            KeyCode::Char('v') | KeyCode::Char('V') => {
+                                self.next_visualizer_mode();
+                            }
+                            KeyCode::Char('+') | KeyCode::Char('=') => {
+                                self.increase_sensitivity();
+                            }
+                            KeyCode::Char('-') | KeyCode::Char('_') => {
+                                self.decrease_sensitivity();
+                            }
+                            KeyCode::Char('1') => self.set_sensitivity_preset(1),
+                            KeyCode::Char('2') => self.set_sensitivity_preset(2),
+                            KeyCode::Char('3') => self.set_sensitivity_preset(3),
+                            KeyCode::Char('4') => self.set_sensitivity_preset(4),
+                            KeyCode::Char('5') => self.set_sensitivity_preset(5),
+                            KeyCode::Char('6') => self.set_sensitivity_preset(6),
+                            KeyCode::Char('7') => self.set_sensitivity_preset(7),
+                            KeyCode::Char('8') => self.set_sensitivity_preset(8),
+                            KeyCode::Char('9') => self.set_sensitivity_preset(9),
+                            KeyCode::Char('g') | KeyCode::Char('G') => {
+                                // Toggle grid (Oscilloscope only)
+                                if self.visualizer_mode == VisualizerMode::Oscilloscope {
+                                    self.osc_show_grid = !self.osc_show_grid;
+                                    self.recreate_visualizer();
+                                    tracing::info!("Toggled oscilloscope grid: {}", self.osc_show_grid);
+                                }
+                            }
+                            KeyCode::Char('f') | KeyCode::Char('F') => {
+                                // Toggle fill mode (Oscilloscope only)
+                                if self.visualizer_mode == VisualizerMode::Oscilloscope {
+                                    self.osc_waveform_mode = match self.osc_waveform_mode {
+                                        WaveformMode::Line => WaveformMode::Filled,
+                                        WaveformMode::Filled => WaveformMode::LineAndFill,
+                                        WaveformMode::LineAndFill => WaveformMode::Line,
+                                    };
+                                    self.recreate_visualizer();
+                                    tracing::info!("Toggled oscilloscope fill mode");
+                                }
+                            }
+                            KeyCode::Char('l') | KeyCode::Char('L') => {
+                                // Toggle labels (Spectrum only)
+                                if self.visualizer_mode == VisualizerMode::Spectrum {
+                                    self.show_labels = !self.show_labels;
+                                    self.recreate_visualizer();
+                                    tracing::info!("Labels toggled: {}", if self.show_labels { "ON" } else { "OFF" });
+                                }
+                            }
+                            KeyCode::Char('t') | KeyCode::Char('T') => {
+                                // Toggle trigger mode (Oscilloscope only)
+                                if self.visualizer_mode == VisualizerMode::Oscilloscope {
+                                    self.osc_trigger_slope = match self.osc_trigger_slope {
+                                        TriggerSlope::Positive => TriggerSlope::Negative,
+                                        TriggerSlope::Negative => TriggerSlope::Both,
+                                        TriggerSlope::Both => TriggerSlope::Positive,
+                                    };
+                                    self.recreate_visualizer();
+                                    tracing::info!("Toggled oscilloscope trigger mode");
+                                }
+                            }
+                            _ => {}
                         }
-                        KeyCode::Char('o') | KeyCode::Char('O') => {
-                            self.next_color_scheme();
-                        }
-                        KeyCode::Char('m') | KeyCode::Char('M') => {
-                            self.toggle_microphone();
-                        }
-                        KeyCode::Char('v') | KeyCode::Char('V') => {
-                            self.next_visualizer_mode();
-                        }
-                        KeyCode::Char('+') | KeyCode::Char('=') => {
-                            self.increase_sensitivity();
-                        }
-                        KeyCode::Char('-') | KeyCode::Char('_') => {
-                            self.decrease_sensitivity();
-                        }
-                        KeyCode::Char('1') => self.set_sensitivity_preset(1),
-                        KeyCode::Char('2') => self.set_sensitivity_preset(2),
-                        KeyCode::Char('3') => self.set_sensitivity_preset(3),
-                        KeyCode::Char('4') => self.set_sensitivity_preset(4),
-                        KeyCode::Char('5') => self.set_sensitivity_preset(5),
-                        KeyCode::Char('6') => self.set_sensitivity_preset(6),
-                        KeyCode::Char('7') => self.set_sensitivity_preset(7),
-                        KeyCode::Char('8') => self.set_sensitivity_preset(8),
-                        KeyCode::Char('9') => self.set_sensitivity_preset(9),
-                        _ => {}
                     }
                 }
             }
@@ -681,11 +780,14 @@ impl Application {
                     // Debug: Log audio parameters occasionally
                     if frame_count % 60 == 0 {
                         tracing::debug!(
-                            "Audio params - amp: {:.3}, bass: {:.3}, mid: {:.3}, treble: {:.3}",
+                            "Audio params - amp: {:.3}, bass: {:.3}, mid: {:.3}, treble: {:.3}, BPM: {:.1} (confidence: {:.2}), beat: {}",
                             audio_params.amplitude,
                             audio_params.bass,
                             audio_params.mid,
-                            audio_params.treble
+                            audio_params.treble,
+                            audio_params.bpm,
+                            audio_params.tempo_confidence,
+                            audio_params.beat
                         );
                     }
 
@@ -704,8 +806,8 @@ impl Application {
             let mut grid = GridBuffer::new(width as usize, height as usize);
             self.visualizer.render(&mut grid);
 
-            // 5. Apply character set mapping to grid
-            self.apply_charset_to_grid(&mut grid);
+            // 5. All visualizers now use Braille rendering directly!
+            // No need to apply character set mapping - Braille gives 8× resolution
 
             // 6. Add UI overlay (character set name and controls)
             self.add_ui_overlay(&mut grid);

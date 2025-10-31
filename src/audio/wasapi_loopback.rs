@@ -184,6 +184,11 @@ impl WasapiLoopbackDevice {
         // Buffer for reading audio data
         let mut sample_queue: VecDeque<u8> = VecDeque::new();
 
+        // Buffer for accumulating samples before chunking
+        // This persists across loop iterations to avoid losing partial chunks
+        const CHUNK_SIZE: usize = 2048;
+        let mut all_samples: Vec<f32> = Vec::with_capacity(CHUNK_SIZE * 2);
+
         // Capture loop
         while !should_stop.load(Ordering::Relaxed) {
             // Wait for audio data (with timeout in milliseconds)
@@ -199,8 +204,8 @@ impl WasapiLoopbackDevice {
             }
 
             // Convert bytes to f32 samples and push to ring buffer
-            // Collect all available samples into a single buffer
-            let mut all_samples = Vec::new();
+            // Process in smaller chunks for consistent frame rate (match FFT window size)
+
             while sample_queue.len() >= blockalign as usize {
                 let mut frame_bytes = vec![0u8; blockalign as usize];
                 for byte in frame_bytes.iter_mut() {
@@ -218,15 +223,32 @@ impl WasapiLoopbackDevice {
                     // Already mono or use first channel
                     all_samples.push(samples[0]);
                 }
-            }
 
-            // Push all samples as a single AudioBuffer (like CPAL does)
-            if !all_samples.is_empty() {
-                let buffer = AudioBuffer::with_samples(all_samples.clone(), sample_rate, 1);
-                if !ring_buffer.push(buffer) {
-                    debug!("Ring buffer full, dropped {} samples", all_samples.len());
+                // Push in consistent chunks to avoid jittery visualization
+                if all_samples.len() >= CHUNK_SIZE {
+                    let chunk: Vec<f32> = all_samples.drain(..CHUNK_SIZE).collect();
+
+                    // Debug: Check amplitude levels occasionally
+                    static mut DEBUG_COUNTER: u32 = 0;
+                    unsafe {
+                        DEBUG_COUNTER += 1;
+                        if DEBUG_COUNTER % 100 == 0 {
+                            let max_amp = chunk.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+                            let rms = (chunk.iter().map(|s| s * s).sum::<f32>() / chunk.len() as f32).sqrt();
+                            debug!("Loopback audio - max: {:.4}, rms: {:.4}, samples: {}", max_amp, rms, chunk.len());
+                        }
+                    }
+
+                    let buffer = AudioBuffer::with_samples(chunk, sample_rate, 1);
+                    if !ring_buffer.push(buffer) {
+                        debug!("Ring buffer full, dropped {} samples", CHUNK_SIZE);
+                    }
                 }
             }
+
+            // Note: We intentionally keep partial samples in all_samples buffer
+            // They will be included in the next chunk when enough samples accumulate
+            // This ensures smooth, continuous audio without losing samples
         }
 
         // Stop the stream

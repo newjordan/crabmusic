@@ -49,6 +49,7 @@ wasapi = "0.21"
 
 [dev-dependencies]
 criterion = "0.5"
+rand = "0.8"
 
 [profile.release]
 opt-level = 3           # Maximum optimization

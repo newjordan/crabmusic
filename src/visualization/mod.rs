@@ -5,6 +5,7 @@
 
 pub mod character_sets;
 pub mod color_schemes;
+pub mod braille;
 mod sine_wave;
 mod spectrum;
 mod oscilloscope;
@@ -12,7 +13,8 @@ mod oscilloscope;
 // Re-export visualizers for external use
 pub use sine_wave::{SineWaveConfig, SineWaveVisualizer};
 pub use spectrum::{SpectrumConfig, SpectrumVisualizer};
-pub use oscilloscope::{OscilloscopeConfig, OscilloscopeVisualizer};
+pub use oscilloscope::{OscilloscopeConfig, OscilloscopeVisualizer, TriggerSlope, WaveformMode};
+pub use braille::BrailleGrid;
 
 use crate::dsp::AudioParameters;
 
@@ -97,21 +99,16 @@ pub trait Visualizer {
     fn name(&self) -> &str;
 }
 
-/// Select a character based on coverage percentage
+/// Select a character based on coverage percentage (deprecated - use CharacterSet)
 ///
-/// Maps coverage values to block element characters for smooth visual transitions.
+/// This function is deprecated. Use `CharacterSet::get_char()` instead for
+/// configurable character selection with smooth gradients.
 ///
 /// # Arguments
 /// * `coverage` - Coverage percentage (0.0-1.0)
 ///
 /// # Returns
 /// Character representing the coverage level
-///
-/// # Coverage Thresholds
-/// - 0.00-0.25: ' ' (empty)
-/// - 0.25-0.50: '░' (light shade)
-/// - 0.50-0.75: '▒' (medium shade)
-/// - 0.75-1.00: '▓' (dark shade)
 ///
 /// # Examples
 ///
@@ -123,6 +120,7 @@ pub trait Visualizer {
 /// assert_eq!(select_character_for_coverage(0.6), '▒');
 /// assert_eq!(select_character_for_coverage(0.9), '▓');
 /// ```
+#[deprecated(note = "Use CharacterSet::get_char() instead")]
 #[inline]
 pub fn select_character_for_coverage(coverage: f32) -> char {
     match coverage {
@@ -131,6 +129,33 @@ pub fn select_character_for_coverage(coverage: f32) -> char {
         c if c < 0.75 => '▒',
         _ => '▓',
     }
+}
+
+/// Select a character from a character set based on intensity
+///
+/// Maps intensity values to characters using the provided character set.
+/// This allows smooth gradients with 64, 128, or 256 density levels.
+///
+/// # Arguments
+/// * `intensity` - Intensity value (0.0-1.0)
+/// * `charset` - Character set to use for selection
+///
+/// # Returns
+/// Character representing the intensity level
+///
+/// # Examples
+///
+/// ```
+/// use crabmusic::visualization::character_sets::{CharacterSet, CharacterSetType, get_character_set};
+/// use crabmusic::visualization::select_character;
+///
+/// let charset = get_character_set(CharacterSetType::Smooth64);
+/// let ch = select_character(0.5, &charset);
+/// // Returns character from middle of 64-level gradient
+/// ```
+#[inline]
+pub fn select_character(intensity: f32, charset: &character_sets::CharacterSet) -> char {
+    charset.get_char(intensity)
 }
 
 /// Linear interpolation between two values
@@ -701,6 +726,11 @@ mod tests {
             treble: 0.2,
             amplitude: 0.4,
             beat: false,
+            beat_flux: false,
+            bpm: 120.0,
+            tempo_confidence: 0.0,
+            spectrum: vec![],
+            waveform: vec![],
         };
 
         viz.update(&params);

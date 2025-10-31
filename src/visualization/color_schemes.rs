@@ -47,6 +47,7 @@ impl ColorSchemeType {
 }
 
 /// Color scheme for mapping intensity to colors
+#[derive(Clone)]
 pub struct ColorScheme {
     scheme_type: ColorSchemeType,
 }

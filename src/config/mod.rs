@@ -76,6 +76,34 @@ pub struct DspConfig {
     /// Treble frequency range (Hz)
     #[serde(default = "default_treble_range")]
     pub treble_range: (f32, f32),
+
+    /// Beat detection configuration
+    #[serde(default)]
+    pub beat_detection: BeatDetectionConfig,
+}
+
+/// Beat detection configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BeatDetectionConfig {
+    /// Sensitivity multiplier (0.5-2.0, higher = more sensitive)
+    #[serde(default = "default_beat_sensitivity")]
+    pub sensitivity: f32,
+
+    /// Minimum time between beats in seconds (cooldown)
+    #[serde(default = "default_beat_cooldown")]
+    pub cooldown_seconds: f32,
+
+    /// Minimum BPM for tempo detection
+    #[serde(default = "default_min_bpm")]
+    pub min_bpm: f32,
+
+    /// Maximum BPM for tempo detection
+    #[serde(default = "default_max_bpm")]
+    pub max_bpm: f32,
+
+    /// Number of beats to track for tempo estimation
+    #[serde(default = "default_tempo_history_size")]
+    pub tempo_history_size: usize,
 }
 
 /// Visualization configuration
@@ -85,7 +113,7 @@ pub struct VisualizationConfig {
     #[serde(default = "default_visualizer_type")]
     pub visualizer_type: String,
 
-    /// Character set type ("basic", "extended", "blocks", "shading", "dots", "lines", "braille")
+    /// Character set type ("basic", "extended", "blocks", "shading", "dots", "lines", "braille", "smooth64", "smooth128", "smooth256")
     #[serde(default = "default_character_set")]
     pub character_set: String,
 
@@ -143,8 +171,13 @@ fn default_smoothing() -> f32 { 0.1 }
 fn default_bass_range() -> (f32, f32) { (20.0, 250.0) }
 fn default_mid_range() -> (f32, f32) { (250.0, 4000.0) }
 fn default_treble_range() -> (f32, f32) { (4000.0, 20000.0) }
+fn default_beat_sensitivity() -> f32 { 1.0 }
+fn default_beat_cooldown() -> f32 { 0.1 }
+fn default_min_bpm() -> f32 { 60.0 }
+fn default_max_bpm() -> f32 { 180.0 }
+fn default_tempo_history_size() -> usize { 8 }
 fn default_visualizer_type() -> String { "sine_wave".to_string() }
-fn default_character_set() -> String { "blocks".to_string() }
+fn default_character_set() -> String { "smooth64".to_string() }
 fn default_amplitude() -> f32 { 1.0 }
 fn default_frequency() -> f32 { 1.0 }
 fn default_thickness() -> usize { 3 }
@@ -173,6 +206,19 @@ impl Default for DspConfig {
             bass_range: default_bass_range(),
             mid_range: default_mid_range(),
             treble_range: default_treble_range(),
+            beat_detection: BeatDetectionConfig::default(),
+        }
+    }
+}
+
+impl Default for BeatDetectionConfig {
+    fn default() -> Self {
+        Self {
+            sensitivity: default_beat_sensitivity(),
+            cooldown_seconds: default_beat_cooldown(),
+            min_bpm: default_min_bpm(),
+            max_bpm: default_max_bpm(),
+            tempo_history_size: default_tempo_history_size(),
         }
     }
 }
@@ -354,6 +400,49 @@ impl AppConfig {
             });
         }
 
+        // Validate beat detection config
+        if !(0.5..=2.0).contains(&self.dsp.beat_detection.sensitivity) {
+            return Err(ConfigError::InvalidValue {
+                field: "dsp.beat_detection.sensitivity".to_string(),
+                reason: "must be between 0.5 and 2.0".to_string(),
+            });
+        }
+
+        if !(0.01..=1.0).contains(&self.dsp.beat_detection.cooldown_seconds) {
+            return Err(ConfigError::InvalidValue {
+                field: "dsp.beat_detection.cooldown_seconds".to_string(),
+                reason: "must be between 0.01 and 1.0".to_string(),
+            });
+        }
+
+        if self.dsp.beat_detection.min_bpm < 30.0 || self.dsp.beat_detection.min_bpm > 300.0 {
+            return Err(ConfigError::InvalidValue {
+                field: "dsp.beat_detection.min_bpm".to_string(),
+                reason: "must be between 30.0 and 300.0".to_string(),
+            });
+        }
+
+        if self.dsp.beat_detection.max_bpm < 30.0 || self.dsp.beat_detection.max_bpm > 300.0 {
+            return Err(ConfigError::InvalidValue {
+                field: "dsp.beat_detection.max_bpm".to_string(),
+                reason: "must be between 30.0 and 300.0".to_string(),
+            });
+        }
+
+        if self.dsp.beat_detection.min_bpm >= self.dsp.beat_detection.max_bpm {
+            return Err(ConfigError::InvalidValue {
+                field: "dsp.beat_detection.min_bpm".to_string(),
+                reason: "must be less than max_bpm".to_string(),
+            });
+        }
+
+        if self.dsp.beat_detection.tempo_history_size < 3 || self.dsp.beat_detection.tempo_history_size > 32 {
+            return Err(ConfigError::InvalidValue {
+                field: "dsp.beat_detection.tempo_history_size".to_string(),
+                reason: "must be between 3 and 32".to_string(),
+            });
+        }
+
         // Validate visualization config
         let valid_visualizers = ["sine_wave", "spectrum", "oscilloscope"];
         if !valid_visualizers.contains(&self.visualization.visualizer_type.as_str()) {
@@ -363,7 +452,10 @@ impl AppConfig {
             });
         }
 
-        let valid_charsets = ["basic", "extended", "blocks", "shading", "dots", "lines", "braille"];
+        let valid_charsets = [
+            "basic", "extended", "blocks", "shading", "dots", "lines", "braille",
+            "smooth64", "smooth_64", "smooth128", "smooth_128", "smooth256", "smooth_256"
+        ];
         if !valid_charsets.contains(&self.visualization.character_set.as_str()) {
             return Err(ConfigError::InvalidValue {
                 field: "visualization.character_set".to_string(),
@@ -555,7 +647,7 @@ mod tests {
     fn test_default_visualization_config() {
         let config = VisualizationConfig::default();
         assert_eq!(config.visualizer_type, "sine_wave");
-        assert_eq!(config.character_set, "blocks");
+        assert_eq!(config.character_set, "smooth64");
     }
 
     #[test]
