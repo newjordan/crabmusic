@@ -1,45 +1,33 @@
 // 3D Waveform Tunnel Visualizer
 // Captures waveform snapshots and moves them toward camera with perspective scaling
 
-use super::{lerp, GridBuffer, Visualizer};
+use super::{lerp, BrailleGrid, GridBuffer, Visualizer};
 use crate::dsp::AudioParameters;
 use crate::visualization::color_schemes::ColorScheme;
 use std::collections::VecDeque;
 use std::f32::consts::PI;
 
 /// A snapshot of the waveform at a moment in time
+/// This is a FROZEN capture - the waveform samples never change after capture
 #[derive(Debug, Clone)]
 struct WaveformSnapshot {
-    /// Amplitude at capture time
-    amplitude: f32,
-    /// Frequency at capture time
-    frequency: f32,
-    /// Phase at capture time
-    phase: f32,
-    /// Depth in tunnel (0.0 = far away, 1.0 = at camera)
-    depth: f32,
-    /// Bass content at capture time
-    bass: f32,
-    /// Mid content at capture time
-    mid: f32,
-    /// Treble content at capture time
-    treble: f32,
+    /// Pre-calculated waveform samples (frozen at capture time)
+    samples: Vec<f32>,
+    /// Y position on screen (in rows)
+    y_position: usize,
+    /// Color intensity for this snapshot
+    intensity: f32,
 }
 
 /// 3D Waveform Tunnel Visualizer
 ///
-/// Creates a tunnel effect by capturing waveform snapshots and moving them
-/// toward the camera with perspective scaling. Far layers appear small at the
-/// top, near layers appear large at the bottom, creating depth perception.
+/// Creates a scrolling cascade of frozen waveform snapshots.
+/// New waves are drawn at the bottom, and the entire canvas scrolls upward.
 pub struct WaveformTunnelVisualizer {
     /// Color scheme for rendering
     color_scheme: ColorScheme,
-    /// Queue of waveform snapshots (layers in tunnel)
+    /// Queue of waveform snapshots (scrolling upward)
     layers: VecDeque<WaveformSnapshot>,
-    /// Maximum number of layers in tunnel
-    max_layers: usize,
-    /// Speed at which layers move toward camera (depth units per frame)
-    speed: f32,
     /// Current phase for waveform generation
     phase: f32,
     /// Current amplitude (smoothed)
@@ -62,6 +50,10 @@ pub struct WaveformTunnelVisualizer {
     smoothing_factor: f32,
     /// Phase speed (radians per frame)
     phase_speed: f32,
+    /// Rows to scroll per frame
+    scroll_speed: usize,
+    /// Frame counter for scroll timing
+    frame_counter: usize,
 }
 
 impl WaveformTunnelVisualizer {
@@ -76,19 +68,19 @@ impl WaveformTunnelVisualizer {
         Self {
             color_scheme,
             layers: VecDeque::new(),
-            max_layers: 25,              // 25 layers for good depth
-            speed: 0.025,                // 2.5% depth per frame (40 frames to traverse)
             phase: 0.0,
-            amplitude: 0.0,
-            frequency: 2.0,
-            bass: 0.0,
-            mid: 0.0,
-            treble: 0.0,
-            base_frequency: 2.0,         // 2 cycles across width
-            amplitude_sensitivity: 8.0,  // Sensitive to amplitude changes
-            frequency_sensitivity: 3.0,  // Moderate frequency sensitivity
-            smoothing_factor: 0.3,       // Fairly responsive
-            phase_speed: 0.1,            // Moderate animation speed
+            amplitude: 1.0,              // Start with full amplitude
+            frequency: 3.0,              // Start with 3 cycles
+            bass: 0.5,                   // Start with some bass
+            mid: 0.5,                    // Start with some mid
+            treble: 0.5,                 // Start with some treble
+            base_frequency: 3.0,         // 3 cycles across width for more visible waves
+            amplitude_sensitivity: 12.0, // Sensitive to amplitude changes
+            frequency_sensitivity: 4.0,  // Moderate frequency sensitivity
+            smoothing_factor: 0.25,      // Balanced responsiveness
+            phase_speed: 0.15,           // Faster animation speed
+            scroll_speed: 1,             // Scroll 1 row per frame
+            frame_counter: 0,
         }
     }
 
@@ -102,63 +94,60 @@ impl WaveformTunnelVisualizer {
         &self.color_scheme
     }
 
-    /// Calculate waveform sample at given x position for a snapshot
-    fn calculate_wave_sample(&self, x: f32, width: f32, snapshot: &WaveformSnapshot) -> f32 {
-        let t = x / width;
-        let angle = t * 2.0 * PI * snapshot.frequency + snapshot.phase;
-        angle.sin() * snapshot.amplitude
+    /// Calculate waveform samples for current state (to be frozen in snapshot)
+    fn calculate_waveform_samples(&self, num_samples: usize) -> Vec<f32> {
+        let mut samples = Vec::with_capacity(num_samples);
+        for i in 0..num_samples {
+            let t = i as f32 / num_samples as f32;
+            let angle = t * 2.0 * PI * self.frequency + self.phase;
+            let sample = angle.sin() * self.amplitude;
+            samples.push(sample);
+        }
+        samples
     }
 
-    /// Render a single layer with perspective scaling
-    fn render_layer(&self, grid: &mut GridBuffer, snapshot: &WaveformSnapshot) {
-        let width = grid.width();
-        let height = grid.height();
+    /// Render a single FROZEN waveform line at a specific Y position
+    fn render_layer(&self, braille: &mut BrailleGrid, snapshot: &WaveformSnapshot, grid_height: usize) {
+        let dot_width = braille.dot_width();
+        let dot_height = braille.dot_height();
 
-        // Calculate scale based on depth (0.2 to 1.0)
-        let scale = 0.15 + (snapshot.depth * 0.85);
+        // Calculate the Y center in dot coordinates
+        let cell_y = snapshot.y_position;
+        if cell_y >= grid_height {
+            return; // Off screen
+        }
 
-        // Calculate y center based on depth (top to bottom)
-        let y_center = (height as f32 * snapshot.depth) as usize;
+        let dot_center_y = cell_y * 4 + 2; // Convert cell Y to dot Y (middle of cell)
 
-        // Calculate color intensity based on depth (far = dim, near = bright)
-        let intensity = 0.2 + (snapshot.depth * 0.8);
+        // Get color from color scheme
+        let color = match self.color_scheme.get_color(snapshot.intensity) {
+            Some(c) => c,
+            None => super::Color::new(128, 128, 128), // Fallback gray
+        };
 
-        // Modulate intensity with frequency content
-        let freq_intensity = snapshot.bass * 0.3 + snapshot.mid * 0.4 + snapshot.treble * 0.3;
-        let final_intensity = (intensity * (0.5 + freq_intensity * 0.5)).min(1.0);
+        // Draw thin sine wave line using FROZEN samples from snapshot
+        let mut prev_x = 0;
+        let mut prev_y = dot_center_y;
 
-        // Render waveform across width
-        for x in 0..width {
-            let sample = self.calculate_wave_sample(x as f32, width as f32, snapshot);
-            let y_offset = (sample * scale * height as f32 * 0.4) as i32;
-            let y = (y_center as i32 + y_offset).clamp(0, height as i32 - 1) as usize;
+        let num_samples = snapshot.samples.len();
+        for dot_x in 0..dot_width {
+            // Get frozen sample from snapshot (interpolate if needed)
+            let sample_index = (dot_x as f32 / dot_width as f32 * num_samples as f32) as usize;
+            let sample_index = sample_index.min(num_samples - 1);
+            let sample = snapshot.samples[sample_index];
 
-            // Get color from color scheme
-            let color = self.color_scheme.get_color(final_intensity);
+            // Amplitude scale - fixed size for all waves
+            let amplitude_scale = dot_height as f32 * 0.15; // 15% of height
+            let y_offset = (sample * amplitude_scale) as i32;
+            let dot_y = (dot_center_y as i32 + y_offset).clamp(0, dot_height as i32 - 1) as usize;
 
-            // Use Braille characters for smooth curves
-            let cell = grid.get_cell_mut(x, y);
-            cell.character = '⠿'; // Full Braille block for solid appearance
-            cell.foreground_color = color;
-
-            // Add thickness by drawing adjacent pixels
-            if scale > 0.5 {
-                // Thicker lines for closer layers
-                if y > 0 {
-                    let cell_above = grid.get_cell_mut(x, y - 1);
-                    if cell_above.character == ' ' {
-                        cell_above.character = '⠿';
-                        cell_above.foreground_color = color;
-                    }
-                }
-                if y < height - 1 {
-                    let cell_below = grid.get_cell_mut(x, y + 1);
-                    if cell_below.character == ' ' {
-                        cell_below.character = '⠿';
-                        cell_below.foreground_color = color;
-                    }
-                }
+            // Draw line from previous point to current point (smooth anti-aliased)
+            if dot_x > 0 {
+                braille.draw_line_with_color(prev_x, prev_y, dot_x, dot_y, color);
             }
+
+            prev_x = dot_x;
+            prev_y = dot_y;
         }
     }
 }
@@ -190,37 +179,36 @@ impl Visualizer for WaveformTunnelVisualizer {
             self.phase -= 2.0 * PI;
         }
 
-        // Capture new snapshot
-        let snapshot = WaveformSnapshot {
-            amplitude: self.amplitude,
-            frequency: self.frequency,
-            phase: self.phase,
-            depth: 0.0, // Start at far distance
-            bass: self.bass,
-            mid: self.mid,
-            treble: self.treble,
-        };
+        // Increment frame counter
+        self.frame_counter += 1;
 
-        // Add to front of queue
-        self.layers.push_front(snapshot);
-
-        // Move all layers toward camera
-        for layer in &mut self.layers {
-            layer.depth += self.speed;
-        }
-
-        // Remove layers that have reached camera
-        while let Some(layer) = self.layers.back() {
-            if layer.depth >= 1.0 {
-                self.layers.pop_back();
-            } else {
-                break;
+        // Every frame, scroll all layers up
+        if self.frame_counter % self.scroll_speed == 0 {
+            for layer in &mut self.layers {
+                if layer.y_position > 0 {
+                    layer.y_position -= 1;
+                }
             }
-        }
 
-        // Limit to max layers
-        while self.layers.len() > self.max_layers {
-            self.layers.pop_back();
+            // Remove layers that scrolled off the top
+            self.layers.retain(|layer| layer.y_position > 0);
+
+            // CAPTURE NEW FROZEN SNAPSHOT at the bottom
+            let num_samples = 200; // High resolution for smooth curves
+            let samples = self.calculate_waveform_samples(num_samples);
+
+            // Calculate intensity from frequency content
+            let freq_intensity = self.bass * 0.3 + self.mid * 0.4 + self.treble * 0.3;
+            let intensity = (0.5 + freq_intensity * 0.5).min(1.0);
+
+            let snapshot = WaveformSnapshot {
+                samples, // Frozen waveform samples
+                y_position: 100, // Start at bottom (will be adjusted in render based on actual height)
+                intensity,
+            };
+
+            // Add to back of queue (bottom of screen)
+            self.layers.push_back(snapshot);
         }
     }
 
@@ -228,10 +216,29 @@ impl Visualizer for WaveformTunnelVisualizer {
         // Clear grid
         grid.clear();
 
-        // Render layers from back to front (far to near)
-        // This ensures near layers overdraw far layers
-        for layer in self.layers.iter().rev() {
-            self.render_layer(grid, layer);
+        let width = grid.width();
+        let height = grid.height();
+
+        // Create Braille grid for high-resolution rendering
+        let mut braille = BrailleGrid::new(width, height);
+
+        // Render all layers at their current Y positions
+        for layer in &self.layers {
+            self.render_layer(&mut braille, layer, height);
+        }
+
+        // Convert Braille grid back to regular grid
+        for cell_y in 0..height {
+            for cell_x in 0..width {
+                let braille_char = braille.get_char(cell_x, cell_y);
+                let braille_color = braille.get_color(cell_x, cell_y);
+
+                if braille_char != ' ' {
+                    let cell = grid.get_cell_mut(cell_x, cell_y);
+                    cell.character = braille_char;
+                    cell.foreground_color = braille_color;
+                }
+            }
         }
     }
 
@@ -251,7 +258,7 @@ mod tests {
         let visualizer = WaveformTunnelVisualizer::new(color_scheme);
         assert_eq!(visualizer.name(), "Waveform Tunnel");
         assert_eq!(visualizer.layers.len(), 0);
-        assert_eq!(visualizer.max_layers, 25);
+        assert_eq!(visualizer.scroll_speed, 1);
     }
 
     #[test]
@@ -262,58 +269,56 @@ mod tests {
 
         visualizer.update(&params);
         assert_eq!(visualizer.layers.len(), 1);
-        // First snapshot starts at 0.0 but immediately moves by speed
-        assert_eq!(visualizer.layers[0].depth, visualizer.speed);
+        // Verify frozen samples were captured
+        assert_eq!(visualizer.layers[0].samples.len(), 200);
     }
 
     #[test]
-    fn test_layer_movement() {
+    fn test_layer_scrolling() {
         let color_scheme = ColorScheme::new(ColorSchemeType::Monochrome);
         let mut visualizer = WaveformTunnelVisualizer::new(color_scheme);
         let params = AudioParameters::default();
 
         visualizer.update(&params);
-        let initial_depth = visualizer.layers[0].depth;
+        let initial_y = visualizer.layers[0].y_position;
 
         visualizer.update(&params);
-        let second_depth = visualizer.layers[1].depth;
+        let second_y = visualizer.layers[1].y_position;
 
-        assert!(second_depth > initial_depth);
+        // Second layer should be below first (higher Y)
+        assert!(second_y >= initial_y);
     }
 
     #[test]
     fn test_layer_removal() {
         let color_scheme = ColorScheme::new(ColorSchemeType::Monochrome);
         let mut visualizer = WaveformTunnelVisualizer::new(color_scheme);
-        visualizer.speed = 0.5; // Fast speed for testing
         let params = AudioParameters::default();
 
-        // Add layers until one reaches camera
-        for _ in 0..5 {
+        // Add many layers
+        for _ in 0..150 {
             visualizer.update(&params);
         }
 
-        // Verify layers at depth >= 1.0 are removed
+        // Verify layers at y_position 0 are removed
         for layer in &visualizer.layers {
-            assert!(layer.depth < 1.0);
+            assert!(layer.y_position > 0);
         }
     }
 
     #[test]
-    fn test_max_layers_limit() {
+    fn test_continuous_flow() {
         let color_scheme = ColorScheme::new(ColorSchemeType::Monochrome);
         let mut visualizer = WaveformTunnelVisualizer::new(color_scheme);
-        visualizer.max_layers = 10;
-        visualizer.speed = 0.01; // Slow speed so layers don't reach camera
         let params = AudioParameters::default();
 
-        // Add more than max_layers
-        for _ in 0..20 {
+        // Add several layers
+        for _ in 0..10 {
             visualizer.update(&params);
         }
 
-        // Should be limited to max_layers
-        assert_eq!(visualizer.layers.len(), 10);
+        // Should have multiple layers
+        assert!(visualizer.layers.len() > 0);
     }
 }
 
