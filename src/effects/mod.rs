@@ -30,6 +30,7 @@ pub mod passthrough;
 pub mod grid_overlay;
 pub mod scanline;
 pub mod bloom;
+pub mod phosphor;
 
 /// Trait for post-processing visual effects
 ///

@@ -378,10 +378,12 @@ impl Application {
         effect_pipeline.add_effect(Box::new(effects::bloom::BloomEffect::new(0.7, 2)));
         // Add scanline effect (CRT-style horizontal lines)
         effect_pipeline.add_effect(Box::new(effects::scanline::ScanlineEffect::new(2)));
+        // Add phosphor glow effect (temporal persistence for CRT-style trails)
+        effect_pipeline.add_effect(Box::new(effects::phosphor::PhosphorGlowEffect::new(0.3, 0.7)));
         // Add grid overlay effect for testing (optional)
         // effect_pipeline.add_effect(Box::new(effects::grid_overlay::GridOverlayEffect::new(10)));
         effect_pipeline.set_enabled(false); // Start with effects disabled
-        tracing::debug!("Effect pipeline initialized with Bloom + Scanline effects (disabled)");
+        tracing::debug!("Effect pipeline initialized with Bloom + Scanline + Phosphor effects (disabled)");
 
         Ok(Self {
             audio_device,
@@ -734,6 +736,7 @@ impl Application {
                 let short_name = match effect_name {
                     "Bloom" => "B",
                     "Scanline" => "S",
+                    "Phosphor" => "P",
                     _ => &effect_name[0..1],
                 };
                 let intensity_pct = (effect.intensity() * 100.0) as u8;
@@ -747,7 +750,7 @@ impl Application {
         let fx_status = fx_parts.join(" ");
 
         let info_text = if self.visualizer_mode == VisualizerMode::Oscilloscope {
-            format!(" {} | {} | {} | {} | V:mode O:color E:fx B:bloom S:scan []:intensity G:grid F:fill T:trigger M:mic Q:quit ",
+            format!(" {} | {} | {} | {} | V:mode O:color E:fx B:bloom S:scan H:phosphor []:intensity G:grid F:fill T:trigger M:mic Q:quit ",
                 visualizer_name, color_scheme_name, mic_status, fx_status)
         } else if self.visualizer_mode == VisualizerMode::Spectrum {
             let map_name = match self.spectrum_mapping { SpectrumMapping::NoteBars => "NOTES", SpectrumMapping::LogBars => "LOG" };
@@ -757,14 +760,14 @@ impl Application {
                     1 => ("A1-A5", 55.0, 880.0),
                     _ => ("A1-A6", 55.0, 1760.0),
                 };
-                format!(" {} | {} | {} | {} | V:mode O:color E:fx B:bloom S:scan []:intensity P:peaks L:labels N:map({}) R:range({}) M:mic +/-:sens Q:quit ",
+                format!(" {} | {} | {} | {} | V:mode O:color E:fx B:bloom S:scan H:phosphor []:intensity P:peaks L:labels N:map({}) R:range({}) M:mic +/-:sens Q:quit ",
                     visualizer_name, color_scheme_name, mic_status, fx_status, map_name, range_label)
             } else {
-                format!(" {} | {} | {} | {} | V:mode O:color E:fx B:bloom S:scan []:intensity P:peaks L:labels N:map({}) M:mic +/-:sens Q:quit ",
+                format!(" {} | {} | {} | {} | V:mode O:color E:fx B:bloom S:scan H:phosphor []:intensity P:peaks L:labels N:map({}) M:mic +/-:sens Q:quit ",
                     visualizer_name, color_scheme_name, mic_status, fx_status, map_name)
             }
         } else {
-            format!(" {} | {} | {} | {} | V:mode O:color E:fx B:bloom S:scan []:intensity M:mic +/-:sens Q:quit ",
+            format!(" {} | {} | {} | {} | V:mode O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
                 visualizer_name, color_scheme_name, mic_status, fx_status)
         };
 
@@ -853,6 +856,9 @@ impl Application {
                             }
                             KeyCode::Char('s') | KeyCode::Char('S') => {
                                 self.toggle_effect("Scanline");
+                            }
+                            KeyCode::Char('h') | KeyCode::Char('H') => {
+                                self.toggle_effect("Phosphor");
                             }
                             KeyCode::Char('[') | KeyCode::Char('{') => {
                                 self.decrease_effect_intensity();
