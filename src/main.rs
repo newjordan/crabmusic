@@ -372,12 +372,14 @@ impl Application {
 
         // Initialize effect pipeline with effects
         let mut effect_pipeline = EffectPipeline::new();
+        // Add bloom effect (glow for bright elements)
+        effect_pipeline.add_effect(Box::new(effects::bloom::BloomEffect::new(0.7, 2)));
         // Add scanline effect (CRT-style horizontal lines)
         effect_pipeline.add_effect(Box::new(effects::scanline::ScanlineEffect::new(2)));
         // Add grid overlay effect for testing (optional)
         // effect_pipeline.add_effect(Box::new(effects::grid_overlay::GridOverlayEffect::new(10)));
         effect_pipeline.set_enabled(false); // Start with effects disabled
-        tracing::debug!("Effect pipeline initialized with Scanline effect (disabled)");
+        tracing::debug!("Effect pipeline initialized with Bloom + Scanline effects (disabled)");
 
         Ok(Self {
             audio_device,

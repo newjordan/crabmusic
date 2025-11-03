@@ -29,6 +29,7 @@ use crate::visualization::GridBuffer;
 pub mod passthrough;
 pub mod grid_overlay;
 pub mod scanline;
+pub mod bloom;
 
 /// Trait for post-processing visual effects
 ///
@@ -586,6 +587,46 @@ mod tests {
 
         println!("Scanline effect: {} µs/frame (target: <1000 µs)", avg_micros);
         assert!(avg_micros < 1000, "Scanline too slow: {} µs (target: <1000 µs)", avg_micros);
+    }
+
+    #[test]
+    fn test_pipeline_performance_bloom() {
+        use crate::dsp::AudioParameters;
+        use crate::visualization::{GridBuffer, Color};
+        use crate::effects::bloom::BloomEffect;
+        use std::time::Instant;
+
+        let mut pipeline = EffectPipeline::new();
+        pipeline.add_effect(Box::new(BloomEffect::new(0.7, 2)));
+        let mut grid = GridBuffer::new(200, 100); // Typical terminal size
+        let params = AudioParameters::default();
+
+        // Fill grid with mix of bright and dim cells (realistic scenario)
+        for y in 0..100 {
+            for x in 0..200 {
+                // Create some bright spots (above threshold)
+                let brightness = if (x + y) % 10 == 0 { 255 } else { 100 };
+                grid.set_cell_with_color(x, y, '█', Color::new(brightness, brightness, brightness));
+            }
+        }
+
+        // Warm up
+        for _ in 0..10 {
+            pipeline.apply(&mut grid, &params);
+        }
+
+        // Benchmark: bloom should be <6ms (6000 microseconds)
+        // Note: Bloom is more expensive than scanlines due to multi-pass blur
+        let iterations = 100; // Fewer iterations since bloom is more expensive
+        let start = Instant::now();
+        for _ in 0..iterations {
+            pipeline.apply(&mut grid, &params);
+        }
+        let elapsed = start.elapsed();
+        let avg_micros = elapsed.as_micros() / iterations;
+
+        println!("Bloom effect: {} µs/frame (target: <6000 µs)", avg_micros);
+        assert!(avg_micros < 6000, "Bloom too slow: {} µs (target: <6000 µs)", avg_micros);
     }
 }
 
