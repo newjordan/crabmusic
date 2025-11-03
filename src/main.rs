@@ -27,7 +27,8 @@ use visualization::{
     character_sets::{get_all_character_sets, get_character_set, CharacterSet, CharacterSetType},
     color_schemes::{ColorScheme, ColorSchemeType},
     GridBuffer, OscilloscopeConfig, OscilloscopeVisualizer, ScrollDirection, SineWaveConfig,
-    SineWaveVisualizer, SpectrogramVisualizer, SpectrumConfig, SpectrumVisualizer, SpectrumMapping, TriggerSlope, Visualizer, WaveformMode,
+    SineWaveVisualizer, SpectrogramVisualizer, SpectrumConfig, SpectrumVisualizer, SpectrumMapping,
+    TriggerSlope, Visualizer, WaveformMode, WaveformTunnelVisualizer,
 };
 
 /// Global shutdown flag
@@ -200,6 +201,7 @@ enum VisualizerMode {
     Spectrum,
     Oscilloscope,
     Spectrogram,
+    WaveformTunnel,
 }
 
 impl VisualizerMode {
@@ -209,7 +211,8 @@ impl VisualizerMode {
             VisualizerMode::SineWave => VisualizerMode::Spectrum,
             VisualizerMode::Spectrum => VisualizerMode::Oscilloscope,
             VisualizerMode::Oscilloscope => VisualizerMode::Spectrogram,
-            VisualizerMode::Spectrogram => VisualizerMode::SineWave,
+            VisualizerMode::Spectrogram => VisualizerMode::WaveformTunnel,
+            VisualizerMode::WaveformTunnel => VisualizerMode::SineWave,
         }
     }
 
@@ -220,6 +223,7 @@ impl VisualizerMode {
             VisualizerMode::Spectrum => "Spectrum Analyzer",
             VisualizerMode::Oscilloscope => "Oscilloscope",
             VisualizerMode::Spectrogram => "Spectrogram",
+            VisualizerMode::WaveformTunnel => "Waveform Tunnel",
         }
     }
 }
@@ -684,6 +688,10 @@ impl Application {
                     self.color_scheme.clone(),
                     ScrollDirection::Up, // Default to scrolling up
                 );
+                Box::new(viz)
+            }
+            VisualizerMode::WaveformTunnel => {
+                let viz = WaveformTunnelVisualizer::new(self.color_scheme.clone());
                 Box::new(viz)
             }
         };

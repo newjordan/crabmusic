@@ -10,12 +10,14 @@ mod sine_wave;
 mod spectrum;
 mod oscilloscope;
 pub mod spectrogram;
+pub mod waveform_tunnel;
 
 // Re-export visualizers for external use
 pub use sine_wave::{SineWaveConfig, SineWaveVisualizer};
 pub use spectrum::{SpectrumConfig, SpectrumVisualizer, SpectrumMapping};
 pub use oscilloscope::{OscilloscopeConfig, OscilloscopeVisualizer, TriggerSlope, WaveformMode};
 pub use spectrogram::{SpectrogramVisualizer, ScrollDirection};
+pub use waveform_tunnel::WaveformTunnelVisualizer;
 pub use braille::BrailleGrid;
 
 use crate::dsp::AudioParameters;
