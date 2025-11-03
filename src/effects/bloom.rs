@@ -68,63 +68,70 @@ pub fn color_brightness(color: Color) -> f32 {
     (0.2126 * color.r as f32 + 0.7152 * color.g as f32 + 0.0722 * color.b as f32) / 255.0
 }
 
-/// Glow effect that makes bright elements glow by brightening neighbors
-///
-/// This is a simplified "bloom" that works better in terminals.
-/// Instead of complex Gaussian blur, it just brightens cells around bright spots.
+/// Bloom effect that makes bright elements glow
 ///
 /// This effect works by:
-/// 1. Finding bright pixels above a threshold
-/// 2. Brightening neighboring cells in a radius around each bright pixel
-/// 3. Using distance-based falloff for smooth glow
+/// 1. Extracting bright pixels above a threshold
+/// 2. Applying Gaussian blur to the bright pixels
+/// 3. Compositing the blurred result back onto the original (additive blending)
 ///
 /// # Examples
 ///
 /// ```
 /// use crabmusic::effects::bloom::BloomEffect;
 ///
-/// // Create glow with 0.3 threshold and radius 3
-/// let mut effect = BloomEffect::new(0.3, 3);
-/// effect.set_intensity(0.8);
+/// // Create bloom with 0.7 threshold and radius 2
+/// let mut effect = BloomEffect::new(0.7, 2);
+/// effect.set_intensity(0.5);
 /// ```
 #[derive(Debug, Clone)]
 pub struct BloomEffect {
     /// Whether the effect is enabled
     enabled: bool,
-    /// Effect intensity (0.0-1.0, strength of glow)
+    /// Effect intensity (0.0-1.0, strength of bloom)
     intensity: f32,
-    /// Brightness threshold (0.0-1.0, pixels above this glow)
+    /// Brightness threshold (0.0-1.0, pixels above this bloom)
     threshold: f32,
-    /// Glow radius (1-5, how far the glow spreads)
+    /// Blur radius (1-5, size of blur kernel)
     blur_radius: usize,
+    /// Temporary buffer for bright pixels
+    bright_buffer: Vec<Option<Color>>,
+    /// Temporary buffer for blurred result
+    blur_buffer: Vec<Option<Color>>,
+    /// Cached Gaussian kernel
+    kernel: Vec<f32>,
 }
 
 impl BloomEffect {
-    /// Create a new glow effect
+    /// Create a new bloom effect
     ///
     /// # Arguments
-    /// * `threshold` - Brightness threshold (0.0-1.0, pixels above this glow)
-    /// * `blur_radius` - Glow radius (1-5, how far the glow spreads)
+    /// * `threshold` - Brightness threshold (0.0-1.0, pixels above this bloom)
+    /// * `blur_radius` - Blur radius (1-5, size of blur kernel)
     ///
     /// # Returns
-    /// A new BloomEffect with default intensity (0.8) and enabled state (true)
+    /// A new BloomEffect with default intensity (0.5) and enabled state (true)
     ///
     /// # Examples
     ///
     /// ```
     /// use crabmusic::effects::bloom::BloomEffect;
     ///
-    /// let effect = BloomEffect::new(0.3, 3);
+    /// let effect = BloomEffect::new(0.7, 2);
     /// ```
     pub fn new(threshold: f32, blur_radius: usize) -> Self {
         let threshold = threshold.clamp(0.0, 1.0);
         let blur_radius = blur_radius.clamp(1, 5);
-
+        let kernel = gaussian_kernel(blur_radius);
+        
         Self {
             enabled: true,
-            intensity: 0.8, // Higher default for visibility
+            intensity: 0.5,
             threshold,
             blur_radius,
+            bright_buffer: Vec::new(),
+            blur_buffer: Vec::new(),
+            kernel,
         }
     }
 
@@ -146,22 +153,152 @@ impl BloomEffect {
         self.blur_radius
     }
 
-    /// Set the glow radius
+    /// Set the blur radius
     ///
     /// # Arguments
-    /// * `radius` - Glow radius (clamped to 1-5)
+    /// * `radius` - Blur radius (clamped to 1-5)
     pub fn set_blur_radius(&mut self, radius: usize) {
         self.blur_radius = radius.clamp(1, 5);
+        self.kernel = gaussian_kernel(self.blur_radius);
+    }
+
+    /// Resize internal buffers to match grid dimensions
+    fn resize_buffers(&mut self, width: usize, height: usize) {
+        let size = width * height;
+        if self.bright_buffer.len() != size {
+            self.bright_buffer.resize(size, None);
+            self.blur_buffer.resize(size, None);
+        }
+    }
+
+    /// Extract bright pixels above threshold
+    fn extract_bright_pixels(&mut self, grid: &GridBuffer) {
+        let width = grid.width();
+        
+        for y in 0..grid.height() {
+            for x in 0..width {
+                let cell = grid.get_cell(x, y);
+                let idx = y * width + x;
+                
+                if let Some(color) = cell.foreground_color {
+                    let brightness = color_brightness(color);
+                    
+                    if brightness >= self.threshold {
+                        self.bright_buffer[idx] = Some(color);
+                    } else {
+                        self.bright_buffer[idx] = None;
+                    }
+                } else {
+                    self.bright_buffer[idx] = None;
+                }
+            }
+        }
+    }
+
+    /// Apply horizontal Gaussian blur pass
+    fn blur_horizontal(&mut self, width: usize, height: usize) {
+        for y in 0..height {
+            for x in 0..width {
+                let mut r_sum = 0.0;
+                let mut g_sum = 0.0;
+                let mut b_sum = 0.0;
+                let mut weight_sum = 0.0;
+                
+                for (i, &weight) in self.kernel.iter().enumerate() {
+                    let offset = i as isize - self.blur_radius as isize;
+                    let sample_x = (x as isize + offset).clamp(0, width as isize - 1) as usize;
+                    
+                    if let Some(color) = self.bright_buffer[y * width + sample_x] {
+                        r_sum += color.r as f32 * weight;
+                        g_sum += color.g as f32 * weight;
+                        b_sum += color.b as f32 * weight;
+                        weight_sum += weight;
+                    }
+                }
+                
+                if weight_sum > 0.0 {
+                    self.blur_buffer[y * width + x] = Some(Color::new(
+                        (r_sum / weight_sum) as u8,
+                        (g_sum / weight_sum) as u8,
+                        (b_sum / weight_sum) as u8,
+                    ));
+                } else {
+                    self.blur_buffer[y * width + x] = None;
+                }
+            }
+        }
+    }
+
+    /// Apply vertical Gaussian blur pass
+    fn blur_vertical(&mut self, width: usize, height: usize) {
+        // Copy blur_buffer to bright_buffer for vertical pass
+        self.bright_buffer.copy_from_slice(&self.blur_buffer);
+        
+        for y in 0..height {
+            for x in 0..width {
+                let mut r_sum = 0.0;
+                let mut g_sum = 0.0;
+                let mut b_sum = 0.0;
+                let mut weight_sum = 0.0;
+                
+                for (i, &weight) in self.kernel.iter().enumerate() {
+                    let offset = i as isize - self.blur_radius as isize;
+                    let sample_y = (y as isize + offset).clamp(0, height as isize - 1) as usize;
+                    
+                    if let Some(color) = self.bright_buffer[sample_y * width + x] {
+                        r_sum += color.r as f32 * weight;
+                        g_sum += color.g as f32 * weight;
+                        b_sum += color.b as f32 * weight;
+                        weight_sum += weight;
+                    }
+                }
+                
+                if weight_sum > 0.0 {
+                    self.blur_buffer[y * width + x] = Some(Color::new(
+                        (r_sum / weight_sum) as u8,
+                        (g_sum / weight_sum) as u8,
+                        (b_sum / weight_sum) as u8,
+                    ));
+                } else {
+                    self.blur_buffer[y * width + x] = None;
+                }
+            }
+        }
+    }
+
+    /// Composite blurred bloom back onto original grid (additive blending)
+    fn composite_bloom(&self, grid: &mut GridBuffer) {
+        let width = grid.width();
+
+        for y in 0..grid.height() {
+            for x in 0..width {
+                let idx = y * width + x;
+
+                if let Some(bloom_color) = self.blur_buffer[idx] {
+                    let cell = grid.get_cell_mut(x, y);
+
+                    if let Some(original_color) = cell.foreground_color {
+                        // Additive blend with intensity
+                        cell.foreground_color = Some(Color::new(
+                            (original_color.r as f32 + bloom_color.r as f32 * self.intensity).min(255.0) as u8,
+                            (original_color.g as f32 + bloom_color.g as f32 * self.intensity).min(255.0) as u8,
+                            (original_color.b as f32 + bloom_color.b as f32 * self.intensity).min(255.0) as u8,
+                        ));
+                    }
+                }
+            }
+        }
     }
 }
 
 impl Effect for BloomEffect {
-    /// Apply the glow effect to the grid buffer
+    /// Apply the bloom effect to the grid buffer
     ///
-    /// This is a simplified "bloom" that works better in terminals:
-    /// 1. Find all bright pixels above threshold
-    /// 2. For each bright pixel, brighten neighboring cells in a radius
-    /// 3. Use distance-based falloff for smooth glow
+    /// This method performs a multi-pass bloom:
+    /// 1. Extract bright pixels above threshold
+    /// 2. Apply horizontal Gaussian blur
+    /// 3. Apply vertical Gaussian blur
+    /// 4. Composite blurred result back onto original (additive)
     fn apply(&mut self, grid: &mut GridBuffer, _params: &AudioParameters) {
         if !self.enabled {
             return;
@@ -170,62 +307,20 @@ impl Effect for BloomEffect {
         let width = grid.width();
         let height = grid.height();
 
-        // First pass: collect all bright pixels
-        let mut bright_pixels = Vec::new();
-        for y in 0..height {
-            for x in 0..width {
-                let cell = grid.get_cell(x, y);
-                if let Some(color) = cell.foreground_color {
-                    let brightness = color_brightness(color);
-                    if brightness >= self.threshold {
-                        bright_pixels.push((x, y, color));
-                    }
-                }
-            }
-        }
+        // Resize buffers if needed
+        self.resize_buffers(width, height);
 
-        // Second pass: apply glow around each bright pixel
-        let radius = self.blur_radius as isize;
-        for (bx, by, bright_color) in bright_pixels {
-            // Apply glow in a square radius around the bright pixel
-            for dy in -radius..=radius {
-                for dx in -radius..=radius {
-                    let x = bx as isize + dx;
-                    let y = by as isize + dy;
+        // Pass 1: Extract bright pixels above threshold
+        self.extract_bright_pixels(grid);
 
-                    // Skip out of bounds
-                    if x < 0 || y < 0 || x >= width as isize || y >= height as isize {
-                        continue;
-                    }
+        // Pass 2: Apply separable Gaussian blur (horizontal)
+        self.blur_horizontal(width, height);
 
-                    let x = x as usize;
-                    let y = y as usize;
+        // Pass 3: Apply separable Gaussian blur (vertical)
+        self.blur_vertical(width, height);
 
-                    // Calculate distance-based falloff
-                    let distance = ((dx * dx + dy * dy) as f32).sqrt();
-                    let max_distance = (radius * radius * 2) as f32;
-                    let falloff = (1.0 - (distance / max_distance)).max(0.0);
-                    let glow_strength = self.intensity * falloff;
-
-                    // Apply glow (additive blending)
-                    let cell = grid.get_cell_mut(x, y);
-                    if let Some(original_color) = cell.foreground_color {
-                        cell.foreground_color = Some(Color::new(
-                            (original_color.r as f32 + bright_color.r as f32 * glow_strength).min(255.0) as u8,
-                            (original_color.g as f32 + bright_color.g as f32 * glow_strength).min(255.0) as u8,
-                            (original_color.b as f32 + bright_color.b as f32 * glow_strength).min(255.0) as u8,
-                        ));
-                    } else {
-                        // If cell is empty, add glow directly
-                        cell.foreground_color = Some(Color::new(
-                            (bright_color.r as f32 * glow_strength).min(255.0) as u8,
-                            (bright_color.g as f32 * glow_strength).min(255.0) as u8,
-                            (bright_color.b as f32 * glow_strength).min(255.0) as u8,
-                        ));
-                    }
-                }
-            }
-        }
+        // Pass 4: Composite blurred bloom back onto original (additive)
+        self.composite_bloom(grid);
     }
 
     fn name(&self) -> &str {
