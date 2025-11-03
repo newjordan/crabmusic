@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 mod audio;
 mod config;
 mod dsp;
+mod effects;
 mod error;
 mod rendering;
 mod visualization;
@@ -20,6 +21,7 @@ use audio::{AudioCaptureDevice, AudioOutputDevice, AudioRingBuffer, CpalAudioDev
 #[cfg(windows)]
 use audio::WasapiLoopbackDevice;
 use dsp::DspProcessor;
+use effects::EffectPipeline;
 use rendering::TerminalRenderer;
 use visualization::{
     character_sets::{get_all_character_sets, get_character_set, CharacterSet, CharacterSetType},
@@ -225,6 +227,7 @@ struct Application {
     audio_output: Option<AudioOutputDevice>,
     dsp_processor: DspProcessor,
     visualizer: Box<dyn Visualizer>,
+    effect_pipeline: EffectPipeline,
     renderer: TerminalRenderer,
     #[allow(dead_code)] // Held for lifetime management
     ring_buffer: Arc<AudioRingBuffer>,
@@ -367,11 +370,19 @@ impl Application {
         let color_scheme = ColorScheme::new(ColorSchemeType::Monochrome);
         let color_scheme_index = 0;
 
+        // Initialize effect pipeline with test effects
+        let mut effect_pipeline = EffectPipeline::new();
+        // Add grid overlay effect for testing (disabled by default)
+        effect_pipeline.add_effect(Box::new(effects::grid_overlay::GridOverlayEffect::new(10)));
+        effect_pipeline.set_enabled(false); // Start with effects disabled
+        tracing::debug!("Effect pipeline initialized with GridOverlay effect (disabled)");
+
         Ok(Self {
             audio_device,
             audio_output,
             dsp_processor,
             visualizer,
+            effect_pipeline,
             renderer,
             ring_buffer,
             target_fps: config.rendering.target_fps,
@@ -509,6 +520,14 @@ impl Application {
         tracing::info!("Microphone toggled: {}", status);
     }
 
+    /// Toggle effects pipeline on/off
+    fn toggle_effects(&mut self) {
+        let new_state = !self.effect_pipeline.is_enabled();
+        self.effect_pipeline.set_enabled(new_state);
+        let status = if new_state { "ON" } else { "OFF" };
+        tracing::info!("Effects toggled: {}", status);
+    }
+
     /// Increase sensitivity by 10%
     fn increase_sensitivity(&mut self) {
         self.sensitivity_multiplier = (self.sensitivity_multiplier + 0.1).min(5.0);
@@ -626,10 +645,11 @@ impl Application {
         let scheme_type = self.color_scheme.scheme_type();
         let color_scheme_name = scheme_type.name();
         let mic_status = if self.microphone_enabled { "MIC:ON" } else { "MIC:OFF" };
+        let fx_status = if self.effect_pipeline.is_enabled() { "FX:ON" } else { "FX:OFF" };
 
         let info_text = if self.visualizer_mode == VisualizerMode::Oscilloscope {
-            format!(" {} | {} | {} | V:mode O:color G:grid F:fill T:trigger M:mic Q:quit ",
-                visualizer_name, color_scheme_name, mic_status)
+            format!(" {} | {} | {} | {} | V:mode O:color E:fx G:grid F:fill T:trigger M:mic Q:quit ",
+                visualizer_name, color_scheme_name, mic_status, fx_status)
         } else if self.visualizer_mode == VisualizerMode::Spectrum {
             let map_name = match self.spectrum_mapping { SpectrumMapping::NoteBars => "NOTES", SpectrumMapping::LogBars => "LOG" };
             if matches!(self.spectrum_mapping, SpectrumMapping::NoteBars) {
@@ -638,15 +658,15 @@ impl Application {
                     1 => ("A1-A5", 55.0, 880.0),
                     _ => ("A1-A6", 55.0, 1760.0),
                 };
-                format!(" {} | {} | {} | V:mode O:color P:peaks L:labels N:map({}) R:range({}) M:mic +/-:sens Q:quit ",
-                    visualizer_name, color_scheme_name, mic_status, map_name, range_label)
+                format!(" {} | {} | {} | {} | V:mode O:color E:fx P:peaks L:labels N:map({}) R:range({}) M:mic +/-:sens Q:quit ",
+                    visualizer_name, color_scheme_name, mic_status, fx_status, map_name, range_label)
             } else {
-                format!(" {} | {} | {} | V:mode O:color P:peaks L:labels N:map({}) M:mic +/-:sens Q:quit ",
-                    visualizer_name, color_scheme_name, mic_status, map_name)
+                format!(" {} | {} | {} | {} | V:mode O:color E:fx P:peaks L:labels N:map({}) M:mic +/-:sens Q:quit ",
+                    visualizer_name, color_scheme_name, mic_status, fx_status, map_name)
             }
         } else {
-            format!(" {} | {} | {} | V:mode O:color M:mic +/-:sens Q:quit ",
-                visualizer_name, color_scheme_name, mic_status)
+            format!(" {} | {} | {} | {} | V:mode O:color E:fx M:mic +/-:sens Q:quit ",
+                visualizer_name, color_scheme_name, mic_status, fx_status)
         };
 
 
@@ -725,6 +745,9 @@ impl Application {
                             // }
                             KeyCode::Char('o') | KeyCode::Char('O') => {
                                 self.next_color_scheme();
+                            }
+                            KeyCode::Char('e') | KeyCode::Char('E') => {
+                                self.toggle_effects();
                             }
                             KeyCode::Char('m') | KeyCode::Char('M') => {
                                 self.toggle_microphone();
@@ -837,7 +860,7 @@ impl Application {
             }
 
             // 1. Read audio samples from ring buffer (only if microphone is enabled)
-            if let Some(audio_buffer) = self.audio_device.read_samples() {
+            let audio_params = if let Some(audio_buffer) = self.audio_device.read_samples() {
                 // Debug: Log that we're receiving audio (disabled for production)
                 // if frame_count % 60 == 0 {
                 //     tracing::debug!(
@@ -858,42 +881,45 @@ impl Application {
                 // - Loopback: always process (system audio) WITHOUT amplitude squelch
                 // - Mic: process only when microphone_enabled is true (WITH squelch)
                 if self.use_loopback {
-                    let audio_params = self.dsp_processor.process(&audio_buffer);
-                    self.visualizer.update(&audio_params);
+                    self.dsp_processor.process(&audio_buffer)
                 } else if self.microphone_enabled {
                     let mut audio_params = self.dsp_processor.process(&audio_buffer);
                     const SQUELCH_THRESHOLD: f32 = 0.005; // conservative floor for mic noise
                     if audio_params.amplitude < SQUELCH_THRESHOLD {
                         audio_params = dsp::AudioParameters::default();
                     }
-                    self.visualizer.update(&audio_params);
+                    audio_params
                 } else {
                     // Mic is OFF and we're not in loopback: feed silence so visuals decay to zero
-                    let audio_params = dsp::AudioParameters::default();
-                    self.visualizer.update(&audio_params);
+                    dsp::AudioParameters::default()
                 }
             } else {
                 // No new audio available this frame: feed silence so visuals decay
-                let params = dsp::AudioParameters::default();
-                self.visualizer.update(&params);
                 // Debug: Log when no audio is available (disabled for production)
                 // if frame_count % 300 == 0 {
                 //     tracing::debug!("No audio buffer available from ring buffer");
                 // }
-            }
+                dsp::AudioParameters::default()
+            };
+
+            // 3. Update visualizer with audio parameters
+            self.visualizer.update(&audio_params);
 
             // 4. Render visualization to grid
             let (width, height) = self.renderer.dimensions();
             let mut grid = GridBuffer::new(width as usize, height as usize);
             self.visualizer.render(&mut grid);
 
-            // 5. All visualizers now use Braille rendering directly!
+            // 5. Apply post-processing effects
+            self.effect_pipeline.apply(&mut grid, &audio_params);
+
+            // 6. All visualizers now use Braille rendering directly!
             // No need to apply character set mapping - Braille gives 8× resolution
 
-            // 6. Add UI overlay (character set name and controls)
+            // 7. Add UI overlay (character set name and controls)
             self.add_ui_overlay(&mut grid);
 
-            // 7. Update terminal display
+            // 8. Update terminal display
             self.renderer
                 .render(&grid)
                 .context("Failed to render frame")?;

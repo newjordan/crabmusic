@@ -26,6 +26,7 @@
 pub mod audio;
 pub mod config;
 pub mod dsp;
+pub mod effects;
 pub mod error;
 pub mod rendering;
 pub mod visualization;
