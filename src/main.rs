@@ -25,7 +25,7 @@ use visualization::{
     character_sets::{get_all_character_sets, get_character_set, CharacterSet, CharacterSetType},
     color_schemes::{ColorScheme, ColorSchemeType},
     GridBuffer, OscilloscopeConfig, OscilloscopeVisualizer, SineWaveConfig,
-    SineWaveVisualizer, SpectrumConfig, SpectrumVisualizer, TriggerSlope, Visualizer, WaveformMode,
+    SineWaveVisualizer, SpectrumConfig, SpectrumVisualizer, SpectrumMapping, TriggerSlope, Visualizer, WaveformMode,
 };
 
 /// Global shutdown flag
@@ -230,8 +230,12 @@ struct Application {
     ring_buffer: Arc<AudioRingBuffer>,
     target_fps: u32,
     sample_rate: u32,
+    /// True if we're capturing system audio via WASAPI loopback (Windows)
+    use_loopback: bool,
     current_charset: CharacterSet,
+    #[allow(dead_code)] // Reserved for future charset cycling feature
     charset_index: usize,
+    /// When false and not using loopback, we ignore mic input for processing
     microphone_enabled: bool,
     sensitivity_multiplier: f32,
     show_labels: bool,
@@ -244,6 +248,10 @@ struct Application {
     osc_show_grid: bool,
     osc_waveform_mode: WaveformMode,
     osc_trigger_slope: TriggerSlope,
+    // Spectrum configuration state
+    spectrum_peak_hold: bool,
+    spectrum_mapping: SpectrumMapping,
+    spectrum_range_preset_index: usize,
 }
 
 impl Application {
@@ -254,9 +262,10 @@ impl Application {
             config.audio.sample_rate, config.dsp.fft_size, config.rendering.target_fps);
 
         // Create ring buffer for audio pipeline
-        // Use a reasonable default of 10 buffers if buffer_size is not available
-        let ring_buffer = Arc::new(AudioRingBuffer::new(10));
-        tracing::debug!("Ring buffer created with capacity: 10");
+        // REDUCED from 10 to 4 for lower latency - just enough to prevent dropouts
+        // With 512-sample chunks @ 44.1kHz, this is ~46ms of buffering (4 * 11.6ms)
+        let ring_buffer = Arc::new(AudioRingBuffer::new(4));
+        tracing::debug!("Ring buffer created with capacity: 4 (low-latency mode)");
 
         // Initialize audio capture with retry logic
         tracing::debug!("Initializing audio capture device...");
@@ -367,9 +376,10 @@ impl Application {
             ring_buffer,
             target_fps: config.rendering.target_fps,
             sample_rate: actual_sample_rate,
+            use_loopback,
             current_charset,
             charset_index,
-            microphone_enabled: true, // Start with microphone enabled
+            microphone_enabled: false, // Start with microphone disabled by default
             sensitivity_multiplier: 1.0, // Start at 100% sensitivity
             show_labels,
             visualizer_mode,
@@ -381,6 +391,10 @@ impl Application {
             osc_show_grid: true,
             osc_waveform_mode: WaveformMode::LineAndFill,
             osc_trigger_slope: TriggerSlope::Positive,
+            // Spectrum defaults
+            spectrum_peak_hold: true,  // Start with peaks enabled
+            spectrum_mapping: SpectrumMapping::NoteBars,
+            spectrum_range_preset_index: 1, // Default to A1–A5
         })
     }
 
@@ -466,6 +480,7 @@ impl Application {
     }
 
     /// Cycle to the next character set
+    #[allow(dead_code)] // Reserved for future charset cycling feature
     fn next_charset(&mut self) {
         let charsets = get_all_character_sets();
         self.charset_index = (self.charset_index + 1) % charsets.len();
@@ -510,7 +525,7 @@ impl Application {
 
     /// Set sensitivity to a preset value (1-9 = 0.5x to 4.5x)
     fn set_sensitivity_preset(&mut self, preset: u8) {
-        if preset >= 1 && preset <= 9 {
+        if (1..=9).contains(&preset) {
             self.sensitivity_multiplier = 0.5 * preset as f32;
             self.recreate_visualizer();
             tracing::info!("Sensitivity preset {} set to {:.1}x", preset, self.sensitivity_multiplier);
@@ -540,6 +555,17 @@ impl Application {
                 let mut config = SpectrumConfig::default();
                 config.amplitude_sensitivity *= self.sensitivity_multiplier;
                 config.show_labels = self.show_labels;
+                config.peak_hold_enabled = self.spectrum_peak_hold;
+                config.mapping = self.spectrum_mapping;
+                if matches!(self.spectrum_mapping, SpectrumMapping::NoteBars) {
+                    let (_label, min, max) = match self.spectrum_range_preset_index % 3 {
+                        0 => ("A2-A5", 110.0, 880.0),
+                        1 => ("A1-A5", 55.0, 880.0),
+                        _ => ("A1-A6", 55.0, 1760.0),
+                    };
+                    config.freq_min = min;
+                    config.freq_max = max;
+                }
                 let mut viz = SpectrumVisualizer::new(config, self.sample_rate, self.current_charset.clone());
                 viz.set_color_scheme(self.color_scheme.clone());
                 Box::new(viz)
@@ -557,6 +583,7 @@ impl Application {
     }
 
     /// Apply character set mapping and colors to the grid
+    #[allow(dead_code)] // Reserved for future charset mapping feature
     fn apply_charset_to_grid(&self, grid: &mut GridBuffer) {
         for y in 0..grid.height() {
             for x in 0..grid.width() {
@@ -601,10 +628,26 @@ impl Application {
         let info_text = if self.visualizer_mode == VisualizerMode::Oscilloscope {
             format!(" {} | {} | {} | V:mode O:color G:grid F:fill T:trigger M:mic Q:quit ",
                 visualizer_name, color_scheme_name, mic_status)
+        } else if self.visualizer_mode == VisualizerMode::Spectrum {
+            let map_name = match self.spectrum_mapping { SpectrumMapping::NoteBars => "NOTES", SpectrumMapping::LogBars => "LOG" };
+            if matches!(self.spectrum_mapping, SpectrumMapping::NoteBars) {
+                let (range_label, _min, _max) = match self.spectrum_range_preset_index % 3 {
+                    0 => ("A2-A5", 110.0, 880.0),
+                    1 => ("A1-A5", 55.0, 880.0),
+                    _ => ("A1-A6", 55.0, 1760.0),
+                };
+                format!(" {} | {} | {} | V:mode O:color P:peaks L:labels N:map({}) R:range({}) M:mic +/-:sens Q:quit ",
+                    visualizer_name, color_scheme_name, mic_status, map_name, range_label)
+            } else {
+                format!(" {} | {} | {} | V:mode O:color P:peaks L:labels N:map({}) M:mic +/-:sens Q:quit ",
+                    visualizer_name, color_scheme_name, mic_status, map_name)
+            }
         } else {
             format!(" {} | {} | {} | V:mode O:color M:mic +/-:sens Q:quit ",
                 visualizer_name, color_scheme_name, mic_status)
         };
+
+
 
         // Draw info bar at the top
         let start_x = (grid.width().saturating_sub(info_text.len())) / 2;
@@ -623,6 +666,8 @@ impl Application {
         // Start audio capture
         self.audio_device
             .start_capture()
+
+
             .context("Failed to start audio capture")?;
 
         // Start audio output (playback) if enabled
@@ -728,6 +773,26 @@ impl Application {
                                     tracing::info!("Labels toggled: {}", if self.show_labels { "ON" } else { "OFF" });
                                 }
                             }
+                            KeyCode::Char('p') | KeyCode::Char('P') => {
+                                // Toggle peak hold (Spectrum only)
+                                if self.visualizer_mode == VisualizerMode::Spectrum {
+                                    self.spectrum_peak_hold = !self.spectrum_peak_hold;
+                                    self.recreate_visualizer();
+                                    tracing::info!("Peak hold toggled: {}", if self.spectrum_peak_hold { "ON" } else { "OFF" });
+                                }
+                            }
+                            KeyCode::Char('n') | KeyCode::Char('N') => {
+                                // Toggle spectrum mapping mode (Spectrum only)
+                                if self.visualizer_mode == VisualizerMode::Spectrum {
+                                    self.spectrum_mapping = match self.spectrum_mapping {
+                                        SpectrumMapping::NoteBars => SpectrumMapping::LogBars,
+                                        SpectrumMapping::LogBars => SpectrumMapping::NoteBars,
+                                    };
+                                    self.recreate_visualizer();
+                                    let name = match self.spectrum_mapping { SpectrumMapping::NoteBars => "NOTES", SpectrumMapping::LogBars => "LOG" };
+                                    tracing::info!("Spectrum mapping toggled: {}", name);
+                                }
+                            }
                             KeyCode::Char('t') | KeyCode::Char('T') => {
                                 // Toggle trigger mode (Oscilloscope only)
                                 if self.visualizer_mode == VisualizerMode::Oscilloscope {
@@ -738,6 +803,19 @@ impl Application {
                                     };
                                     self.recreate_visualizer();
                                     tracing::info!("Toggled oscilloscope trigger mode");
+                                }
+                            }
+                            KeyCode::Char('r') | KeyCode::Char('R') => {
+                                // Cycle Spectrum note range presets (Spectrum+NoteBars only)
+                                if self.visualizer_mode == VisualizerMode::Spectrum && matches!(self.spectrum_mapping, SpectrumMapping::NoteBars) {
+                                    self.spectrum_range_preset_index = (self.spectrum_range_preset_index + 1) % 3;
+                                    self.recreate_visualizer();
+                                    let (label, _min, _max) = match self.spectrum_range_preset_index % 3 {
+                                        0 => ("A2-A5", 110.0, 880.0),
+                                        1 => ("A1-A5", 55.0, 880.0),
+                                        _ => ("A1-A6", 55.0, 1760.0),
+                                    };
+                                    tracing::info!("Spectrum note range preset: {}", label);
                                 }
                             }
                             _ => {}
@@ -758,47 +836,48 @@ impl Application {
 
             // 1. Read audio samples from ring buffer (only if microphone is enabled)
             if let Some(audio_buffer) = self.audio_device.read_samples() {
-                // Debug: Log that we're receiving audio
-                if frame_count % 60 == 0 {
-                    tracing::debug!(
-                        "Received audio buffer: {} samples, {} channels",
-                        audio_buffer.samples.len(),
-                        audio_buffer.channels
-                    );
-                }
+                // Debug: Log that we're receiving audio (disabled for production)
+                // if frame_count % 60 == 0 {
+                //     tracing::debug!(
+                //         "Received audio buffer: {} samples, {} channels",
+                //         audio_buffer.samples.len(),
+                //         audio_buffer.channels
+                //     );
+                // }
 
-                // Only process audio if microphone is enabled
+                // 1a. If microphone passthrough is enabled, write to output so you can hear it
                 if self.microphone_enabled {
-                    // 1a. Pass audio through to output (so you can hear it) if enabled
                     if let Some(ref audio_output) = self.audio_output {
                         audio_output.write_samples(&audio_buffer);
                     }
+                }
 
-                    // 2. Process audio → extract parameters
+                // 2. Process audio only when appropriate source is active
+                // - Loopback: always process (system audio) WITHOUT amplitude squelch
+                // - Mic: process only when microphone_enabled is true (WITH squelch)
+                if self.use_loopback {
                     let audio_params = self.dsp_processor.process(&audio_buffer);
-
-                    // Debug: Log audio parameters occasionally
-                    if frame_count % 60 == 0 {
-                        tracing::debug!(
-                            "Audio params - amp: {:.3}, bass: {:.3}, mid: {:.3}, treble: {:.3}, BPM: {:.1} (confidence: {:.2}), beat: {}",
-                            audio_params.amplitude,
-                            audio_params.bass,
-                            audio_params.mid,
-                            audio_params.treble,
-                            audio_params.bpm,
-                            audio_params.tempo_confidence,
-                            audio_params.beat
-                        );
+                    self.visualizer.update(&audio_params);
+                } else if self.microphone_enabled {
+                    let mut audio_params = self.dsp_processor.process(&audio_buffer);
+                    const SQUELCH_THRESHOLD: f32 = 0.005; // conservative floor for mic noise
+                    if audio_params.amplitude < SQUELCH_THRESHOLD {
+                        audio_params = dsp::AudioParameters::default();
                     }
-
-                    // 3. Update visualizer with audio parameters
+                    self.visualizer.update(&audio_params);
+                } else {
+                    // Mic is OFF and we're not in loopback: feed silence so visuals decay to zero
+                    let audio_params = dsp::AudioParameters::default();
                     self.visualizer.update(&audio_params);
                 }
             } else {
-                // Debug: Log when no audio is available
-                if frame_count % 300 == 0 {
-                    tracing::debug!("No audio buffer available from ring buffer");
-                }
+                // No new audio available this frame: feed silence so visuals decay
+                let params = dsp::AudioParameters::default();
+                self.visualizer.update(&params);
+                // Debug: Log when no audio is available (disabled for production)
+                // if frame_count % 300 == 0 {
+                //     tracing::debug!("No audio buffer available from ring buffer");
+                // }
             }
 
             // 4. Render visualization to grid
@@ -832,7 +911,7 @@ impl Application {
                 let avg_frame_time = total_frame_time / frame_count;
                 let target_frame_time = frame_duration;
 
-                // Log performance metrics
+                // Log performance metrics (only warnings, not regular debug)
                 if actual_fps < self.target_fps * 9 / 10 {
                     // Warn if FPS drops below 90% of target
                     tracing::warn!(
@@ -843,16 +922,18 @@ impl Application {
                         min_frame_time.as_secs_f32() * 1000.0,
                         max_frame_time.as_secs_f32() * 1000.0
                     );
-                } else {
-                    tracing::debug!(
-                        "Performance: FPS={} (target={}), avg={:.2}ms, min={:.2}ms, max={:.2}ms",
-                        actual_fps,
-                        self.target_fps,
-                        avg_frame_time.as_secs_f32() * 1000.0,
-                        min_frame_time.as_secs_f32() * 1000.0,
-                        max_frame_time.as_secs_f32() * 1000.0
-                    );
                 }
+                // Disabled regular performance debug logging for production
+                // else {
+                //     tracing::debug!(
+                //         "Performance: FPS={} (target={}), avg={:.2}ms, min={:.2}ms, max={:.2}ms",
+                //         actual_fps,
+                //         self.target_fps,
+                //         avg_frame_time.as_secs_f32() * 1000.0,
+                //         min_frame_time.as_secs_f32() * 1000.0,
+                //         max_frame_time.as_secs_f32() * 1000.0
+                //     );
+                // }
 
                 // Warn if frame time exceeds target significantly
                 if max_frame_time > target_frame_time * 2 {
@@ -1018,6 +1099,8 @@ fn init_logging(verbose: bool, debug: bool) -> Result<()> {
     };
 
     // Configure logging format
+    // Write to stderr instead of stdout to avoid interference with terminal UI
+    // and disable ANSI codes when in alternate screen mode
     fmt()
         .with_env_filter(filter)
         .with_target(false)
@@ -1025,6 +1108,8 @@ fn init_logging(verbose: bool, debug: bool) -> Result<()> {
         .with_file(false)
         .with_line_number(false)
         .with_timer(fmt::time::uptime())  // Show time since start
+        .with_writer(std::io::stderr)  // Write to stderr instead of stdout
+        .with_ansi(false)  // Disable ANSI codes to avoid terminal conflicts
         .with_level(true)
         .init();
 

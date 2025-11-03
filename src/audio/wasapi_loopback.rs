@@ -1,8 +1,6 @@
 // Windows WASAPI loopback capture for system audio
 // This module provides native Windows loopback capture without virtual cables
 
-#![cfg(windows)]
-
 use crate::audio::{AudioBuffer, AudioCaptureDevice, AudioConfig, AudioRingBuffer};
 use crate::error::AudioError;
 use std::collections::VecDeque;
@@ -186,7 +184,9 @@ impl WasapiLoopbackDevice {
 
         // Buffer for accumulating samples before chunking
         // This persists across loop iterations to avoid losing partial chunks
-        const CHUNK_SIZE: usize = 2048;
+        // REDUCED from 2048 to 512 for lower latency (11.6ms @ 44.1kHz vs 46.4ms)
+        // This gives much crisper response to transients and high notes
+        const CHUNK_SIZE: usize = 512;
         let mut all_samples: Vec<f32> = Vec::with_capacity(CHUNK_SIZE * 2);
 
         // Capture loop
@@ -233,12 +233,15 @@ impl WasapiLoopbackDevice {
                     unsafe {
                         DEBUG_COUNTER += 1;
                         if DEBUG_COUNTER % 100 == 0 {
-                            let max_amp = chunk.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
                             let rms = (chunk.iter().map(|s| s * s).sum::<f32>() / chunk.len() as f32).sqrt();
+                            let max_amp = chunk.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
                             debug!("Loopback audio - max: {:.4}, rms: {:.4}, samples: {}", max_amp, rms, chunk.len());
                         }
                     }
 
+                    // NO NOISE GATE: FFT normalization handles showing patterns regardless of volume
+                    // The visualizations will show the frequency patterns even at low system volume
+                    // because the spectrum is normalized to the peak frequency in each frame
                     let buffer = AudioBuffer::with_samples(chunk, sample_rate, 1);
                     if !ring_buffer.push(buffer) {
                         debug!("Ring buffer full, dropped {} samples", CHUNK_SIZE);

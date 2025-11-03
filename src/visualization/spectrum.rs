@@ -4,10 +4,20 @@
 use super::{character_sets::CharacterSet, lerp, GridBuffer, Visualizer};
 use crate::dsp::AudioParameters;
 
+/// Mapping mode for spectrum bars
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SpectrumMapping {
+    /// Traditional logarithmic bands between freq_min..freq_max
+    LogBars,
+    /// Bars aligned to equal-tempered musical notes (anchored at A4=440 Hz)
+    #[default]
+    NoteBars,
+}
+
 /// Configuration for spectrum analyzer visualizer
 #[derive(Debug, Clone)]
 pub struct SpectrumConfig {
-    /// Number of frequency bars to display
+    /// Number of frequency bars to display (ignored in NoteBars mode; derived from note range)
     pub bar_count: usize,
     /// Minimum frequency to display (Hz)
     pub freq_min: f32,
@@ -25,20 +35,23 @@ pub struct SpectrumConfig {
     pub peak_decay_rate: f32,
     /// Show frequency labels for debugging/calibration
     pub show_labels: bool,
+    /// Bar frequency mapping mode
+    pub mapping: SpectrumMapping,
 }
 
 impl Default for SpectrumConfig {
     fn default() -> Self {
         Self {
-            bar_count: 32,
+            bar_count: 128,  // Default; NoteBars mode will derive from note range
             freq_min: 20.0,
             freq_max: 20000.0,
-            smoothing_factor: 0.0, // NO SMOOTHING for instant response to drums/beats
-            amplitude_sensitivity: 2.5, // Boosted slightly to compensate
-            bar_spacing: 0,
-            peak_hold_enabled: true,
-            peak_decay_rate: 0.05, // Faster decay to match no smoothing
+            smoothing_factor: 0.15, // Small amount of smoothing to reduce jitter
+            amplitude_sensitivity: 2.5, // Sensitivity multiplier
+            bar_spacing: 0,  // No spacing between bars for continuous spectrum
+            peak_hold_enabled: false, // OFF by default in NoteBars for cleaner look
+            peak_decay_rate: 0.02, // Gravity-like falling speed for peaks
             show_labels: false,
+            mapping: SpectrumMapping::NoteBars,
         }
     }
 }
@@ -85,10 +98,11 @@ impl SpectrumConfig {
 /// # Examples
 ///
 /// ```
-/// use crabmusic::visualization::{SpectrumVisualizer, SpectrumConfig, Visualizer, GridBuffer};
+/// use crabmusic::visualization::{SpectrumVisualizer, SpectrumConfig, Visualizer, GridBuffer, character_sets::{get_character_set, CharacterSetType}};
 /// use crabmusic::dsp::AudioParameters;
 ///
-/// let mut viz = SpectrumVisualizer::new(SpectrumConfig::default(), 44100);
+/// let charset = get_character_set(CharacterSetType::Blocks);
+/// let mut viz = SpectrumVisualizer::new(SpectrumConfig::default(), 44100, charset);
 /// let mut grid = GridBuffer::new(80, 24);
 /// let params = AudioParameters::default();
 ///
@@ -100,10 +114,14 @@ pub struct SpectrumVisualizer {
     bar_heights: Vec<f32>,
     /// Peak hold values for each bar
     peak_heights: Vec<f32>,
+    /// Peak velocities for gravity effect (how fast they're falling)
+    peak_velocities: Vec<f32>,
     /// Configuration
     config: SpectrumConfig,
     /// Sample rate (needed for frequency mapping)
     sample_rate: u32,
+    /// Precomputed centers for NoteBars mapping (Hz)
+    note_centers: Vec<f32>,
     /// Beat flash effect (0.0-1.0, decays over time)
     beat_flash: f32,
     /// Character set for rendering (smooth gradients)
@@ -125,12 +143,13 @@ impl SpectrumVisualizer {
     /// # Examples
     ///
     /// ```
-    /// use crabmusic::visualization::{SpectrumVisualizer, SpectrumConfig, Visualizer};
+    /// use crabmusic::visualization::{SpectrumVisualizer, SpectrumConfig, Visualizer, character_sets::{get_character_set, CharacterSetType}};
     ///
-    /// let viz = SpectrumVisualizer::new(SpectrumConfig::default(), 44100);
+    /// let charset = get_character_set(CharacterSetType::Blocks);
+    /// let viz = SpectrumVisualizer::new(SpectrumConfig::default(), 44100, charset);
     /// assert_eq!(viz.name(), "Spectrum Analyzer");
     /// ```
-    pub fn new(config: SpectrumConfig, sample_rate: u32, charset: CharacterSet) -> Self {
+    pub fn new(mut config: SpectrumConfig, sample_rate: u32, charset: CharacterSet) -> Self {
         // Validate configuration
         assert!(
             config.is_valid(),
@@ -138,13 +157,27 @@ impl SpectrumVisualizer {
         );
         assert!(sample_rate > 0, "Sample rate must be > 0");
 
+        // Precompute note centers when using NoteBars mapping and override bar_count accordingly
+        let note_centers = if matches!(config.mapping, SpectrumMapping::NoteBars) {
+            let centers = Self::generate_note_centers(config.freq_min, config.freq_max);
+            if !centers.is_empty() {
+                config.bar_count = centers.len();
+            }
+            centers
+        } else {
+            Vec::new()
+        };
+
         let bar_heights = vec![0.0; config.bar_count];
         let peak_heights = vec![0.0; config.bar_count];
+        let peak_velocities = vec![0.0; config.bar_count];
         Self {
             bar_heights,
             peak_heights,
+            peak_velocities,
             config,
             sample_rate,
+            note_centers,
             beat_flash: 0.0,
             charset,
             color_scheme: super::color_schemes::ColorScheme::new(super::color_schemes::ColorSchemeType::Monochrome),
@@ -153,6 +186,25 @@ impl SpectrumVisualizer {
 
     /// Update the character set for rendering
     ///
+    /// Generate equal-tempered note centers (A4=440 Hz) within the given frequency range
+    fn generate_note_centers(freq_min: f32, freq_max: f32) -> Vec<f32> {
+        if !(freq_max > freq_min && freq_min > 0.0) {
+            return Vec::new();
+        }
+        let a4 = 440.0_f32;
+        // k is number of semitones relative to A4
+        let k_min = (12.0 * (freq_min / a4).log2()).ceil() as i32;
+        let k_max = (12.0 * (freq_max / a4).log2()).floor() as i32;
+        let mut centers = Vec::new();
+        for k in k_min..=k_max {
+            let f = a4 * 2f32.powf(k as f32 / 12.0);
+            if f >= freq_min && f <= freq_max {
+                centers.push(f);
+            }
+        }
+        centers
+    }
+
     /// Allows changing the character set at runtime for different visual styles
     pub fn set_charset(&mut self, charset: CharacterSet) {
         self.charset = charset;
@@ -163,6 +215,24 @@ impl SpectrumVisualizer {
     /// Allows changing the color scheme at runtime for different visual styles
     pub fn set_color_scheme(&mut self, color_scheme: super::color_schemes::ColorScheme) {
         self.color_scheme = color_scheme;
+    }
+
+    /// Change the bar mapping mode at runtime and reconfigure internal buffers
+    pub fn set_mapping(&mut self, mapping: SpectrumMapping) {
+        if self.config.mapping == mapping { return; }
+        self.config.mapping = mapping;
+        if matches!(self.config.mapping, SpectrumMapping::NoteBars) {
+            self.note_centers = Self::generate_note_centers(self.config.freq_min, self.config.freq_max);
+            if !self.note_centers.is_empty() {
+                self.config.bar_count = self.note_centers.len();
+            }
+        } else {
+            self.note_centers.clear();
+        }
+        // Resize internal buffers to match new bar_count
+        self.bar_heights.resize(self.config.bar_count, 0.0);
+        self.peak_heights.resize(self.config.bar_count, 0.0);
+        self.peak_velocities.resize(self.config.bar_count, 0.0);
     }
 
     /// Map bar index to frequency range using logarithmic scaling
@@ -185,22 +255,42 @@ impl SpectrumVisualizer {
     fn bar_to_frequency_range(&self, bar_index: usize) -> (f32, f32) {
         let f_min = self.config.freq_min;
         let f_max = self.config.freq_max;
-        let n = self.config.bar_count as f32;
-        let i = bar_index as f32;
+
+        // Note-aligned bars: use semitone centers and half-step geometric boundaries
+        if matches!(self.config.mapping, SpectrumMapping::NoteBars) && !self.note_centers.is_empty() {
+            let idx = bar_index.min(self.note_centers.len().saturating_sub(1));
+            let center = self.note_centers[idx];
+            let r = 2f32.powf(1.0 / 12.0);
+
+            let lower = if idx > 0 {
+                (self.note_centers[idx - 1] * center).sqrt()
+            } else {
+                center / r.sqrt()
+            };
+            let upper = if idx + 1 < self.note_centers.len() {
+                (self.note_centers[idx + 1] * center).sqrt()
+            } else {
+                center * r.sqrt()
+            };
+
+            let lo = lower.max(f_min);
+            let hi = upper.min(f_max);
+            return (lo, hi.max(lo + 1.0));
+        }
 
         // Logarithmic scaling: f(i) = f_min * (f_max/f_min)^(i/n)
+        let n = self.config.bar_count as f32;
+        let i = bar_index as f32;
         let ratio = f_max / f_min;
         let freq_start = f_min * ratio.powf(i / n);
         let freq_end = f_min * ratio.powf((i + 1.0) / n);
-
         (freq_start, freq_end)
     }
 
     /// Extract bar height from FFT spectrum
     ///
     /// Aggregates FFT bins within the bar's frequency range to compute
-    /// the bar's visual height. Uses averaging to prevent single bins
-    /// from dominating the display.
+    /// the bar's visual height. Uses RMS averaging for better perceptual accuracy.
     ///
     /// # Arguments
     /// * `spectrum` - FFT magnitude spectrum from AudioParameters
@@ -232,31 +322,53 @@ impl SpectrumVisualizer {
         let bin_max = (freq_max * window_size as f32 / self.sample_rate as f32).floor() as usize;
 
         // Clamp to valid range
-        let bin_min = bin_min.min(spectrum.len());
-        let bin_max = bin_max.min(spectrum.len());
+        let bin_min = bin_min.min(spectrum.len().saturating_sub(1));
+        let bin_max = bin_max.min(spectrum.len()).max(bin_min + 1); // Ensure at least 1 bin
 
-        // Handle edge cases
-        if bin_min >= bin_max {
+        // Use RMS (Root Mean Square) for better perceptual accuracy
+        let mut sum_squares = 0.0;
+        let mut count = 0;
+
+        for bin_idx in bin_min..bin_max {
+            if bin_idx < spectrum.len() {
+                let magnitude = spectrum[bin_idx];
+                sum_squares += magnitude * magnitude;
+                count += 1;
+            }
+        }
+
+        if count == 0 {
             return 0.0;
         }
 
-        // Average magnitude in this frequency range
-        let sum: f32 = spectrum[bin_min..bin_max].iter().sum();
-        let count = (bin_max - bin_min) as f32;
+        // Calculate RMS and apply sensitivity
+        let rms = (sum_squares / count as f32).sqrt();
 
-        if count > 0.0 {
-            // Apply sensitivity and clamp to reasonable range
-            let raw_height = (sum / count) * self.config.amplitude_sensitivity;
-            raw_height.min(2.0) // Clamp to prevent extreme values
+        // In NoteBars mode, keep it simple and responsive: weighted RMS with linear scaling
+        if matches!(self.config.mapping, SpectrumMapping::NoteBars) {
+            let height = rms * self.config.amplitude_sensitivity;
+            return height.min(1.0);
+        }
+
+        // LogBars mode: apply gentle log compression
+        // NO NOISE GATE: Spectrum is already normalized, so patterns show regardless of volume
+        let raw_height = rms * self.config.amplitude_sensitivity;
+        let log_height = if raw_height > 0.02 {
+            let adjusted_height = (raw_height - 0.02).max(0.0);
+            (1.0 + adjusted_height).ln() / (1.0_f32 + 2.0_f32).ln()
         } else {
             0.0
+        };
+        if log_height < 0.05 {
+            0.0
+        } else {
+            log_height.min(1.0)
         }
     }
 
-    /// Render frequency range labels for debugging/calibration
-    ///
-    /// Displays frequency ranges and band names at the bottom of the visualization
-    /// to help understand which bars correspond to which frequencies.
+    /// Render frequency or note labels at the bottom
+    /// - In LogBars mode: render broad frequency band labels + a few frequency ticks
+    /// - In NoteBars mode: render musical note labels (A, A#, B, ...) with octave numbers
     fn render_labels(&self, grid: &mut GridBuffer) {
         let width = grid.width();
         let height = grid.height();
@@ -265,7 +377,54 @@ impl SpectrumVisualizer {
             return; // Need at least 3 lines for labels
         }
 
-        // Define frequency bands (professional audio ranges)
+        // If in NoteBars mode, draw musical note labels spaced to avoid overlap
+        if matches!(self.config.mapping, SpectrumMapping::NoteBars) && !self.note_centers.is_empty() {
+            let label_y = height - 2;
+            let bar_width = width / self.config.bar_count.max(1);
+            if bar_width < 2 {
+                return; // Not enough horizontal space to draw note labels
+            }
+
+            // Approximate how many labels can fit (3 chars per label average: e.g., "A#4")
+            let min_chars_per_label = 3;
+            let max_labels = (width / min_chars_per_label).max(1);
+            let step = ((self.config.bar_count as f32) / (max_labels as f32)).ceil() as usize;
+            let step = step.max(1);
+
+            // Helper to build note label from frequency
+            let note_label = |f: f32| -> String {
+                let a4 = 440.0_f32;
+                let n = (12.0 * (f / a4).log2()).round() as i32; // semitone offset from A4
+                let midi = 69 + n; // MIDI note number
+                let names = [
+                    "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+                ];
+                let name = names[(midi.rem_euclid(12)) as usize];
+                let octave = (midi / 12) - 1;
+                format!("{}{}", name, octave)
+            };
+
+            // Draw notes at step-intervals
+            let mut idx = 0usize;
+            while idx < self.config.bar_count {
+                let f = if idx < self.note_centers.len() { self.note_centers[idx] } else { 0.0 };
+                if f > 0.0 {
+                    let label = note_label(f);
+                    let center_x = (idx * bar_width) + (bar_width / 2);
+                    let start_x = center_x.saturating_sub(label.len() / 2);
+                    for (i, ch) in label.chars().enumerate() {
+                        let x = start_x + i;
+                        if x < width {
+                            grid.set_cell_with_color(x, label_y, ch, super::Color::new(200, 200, 200));
+                        }
+                    }
+                }
+                idx += step;
+            }
+            return;
+        }
+
+        // LogBars mode: render broad frequency band labels
         let bands = [
             (20.0, 60.0, "SUB", super::Color::new(80, 20, 20)),      // Sub-bass
             (60.0, 250.0, "BASS", super::Color::new(255, 50, 0)),    // Bass
@@ -353,26 +512,80 @@ impl SpectrumVisualizer {
 
 impl Visualizer for SpectrumVisualizer {
     fn update(&mut self, params: &AudioParameters) {
+        // Debug: Log spectrum data periodically (disabled for production)
+        // static mut FRAME_COUNTER: u32 = 0;
+        // unsafe {
+        //     FRAME_COUNTER += 1;
+        //     if FRAME_COUNTER % 60 == 0 {
+        //         let max_spectrum = params.spectrum.iter().cloned().fold(0.0f32, f32::max);
+        //         let avg_spectrum = if params.spectrum.len() > 0 {
+        //             params.spectrum.iter().sum::<f32>() / params.spectrum.len() as f32
+        //         } else {
+        //             0.0
+        //         };
+
+        //         // Sample first 5 bars to see what they're getting
+        //         let bar0 = self.extract_bar_from_spectrum(&params.spectrum, 0);
+        //         let bar10 = self.extract_bar_from_spectrum(&params.spectrum, 10);
+        //         let bar20 = self.extract_bar_from_spectrum(&params.spectrum, 20);
+        //         let bar30 = self.extract_bar_from_spectrum(&params.spectrum, 30);
+
+        //         tracing::info!("🎵 SPECTRUM DEBUG:");
+        //         tracing::info!("  Max: {:.4}, Avg: {:.6}, Amplitude: {:.4}, Len: {}",
+        //             max_spectrum, avg_spectrum, params.amplitude, params.spectrum.len());
+        //         tracing::info!("  Bars: [0]={:.3} [10]={:.3} [20]={:.3} [30]={:.3}",
+        //             bar0, bar10, bar20, bar30);
+        //     }
+        // }
+
         // Extract bar heights from real FFT spectrum
         for i in 0..self.config.bar_count {
             let target_height = self.extract_bar_from_spectrum(&params.spectrum, i);
 
-            // Apply smoothing to prevent jitter
-            self.bar_heights[i] = lerp(
-                self.bar_heights[i],
-                target_height.min(1.0),
-                self.config.smoothing_factor,
-            );
+            // NO minimum floor - let quiet bars be quiet!
+            // This way we can see the actual spectrum shape
 
-            // Update peak hold
+            // Apply smoothing to prevent jitter
+            // NOTE: smoothing_factor of 0.0 = NO smoothing (instant update)
+            //       smoothing_factor of 1.0 = full smoothing (slow update)
+            if self.config.smoothing_factor == 0.0 {
+                // No smoothing - instant update!
+                self.bar_heights[i] = target_height.min(1.0);
+            } else {
+                // With smoothing - gradual transition
+                // Use (1.0 - smoothing) as the lerp factor so 0.0 = instant, 1.0 = no change
+                self.bar_heights[i] = lerp(
+                    self.bar_heights[i],
+                    target_height.min(1.0),
+                    1.0 - self.config.smoothing_factor,
+                );
+            }
+
+            // Update peak hold with gravity physics
             if self.config.peak_hold_enabled {
-                if self.bar_heights[i] > self.peak_heights[i] {
-                    // New peak detected
+                // Only update peaks if the bar height is significant (not noise)
+                const PEAK_THRESHOLD: f32 = 0.1;  // Don't track peaks below 10% height
+
+                if self.bar_heights[i] > self.peak_heights[i] && self.bar_heights[i] > PEAK_THRESHOLD {
+                    // New peak detected - reset velocity
                     self.peak_heights[i] = self.bar_heights[i];
+                    self.peak_velocities[i] = 0.0;  // Stop falling when new peak hit
                 } else {
-                    // Decay peak slowly
-                    self.peak_heights[i] =
-                        (self.peak_heights[i] - self.config.peak_decay_rate).max(0.0);
+                    // Apply gravity acceleration for natural falling effect
+                    // Gravity constant - adjust for desired fall speed
+                    let gravity = 0.001; // Acceleration due to "gravity"
+
+                    // Update velocity (accelerate downward)
+                    self.peak_velocities[i] += gravity;
+
+                    // Update position based on velocity
+                    self.peak_heights[i] = (self.peak_heights[i] - self.peak_velocities[i]).max(0.0);
+
+                    // If peak reaches bottom or falls below threshold, reset
+                    if self.peak_heights[i] <= PEAK_THRESHOLD {
+                        self.peak_heights[i] = 0.0;
+                        self.peak_velocities[i] = 0.0;
+                    }
                 }
             }
         }
@@ -392,14 +605,24 @@ impl Visualizer for SpectrumVisualizer {
         let width = grid.width();
         let height = grid.height();
 
+        // Reserve space at bottom for labels if enabled
+        let viz_height = if self.config.show_labels && height > 3 {
+            height - 3  // Reserve 3 rows for labels
+        } else {
+            height
+        };
+
         // Use HIGH-RESOLUTION Braille rendering (same as oscilloscope!)
-        let mut braille = super::BrailleGrid::new(width, height);
+        let mut braille = super::BrailleGrid::new(width, viz_height);
         let dot_width = braille.dot_width();   // 2× width in dots
         let dot_height = braille.dot_height(); // 4× height in dots
 
         // Calculate bar width in dot space (including spacing)
-        let bar_width_with_spacing = dot_width / self.config.bar_count;
-        let bar_width = bar_width_with_spacing.saturating_sub(self.config.bar_spacing * 2).max(1);
+        // With 64 bars, we want them to be narrow to see the frequency distribution clearly
+        let total_spacing = self.config.bar_spacing * (self.config.bar_count - 1);
+        let available_width = dot_width.saturating_sub(total_spacing);
+        let bar_width = (available_width / self.config.bar_count).max(1);
+        let bar_width_with_spacing = bar_width + self.config.bar_spacing;
 
         // Render each bar in high-resolution dot space
         for bar_idx in 0..self.config.bar_count {
@@ -469,18 +692,32 @@ impl Visualizer for SpectrumVisualizer {
                     braille.set_dot_with_color(dot_x, dot_y, gradient_color);
                 }
 
-                // Draw peak indicator (single dot line at peak height)
-                if self.config.peak_hold_enabled && self.peak_heights[bar_idx] > 0.05 {
-                    if peak_dot_y < dot_height {
-                        let peak_color = super::Color::new(255, 255, 100); // Bright yellow peak
-                        braille.set_dot_with_color(dot_x, peak_dot_y, peak_color);
+                // Draw peak indicator as a bright cap at peak height
+                if self.config.peak_hold_enabled && self.peak_heights[bar_idx] > 0.01
+                    && peak_dot_y < dot_height {
+                    // Create a more visible peak cap with gradient
+                    let peak_intensity = self.peak_heights[bar_idx];
+
+                    // Main peak cap - bright white/yellow that fades as it falls
+                    let brightness = (peak_intensity * 255.0).min(255.0) as u8;
+                    let peak_color = super::Color::new(
+                        255,  // Red stays bright
+                        255,  // Green stays bright
+                        (brightness as f32 * 0.6) as u8  // Blue fades faster for yellow->red effect
+                    );
+
+                    // Draw the peak cap (2 dots thick for better visibility)
+                    braille.set_dot_with_color(dot_x, peak_dot_y, peak_color);
+                    if peak_dot_y > 0 {
+                        // Add a second dot above for thickness
+                        braille.set_dot_with_color(dot_x, peak_dot_y.saturating_sub(1), peak_color);
                     }
                 }
             }
         }
 
-        // Convert Braille grid back to regular grid
-        for cell_y in 0..height {
+        // Convert Braille grid back to regular grid (only visualization area)
+        for cell_y in 0..viz_height {
             for cell_x in 0..width {
                 let ch = braille.get_char(cell_x, cell_y);
                 if ch != '⠀' {
@@ -512,20 +749,20 @@ mod tests {
     #[test]
     fn test_spectrum_creation() {
         let viz = SpectrumVisualizer::new(
-            SpectrumConfig::default(),
+            SpectrumConfig { mapping: SpectrumMapping::LogBars, ..Default::default() },
             44100,
             crate::visualization::character_sets::get_character_set(
                 crate::visualization::character_sets::CharacterSetType::Blocks
             ),
         );
         assert_eq!(viz.name(), "Spectrum Analyzer");
-        assert_eq!(viz.bar_heights.len(), 32);
-        assert_eq!(viz.peak_heights.len(), 32);
+        assert_eq!(viz.bar_heights.len(), 128);
+        assert_eq!(viz.peak_heights.len(), 128);
     }
 
     #[test]
     fn test_logarithmic_frequency_mapping() {
-        let config = SpectrumConfig::default();
+        let config = SpectrumConfig { mapping: SpectrumMapping::LogBars, ..Default::default() };
         let viz = SpectrumVisualizer::new(
             config,
             44100,
@@ -539,7 +776,8 @@ mod tests {
         assert!((f_min - 20.0).abs() < 1.0);
 
         // Last bar should end at freq_max
-        let (_f_min, f_max) = viz.bar_to_frequency_range(31);
+        let last_bar_idx = viz.config.bar_count - 1;
+        let (_f_min, f_max) = viz.bar_to_frequency_range(last_bar_idx);
         assert!((f_max - 20000.0).abs() < 100.0);
 
         // Middle bars should be logarithmically spaced
@@ -555,7 +793,7 @@ mod tests {
 
     #[test]
     fn test_extract_bar_from_spectrum() {
-        let config = SpectrumConfig::default();
+        let config = SpectrumConfig { mapping: SpectrumMapping::LogBars, ..Default::default() };
         let viz = SpectrumVisualizer::new(
             config,
             44100,
@@ -573,7 +811,7 @@ mod tests {
         let mut max_bar = 0;
         let mut max_height = 0.0;
 
-        for i in 0..32 {
+        for i in 0..viz.config.bar_count {
             let height = viz.extract_bar_from_spectrum(&spectrum, i);
             if height > max_height {
                 max_height = height;
@@ -602,8 +840,10 @@ mod tests {
         );
 
         // Create params with high energy
-        let mut params = AudioParameters::default();
-        params.spectrum = vec![1.0; 1024];
+        let mut params = AudioParameters {
+            spectrum: vec![1.0; 1024],
+            ..Default::default()
+        };
 
         viz.update(&params);
         let peak_after_high = viz.peak_heights[0];
@@ -633,8 +873,10 @@ mod tests {
         );
 
         // Sudden change in spectrum
-        let mut params = AudioParameters::default();
-        params.spectrum = vec![0.0; 1024];
+        let mut params = AudioParameters {
+            spectrum: vec![0.0; 1024],
+            ..Default::default()
+        };
         viz.update(&params);
 
         params.spectrum = vec![1.0; 1024];
@@ -654,8 +896,10 @@ mod tests {
                 crate::visualization::character_sets::CharacterSetType::Blocks
             ),
         );
-        let mut params = AudioParameters::default();
-        params.spectrum = vec![0.5; 1024];
+        let params = AudioParameters {
+            spectrum: vec![0.5; 1024],
+            ..Default::default()
+        };
 
         viz.update(&params);
 
@@ -677,8 +921,10 @@ mod tests {
         );
         let mut grid = GridBuffer::new(40, 20);
 
-        let mut params = AudioParameters::default();
-        params.spectrum = vec![0.5; 1024];
+        let params = AudioParameters {
+            spectrum: vec![0.5; 1024],
+            ..Default::default()
+        };
 
         viz.update(&params);
         viz.render(&mut grid);

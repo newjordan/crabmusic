@@ -166,8 +166,12 @@ pub struct RenderingConfig {
 fn default_sample_rate() -> u32 { 44100 }
 fn default_channels() -> u16 { 2 }
 fn default_buffer_capacity() -> usize { 8192 }
-fn default_fft_size() -> usize { 2048 }
-fn default_smoothing() -> f32 { 0.1 }
+// REDUCED from 2048 to 1024 for lower latency (23ms @ 44.1kHz vs 46ms)
+// Still provides good frequency resolution: 44100/1024 = 43 Hz per bin
+fn default_fft_size() -> usize { 1024 }
+// REDUCED from 0.1 to 0.05 for crisper response to transients
+// Lower smoothing = faster visual response to audio changes
+fn default_smoothing() -> f32 { 0.05 }
 fn default_bass_range() -> (f32, f32) { (20.0, 250.0) }
 fn default_mid_range() -> (f32, f32) { (250.0, 4000.0) }
 fn default_treble_range() -> (f32, f32) { (4000.0, 20000.0) }
@@ -636,8 +640,8 @@ mod tests {
     #[test]
     fn test_default_dsp_config() {
         let config = DspConfig::default();
-        assert_eq!(config.fft_size, 2048);
-        assert_eq!(config.smoothing, 0.1);
+        assert_eq!(config.fft_size, 1024);  // Updated for low-latency mode
+        assert_eq!(config.smoothing, 0.05);  // Updated for crisper response
         assert_eq!(config.bass_range, (20.0, 250.0));
         assert_eq!(config.mid_range, (250.0, 4000.0));
         assert_eq!(config.treble_range, (4000.0, 20000.0));

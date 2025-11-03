@@ -12,7 +12,7 @@ mod oscilloscope;
 
 // Re-export visualizers for external use
 pub use sine_wave::{SineWaveConfig, SineWaveVisualizer};
-pub use spectrum::{SpectrumConfig, SpectrumVisualizer};
+pub use spectrum::{SpectrumConfig, SpectrumVisualizer, SpectrumMapping};
 pub use oscilloscope::{OscilloscopeConfig, OscilloscopeVisualizer, TriggerSlope, WaveformMode};
 pub use braille::BrailleGrid;
 
@@ -429,7 +429,7 @@ impl Color {
     }
 
     /// Convert to ratatui Color
-    pub fn to_ratatui_color(&self) -> ratatui::style::Color {
+    pub fn to_ratatui_color(self) -> ratatui::style::Color {
         ratatui::style::Color::Rgb(self.r, self.g, self.b)
     }
 }
@@ -606,38 +606,53 @@ mod tests {
     // Coverage algorithm tests
     #[test]
     fn test_character_selection_empty() {
-        assert_eq!(select_character_for_coverage(0.0), ' ');
-        assert_eq!(select_character_for_coverage(0.1), ' ');
-        assert_eq!(select_character_for_coverage(0.24), ' ');
+        use crate::visualization::character_sets::{get_character_set, CharacterSetType};
+        let charset = get_character_set(CharacterSetType::Shading);
+        // Shading set: [' ', '░', '▒', '▓', '█', '▀', '▄', '▌', '▐'] (9 chars, indices 0-8)
+        assert_eq!(charset.get_char(0.0), ' ');  // index 0
+        assert_eq!(charset.get_char(0.05), ' '); // index 0.4 → 0
     }
 
     #[test]
     fn test_character_selection_light() {
-        assert_eq!(select_character_for_coverage(0.25), '░');
-        assert_eq!(select_character_for_coverage(0.3), '░');
-        assert_eq!(select_character_for_coverage(0.49), '░');
+        use crate::visualization::character_sets::{get_character_set, CharacterSetType};
+        let charset = get_character_set(CharacterSetType::Shading);
+        // Shading set: [' ', '░', '▒', '▓', '█', '▀', '▄', '▌', '▐']
+        assert_eq!(charset.get_char(0.125), '░'); // index 1.0 → 1
+        assert_eq!(charset.get_char(0.15), '░');  // index 1.2 → 1
     }
 
     #[test]
     fn test_character_selection_medium() {
-        assert_eq!(select_character_for_coverage(0.50), '▒');
-        assert_eq!(select_character_for_coverage(0.6), '▒');
-        assert_eq!(select_character_for_coverage(0.74), '▒');
+        use crate::visualization::character_sets::{get_character_set, CharacterSetType};
+        let charset = get_character_set(CharacterSetType::Shading);
+        // Shading set: [' ', '░', '▒', '▓', '█', '▀', '▄', '▌', '▐'] (9 chars, indices 0-8)
+        assert_eq!(charset.get_char(0.50), '█');  // 0.50 * 8 = 4.0 → rounds to 4 → '█'
+        assert_eq!(charset.get_char(0.55), '█');  // 0.55 * 8 = 4.4 → rounds to 4 → '█'
+        assert_eq!(charset.get_char(0.625), '▀'); // 0.625 * 8 = 5.0 → rounds to 5 → '▀'
     }
 
     #[test]
     fn test_character_selection_dark() {
-        assert_eq!(select_character_for_coverage(0.75), '▓');
-        assert_eq!(select_character_for_coverage(0.9), '▓');
-        assert_eq!(select_character_for_coverage(1.0), '▓');
+        use crate::visualization::character_sets::{get_character_set, CharacterSetType};
+        let charset = get_character_set(CharacterSetType::Shading);
+        // Shading set: [' ', '░', '▒', '▓', '█', '▀', '▄', '▌', '▐']
+        assert_eq!(charset.get_char(0.75), '▄');  // index 6.0 → 6
+        assert_eq!(charset.get_char(0.875), '▌'); // index 7.0 → 7
+        assert_eq!(charset.get_char(1.0), '▐');   // index 8.0 → 8
     }
 
     #[test]
     fn test_character_selection_boundary_values() {
-        // Test exact boundary values
-        assert_eq!(select_character_for_coverage(0.25), '░');
-        assert_eq!(select_character_for_coverage(0.50), '▒');
-        assert_eq!(select_character_for_coverage(0.75), '▓');
+        use crate::visualization::character_sets::{get_character_set, CharacterSetType};
+        let charset = get_character_set(CharacterSetType::Shading);
+        // Shading set: [' ', '░', '▒', '▓', '█', '▀', '▄', '▌', '▐']
+        // Test that intensity values map correctly to character indices
+        assert_eq!(charset.get_char(0.0), ' ');   // index 0
+        assert_eq!(charset.get_char(0.25), '▒');  // index 2.0 → 2
+        assert_eq!(charset.get_char(0.50), '█');  // index 4.0 → 4
+        assert_eq!(charset.get_char(0.75), '▄');  // index 6.0 → 6
+        assert_eq!(charset.get_char(1.0), '▐');   // index 8.0 → 8
     }
 
     #[test]
