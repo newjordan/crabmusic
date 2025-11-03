@@ -9,11 +9,13 @@ pub mod braille;
 mod sine_wave;
 mod spectrum;
 mod oscilloscope;
+pub mod spectrogram;
 
 // Re-export visualizers for external use
 pub use sine_wave::{SineWaveConfig, SineWaveVisualizer};
 pub use spectrum::{SpectrumConfig, SpectrumVisualizer, SpectrumMapping};
 pub use oscilloscope::{OscilloscopeConfig, OscilloscopeVisualizer, TriggerSlope, WaveformMode};
+pub use spectrogram::{SpectrogramVisualizer, ScrollDirection};
 pub use braille::BrailleGrid;
 
 use crate::dsp::AudioParameters;

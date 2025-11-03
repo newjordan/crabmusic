@@ -129,12 +129,10 @@ impl Moon {
                     let x = (self.x as i32 + dx) as usize;
                     let y = (self.y as i32 + dy) as usize;
 
-                    if x < grid.width() && y < grid.height() {
-                        if grid.get_cell(x, y).character == ' ' {
-                            if rand::random::<f32>() < 0.15 {
-                                grid.set_cell_with_color(x, y, '·', glow_color);
-                            }
-                        }
+                    if x < grid.width() && y < grid.height()
+                        && grid.get_cell(x, y).character == ' '
+                        && rand::random::<f32>() < 0.15 {
+                        grid.set_cell_with_color(x, y, '·', glow_color);
                     }
                 }
             }

@@ -138,7 +138,7 @@ fn test_audio_buffer_clone() {
 #[test]
 fn test_stereo_to_mono_conversion() {
     // This tests the internal conversion logic
-    let stereo_samples = vec![0.5, 0.3, 0.7, 0.1, 0.2, 0.8];
+    let stereo_samples = [0.5, 0.3, 0.7, 0.1, 0.2, 0.8];
     let mono_samples: Vec<f32> = stereo_samples
         .chunks_exact(2)
         .map(|chunk| (chunk[0] + chunk[1]) / 2.0)

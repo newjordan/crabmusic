@@ -1,7 +1,7 @@
 // Quick test to see Braille oscilloscope rendering
 // Run with: cargo run --example test_braille_oscilloscope
 
-use crabmusic::dsp::{AudioParameters, DspProcessor};
+use crabmusic::dsp::DspProcessor;
 use crabmusic::audio::AudioBuffer;
 use crabmusic::visualization::{OscilloscopeVisualizer, OscilloscopeConfig, GridBuffer, Visualizer};
 

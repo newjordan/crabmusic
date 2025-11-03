@@ -26,8 +26,8 @@ use rendering::TerminalRenderer;
 use visualization::{
     character_sets::{get_all_character_sets, get_character_set, CharacterSet, CharacterSetType},
     color_schemes::{ColorScheme, ColorSchemeType},
-    GridBuffer, OscilloscopeConfig, OscilloscopeVisualizer, SineWaveConfig,
-    SineWaveVisualizer, SpectrumConfig, SpectrumVisualizer, SpectrumMapping, TriggerSlope, Visualizer, WaveformMode,
+    GridBuffer, OscilloscopeConfig, OscilloscopeVisualizer, ScrollDirection, SineWaveConfig,
+    SineWaveVisualizer, SpectrogramVisualizer, SpectrumConfig, SpectrumVisualizer, SpectrumMapping, TriggerSlope, Visualizer, WaveformMode,
 };
 
 /// Global shutdown flag
@@ -199,6 +199,7 @@ enum VisualizerMode {
     SineWave,
     Spectrum,
     Oscilloscope,
+    Spectrogram,
 }
 
 impl VisualizerMode {
@@ -207,7 +208,8 @@ impl VisualizerMode {
         match self {
             VisualizerMode::SineWave => VisualizerMode::Spectrum,
             VisualizerMode::Spectrum => VisualizerMode::Oscilloscope,
-            VisualizerMode::Oscilloscope => VisualizerMode::SineWave,
+            VisualizerMode::Oscilloscope => VisualizerMode::Spectrogram,
+            VisualizerMode::Spectrogram => VisualizerMode::SineWave,
         }
     }
 
@@ -217,6 +219,7 @@ impl VisualizerMode {
             VisualizerMode::SineWave => "Sine Wave",
             VisualizerMode::Spectrum => "Spectrum Analyzer",
             VisualizerMode::Oscilloscope => "Oscilloscope",
+            VisualizerMode::Spectrogram => "Spectrogram",
         }
     }
 }
@@ -674,6 +677,13 @@ impl Application {
                 config.trigger_slope = self.osc_trigger_slope;
                 let mut viz = OscilloscopeVisualizer::new(config);
                 viz.set_color_scheme(self.color_scheme.clone());
+                Box::new(viz)
+            }
+            VisualizerMode::Spectrogram => {
+                let viz = SpectrogramVisualizer::new(
+                    self.color_scheme.clone(),
+                    ScrollDirection::Up, // Default to scrolling up
+                );
                 Box::new(viz)
             }
         };

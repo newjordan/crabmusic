@@ -275,7 +275,7 @@ fn generate_braille_patterns_with_dots(dot_count: u8) -> Vec<char> {
 /// Helper: Count dots in a Braille character
 fn count_braille_dots(ch: char) -> u32 {
     let code = ch as u32;
-    if code >= 0x2800 && code <= 0x28FF {
+    if (0x2800..=0x28FF).contains(&code) {
         let pattern = (code - 0x2800) as u8;
         pattern.count_ones()
     } else {
@@ -332,7 +332,7 @@ mod tests {
     #[test]
     fn test_shading_set() {
         let charset = shading_set();
-        assert!(charset.len() > 0);
+        assert!(!charset.is_empty());
         assert_eq!(charset.get_char(0.0), ' ');
     }
 
@@ -346,14 +346,14 @@ mod tests {
     #[test]
     fn test_lines_set() {
         let charset = lines_set();
-        assert!(charset.len() > 0);
+        assert!(!charset.is_empty());
         assert_eq!(charset.get_char(0.0), ' ');
     }
 
     #[test]
     fn test_braille_set() {
         let charset = braille_set();
-        assert!(charset.len() > 0);
+        assert!(!charset.is_empty());
         assert_eq!(charset.get_char(0.0), ' ');
     }
 
@@ -401,8 +401,8 @@ mod tests {
     #[test]
     fn test_get_all_character_sets() {
         let sets = get_all_character_sets();
-        assert_eq!(sets.len(), 7);
-        
+        assert_eq!(sets.len(), 10); // 7 original + 3 smooth sets (smooth64, smooth128, smooth256)
+
         for charset in sets {
             assert!(!charset.is_empty());
         }

@@ -50,11 +50,11 @@ fn test_oscilloscope_with_real_audio() {
     // Waveform should show sine wave pattern
     // Check that we have positive and negative values (not flat)
     assert!(
-        viz.waveform.iter().any(|&s| s > 0.5),
+        viz.waveform().iter().any(|&s| s > 0.5),
         "Waveform should have positive values"
     );
     assert!(
-        viz.waveform.iter().any(|&s| s < -0.5),
+        viz.waveform().iter().any(|&s| s < -0.5),
         "Waveform should have negative values"
     );
 
@@ -82,7 +82,7 @@ fn test_oscilloscope_with_real_audio() {
 #[test]
 fn test_oscilloscope_shows_different_waveforms() {
     let mut dsp = DspProcessor::new(44100, 2048).unwrap();
-    let config = OscilloscopeConfig::default();
+    let _config = OscilloscopeConfig::default();
 
     // Test 1: Sine wave (smooth)
     let sine_samples = generate_sine_wave(440.0, 0.8, 44100, 2048);
@@ -140,7 +140,7 @@ fn test_oscilloscope_handles_silence() {
 
     // Waveform should be near zero
     let max_value = viz
-        .waveform
+        .waveform()
         .iter()
         .map(|&s| s.abs())
         .fold(0.0f32, f32::max);
@@ -175,11 +175,11 @@ fn test_oscilloscope_with_stereo_audio() {
 
     // Should produce valid waveform (mono-mixed from stereo)
     assert!(
-        viz.waveform.iter().any(|&s| s > 0.3),
+        viz.waveform().iter().any(|&s| s > 0.3),
         "Stereo waveform should have positive values"
     );
     assert!(
-        viz.waveform.iter().any(|&s| s < -0.3),
+        viz.waveform().iter().any(|&s| s < -0.3),
         "Stereo waveform should have negative values"
     );
 }
@@ -212,13 +212,13 @@ fn test_oscilloscope_trigger_stabilizes_waveform() {
     viz_without_trigger.update(&params);
 
     // Both should have valid waveforms
-    assert!(!viz_with_trigger.waveform.is_empty());
-    assert!(!viz_without_trigger.waveform.is_empty());
+    assert!(!viz_with_trigger.waveform().is_empty());
+    assert!(!viz_without_trigger.waveform().is_empty());
 
     // Note: We can't easily test that trigger actually stabilizes the waveform
     // in a unit test, but we can verify that both modes work
-    assert!(viz_with_trigger.waveform.iter().any(|&s| s.abs() > 0.1));
-    assert!(viz_without_trigger.waveform.iter().any(|&s| s.abs() > 0.1));
+    assert!(viz_with_trigger.waveform().iter().any(|&s| s.abs() > 0.1));
+    assert!(viz_without_trigger.waveform().iter().any(|&s| s.abs() > 0.1));
 }
 
 #[test]
@@ -291,6 +291,7 @@ fn test_oscilloscope_grid_rendering() {
 fn test_oscilloscope_waveform_length() {
     let mut dsp = DspProcessor::new(44100, 2048).unwrap();
     let config = OscilloscopeConfig::default();
+    let sample_count = config.sample_count;
     let mut viz = OscilloscopeVisualizer::new(config);
 
     // Generate test audio
@@ -312,8 +313,8 @@ fn test_oscilloscope_waveform_length() {
 
     // Visualizer waveform should match config
     assert_eq!(
-        viz.waveform.len(),
-        config.sample_count,
+        viz.waveform().len(),
+        sample_count,
         "Visualizer waveform should match config sample_count"
     );
 }

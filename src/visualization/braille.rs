@@ -385,13 +385,16 @@ mod tests {
     fn test_draw_line_diagonal() {
         let mut grid = BrailleGrid::new(10, 10);
 
-        // Draw diagonal line
+        // Draw diagonal line from dot (0,0) to dot (10,10)
+        // Grid is 10x10 cells = 20x40 dots (each cell is 2x4 dots)
         grid.draw_line(0, 0, 10, 10);
 
         // Should have dots along diagonal
-        for i in 0..5 {
-            assert!(!grid.is_empty(i, i));
-        }
+        // Dot (0,0) is in cell (0,0), dot (10,10) is in cell (5,2)
+        // Check that at least some cells along the path are not empty
+        assert!(!grid.is_empty(0, 0)); // Start
+        assert!(!grid.is_empty(2, 1)); // Middle
+        assert!(!grid.is_empty(5, 2)); // End
     }
 
     #[test]

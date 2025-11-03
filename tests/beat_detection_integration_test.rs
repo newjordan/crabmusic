@@ -53,8 +53,6 @@ fn test_beat_detection_with_sine_wave_pulses() {
     let mut processor = DspProcessor::new(44100, 2048).unwrap();
 
     // Generate sine wave pulses (simulated beat pattern)
-    let mut beat_detected = false;
-
     // Low amplitude baseline
     let quiet_buffer = generate_sine_wave(440.0, 0.1, 44100, 2048);
     for _ in 0..5 {
@@ -64,7 +62,7 @@ fn test_beat_detection_with_sine_wave_pulses() {
     // High amplitude pulse
     let loud_buffer = generate_sine_wave(440.0, 0.8, 44100, 2048);
     let params = processor.process(&loud_buffer);
-    beat_detected = params.beat;
+    let beat_detected = params.beat;
 
     assert!(beat_detected, "Should detect beat on amplitude pulse");
 }

@@ -42,20 +42,28 @@ let treble = self.extract_band(&spectrum, 4000.0, 20000.0);
 
 ## Common Calibration Issues
 
-### 1. **Visualization Lags Behind Music**
+### 1. **Visualization Lags Behind Music** ⚠️ CRITICAL FIX
 
-**Problem**: Smoothing is too high
-**Location**: `src/visualization/spectrum.rs:34`
-**Current value**: `smoothing_factor: 0.7` (70% of old value retained)
+**Problem**: Smoothing causes lag for drums/beats
+**Location**: `src/visualization/spectrum.rs:36`
+**Current value**: `smoothing_factor: 0.0` (FIXED - was 0.7!)
 
-**Fix**:
+**Why smoothing is BAD for live music**:
+- With 0.7 smoothing: Takes 5-7 frames (~100ms) to reach full height
+- Drums hit and are OVER before the bar reaches peak
+- Creates "blurry" feeling where beats smear together
+
+**Current fix**: ZERO smoothing for instant response!
 ```rust
-smoothing_factor: 0.3,  // Faster response (try 0.2-0.5)
+smoothing_factor: 0.0,  // Instant response - feels crispy!
 ```
 
-**Trade-offs**:
-- Lower = more responsive, more jitter
-- Higher = smoother, more lag
+**If too jittery**, add minimal smoothing:
+```rust
+smoothing_factor: 0.1,  // 10% smoothing - barely noticeable
+```
+
+**Professional tools** (Voxengo SPAN, REW) use zero smoothing + peak hold for visual persistence
 
 ### 2. **Bars Don't Match Music Intensity**
 
