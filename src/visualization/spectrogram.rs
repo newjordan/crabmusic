@@ -140,48 +140,44 @@ impl Visualizer for SpectrogramVisualizer {
                     &self.history_buffer[history_idx]
                 }
             };
-            
-            // Calculate y position (convert from effective height to grid height)
-            let y = match self.scroll_direction {
-                ScrollDirection::Up => (effective_height - num_rows + row_idx) / 4,
-                ScrollDirection::Down => row_idx / 4,
-            };
-            
+
+            // Calculate y position
+            let y = row_idx;
+
             // Skip if out of bounds
             if y >= height {
                 continue;
             }
-            
+
             // Render this row across the width
             for x in 0..width {
                 // Map x position to frequency bin
                 let bin_idx = (x * spectrum.len()) / width;
                 let bin_idx = bin_idx.min(spectrum.len().saturating_sub(1));
-                
+
                 // Get amplitude for this bin
                 let amplitude = spectrum[bin_idx];
 
                 // Map amplitude to color using color scheme
                 let color = self.color_scheme.get_color(amplitude);
 
-                // Determine Braille character based on sub-pixel position
-                let sub_y = match self.scroll_direction {
-                    ScrollDirection::Up => (effective_height - num_rows + row_idx) % 4,
-                    ScrollDirection::Down => row_idx % 4,
+                // Use full block character for solid appearance
+                // Choose character based on amplitude for better visual density
+                let character = if amplitude > 0.7 {
+                    '█' // Full block for high amplitude
+                } else if amplitude > 0.4 {
+                    '▓' // Dark shade for medium amplitude
+                } else if amplitude > 0.2 {
+                    '▒' // Medium shade for low amplitude
+                } else if amplitude > 0.05 {
+                    '░' // Light shade for very low amplitude
+                } else {
+                    ' ' // Empty for silence
                 };
 
-                // Use Braille patterns for vertical resolution
-                let braille_char = match sub_y {
-                    0 => '⠁', // Top dot
-                    1 => '⠂', // Second dot
-                    2 => '⠄', // Third dot
-                    3 => '⡀', // Bottom dot
-                    _ => '⠀', // Empty
-                };
-
-                // Set cell with color and Braille character
+                // Set cell with color and character
                 let cell = grid.get_cell_mut(x, y);
-                cell.character = braille_char;
+                cell.character = character;
                 cell.foreground_color = color;
             }
         }
