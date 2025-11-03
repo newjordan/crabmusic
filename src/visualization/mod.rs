@@ -282,6 +282,33 @@ impl GridBuffer {
         &self.cells[y * self.width + x]
     }
 
+    /// Get a mutable reference to a cell at the specified coordinates
+    ///
+    /// # Arguments
+    /// * `x` - X coordinate (column)
+    /// * `y` - Y coordinate (row)
+    ///
+    /// # Returns
+    /// Mutable reference to the GridCell at the specified coordinates
+    ///
+    /// # Panics
+    /// Panics if coordinates are out of bounds
+    pub fn get_cell_mut(&mut self, x: usize, y: usize) -> &mut GridCell {
+        assert!(
+            x < self.width,
+            "x coordinate {} out of bounds (width: {})",
+            x,
+            self.width
+        );
+        assert!(
+            y < self.height,
+            "y coordinate {} out of bounds (height: {})",
+            y,
+            self.height
+        );
+        &mut self.cells[y * self.width + x]
+    }
+
     /// Set a cell at the specified coordinates
     ///
     /// # Arguments

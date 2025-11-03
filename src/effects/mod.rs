@@ -28,6 +28,7 @@ use crate::visualization::GridBuffer;
 
 pub mod passthrough;
 pub mod grid_overlay;
+pub mod scanline;
 
 /// Trait for post-processing visual effects
 ///
@@ -548,6 +549,43 @@ mod tests {
 
         println!("Grid overlay effect: {} µs/frame (target: <2000 µs)", avg_micros);
         assert!(avg_micros < 2000, "Grid overlay too slow: {} µs (target: <2000 µs)", avg_micros);
+    }
+
+    #[test]
+    fn test_pipeline_performance_scanline() {
+        use crate::dsp::AudioParameters;
+        use crate::visualization::{GridBuffer, Color};
+        use crate::effects::scanline::ScanlineEffect;
+        use std::time::Instant;
+
+        let mut pipeline = EffectPipeline::new();
+        pipeline.add_effect(Box::new(ScanlineEffect::new(2)));
+        let mut grid = GridBuffer::new(200, 100); // Typical terminal size
+        let params = AudioParameters::default();
+
+        // Fill grid with colored cells (scanlines only affect colored cells)
+        for y in 0..100 {
+            for x in 0..200 {
+                grid.set_cell_with_color(x, y, '█', Color::new(255, 255, 255));
+            }
+        }
+
+        // Warm up
+        for _ in 0..10 {
+            pipeline.apply(&mut grid, &params);
+        }
+
+        // Benchmark: scanline should be <1ms (1000 microseconds)
+        let iterations = 1000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            pipeline.apply(&mut grid, &params);
+        }
+        let elapsed = start.elapsed();
+        let avg_micros = elapsed.as_micros() / iterations;
+
+        println!("Scanline effect: {} µs/frame (target: <1000 µs)", avg_micros);
+        assert!(avg_micros < 1000, "Scanline too slow: {} µs (target: <1000 µs)", avg_micros);
     }
 }
 
