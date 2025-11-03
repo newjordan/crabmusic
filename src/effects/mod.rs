@@ -256,6 +256,29 @@ impl EffectPipeline {
         self.enabled
     }
 
+    /// Get immutable reference to an effect by name
+    ///
+    /// Useful for reading effect parameters.
+    ///
+    /// # Arguments
+    /// * `name` - Name of the effect to find
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crabmusic::effects::{EffectPipeline, passthrough::PassthroughEffect};
+    ///
+    /// let mut pipeline = EffectPipeline::new();
+    /// pipeline.add_effect(Box::new(PassthroughEffect::new()));
+    ///
+    /// if let Some(effect) = pipeline.get_effect("Passthrough") {
+    ///     println!("Intensity: {}", effect.intensity());
+    /// }
+    /// ```
+    pub fn get_effect(&self, name: &str) -> Option<&Box<dyn Effect>> {
+        self.effects.iter().find(|e| e.name() == name)
+    }
+
     /// Get mutable reference to an effect by name
     ///
     /// Useful for adjusting effect parameters at runtime.

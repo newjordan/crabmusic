@@ -255,6 +255,8 @@ struct Application {
     spectrum_peak_hold: bool,
     spectrum_mapping: SpectrumMapping,
     spectrum_range_preset_index: usize,
+    // Effect control state
+    selected_effect_for_intensity: Option<String>, // Track which effect to adjust intensity for
 }
 
 impl Application {
@@ -410,6 +412,8 @@ impl Application {
             spectrum_peak_hold: true,  // Start with peaks enabled
             spectrum_mapping: SpectrumMapping::NoteBars,
             spectrum_range_preset_index: 1, // Default to A1–A5
+            // Effect control defaults
+            selected_effect_for_intensity: None, // No effect selected initially
         })
     }
 
@@ -524,12 +528,78 @@ impl Application {
         tracing::info!("Microphone toggled: {}", status);
     }
 
-    /// Toggle effects pipeline on/off
+    /// Toggle effects pipeline on/off (master toggle)
     fn toggle_effects(&mut self) {
         let new_state = !self.effect_pipeline.is_enabled();
         self.effect_pipeline.set_enabled(new_state);
         let status = if new_state { "ON" } else { "OFF" };
+        self.selected_effect_for_intensity = None; // Master toggle affects all effects
         tracing::info!("Effects toggled: {}", status);
+    }
+
+    /// Toggle a specific effect by name
+    fn toggle_effect(&mut self, effect_name: &str) {
+        if let Some(effect) = self.effect_pipeline.get_effect_mut(effect_name) {
+            let new_state = !effect.is_enabled();
+            effect.set_enabled(new_state);
+            let status = if new_state { "ON" } else { "OFF" };
+            self.selected_effect_for_intensity = Some(effect_name.to_string());
+            tracing::info!("{} effect toggled: {}", effect_name, status);
+        }
+    }
+
+    /// Increase intensity of selected effect (or all if none selected)
+    fn increase_effect_intensity(&mut self) {
+        if let Some(ref effect_name) = self.selected_effect_for_intensity {
+            // Adjust specific effect
+            if let Some(effect) = self.effect_pipeline.get_effect_mut(effect_name) {
+                let old_intensity = effect.intensity();
+                let new_intensity = (old_intensity + 0.1).min(1.0);
+                effect.set_intensity(new_intensity);
+                tracing::info!("{} intensity: {:.1}% → {:.1}%",
+                    effect_name, old_intensity * 100.0, new_intensity * 100.0);
+            }
+        } else {
+            // Adjust all effects - collect names as owned Strings to avoid borrow issues
+            let effect_names: Vec<String> = self.effect_pipeline.effect_names()
+                .into_iter()
+                .map(|s| s.to_string())
+                .collect();
+            for effect_name in effect_names {
+                if let Some(effect) = self.effect_pipeline.get_effect_mut(&effect_name) {
+                    let new_intensity = (effect.intensity() + 0.1).min(1.0);
+                    effect.set_intensity(new_intensity);
+                }
+            }
+            tracing::info!("All effects intensity increased by 10%");
+        }
+    }
+
+    /// Decrease intensity of selected effect (or all if none selected)
+    fn decrease_effect_intensity(&mut self) {
+        if let Some(ref effect_name) = self.selected_effect_for_intensity {
+            // Adjust specific effect
+            if let Some(effect) = self.effect_pipeline.get_effect_mut(effect_name) {
+                let old_intensity = effect.intensity();
+                let new_intensity = (old_intensity - 0.1).max(0.0);
+                effect.set_intensity(new_intensity);
+                tracing::info!("{} intensity: {:.1}% → {:.1}%",
+                    effect_name, old_intensity * 100.0, new_intensity * 100.0);
+            }
+        } else {
+            // Adjust all effects - collect names as owned Strings to avoid borrow issues
+            let effect_names: Vec<String> = self.effect_pipeline.effect_names()
+                .into_iter()
+                .map(|s| s.to_string())
+                .collect();
+            for effect_name in effect_names {
+                if let Some(effect) = self.effect_pipeline.get_effect_mut(&effect_name) {
+                    let new_intensity = (effect.intensity() - 0.1).max(0.0);
+                    effect.set_intensity(new_intensity);
+                }
+            }
+            tracing::info!("All effects intensity decreased by 10%");
+        }
     }
 
     /// Increase sensitivity by 10%
@@ -649,10 +719,35 @@ impl Application {
         let scheme_type = self.color_scheme.scheme_type();
         let color_scheme_name = scheme_type.name();
         let mic_status = if self.microphone_enabled { "MIC:ON" } else { "MIC:OFF" };
-        let fx_status = if self.effect_pipeline.is_enabled() { "FX:ON" } else { "FX:OFF" };
+
+        // Build effect status string with individual effect states
+        let mut fx_parts = Vec::new();
+        if self.effect_pipeline.is_enabled() {
+            fx_parts.push("FX:ON".to_string());
+        } else {
+            fx_parts.push("FX:OFF".to_string());
+        }
+
+        // Show individual effect states and intensities
+        for effect_name in self.effect_pipeline.effect_names() {
+            if let Some(effect) = self.effect_pipeline.get_effect(effect_name) {
+                let short_name = match effect_name {
+                    "Bloom" => "B",
+                    "Scanline" => "S",
+                    _ => &effect_name[0..1],
+                };
+                let intensity_pct = (effect.intensity() * 100.0) as u8;
+                if effect.is_enabled() {
+                    fx_parts.push(format!("{}:{}%", short_name, intensity_pct));
+                } else {
+                    fx_parts.push(format!("{}:off", short_name));
+                }
+            }
+        }
+        let fx_status = fx_parts.join(" ");
 
         let info_text = if self.visualizer_mode == VisualizerMode::Oscilloscope {
-            format!(" {} | {} | {} | {} | V:mode O:color E:fx G:grid F:fill T:trigger M:mic Q:quit ",
+            format!(" {} | {} | {} | {} | V:mode O:color E:fx B:bloom S:scan []:intensity G:grid F:fill T:trigger M:mic Q:quit ",
                 visualizer_name, color_scheme_name, mic_status, fx_status)
         } else if self.visualizer_mode == VisualizerMode::Spectrum {
             let map_name = match self.spectrum_mapping { SpectrumMapping::NoteBars => "NOTES", SpectrumMapping::LogBars => "LOG" };
@@ -662,14 +757,14 @@ impl Application {
                     1 => ("A1-A5", 55.0, 880.0),
                     _ => ("A1-A6", 55.0, 1760.0),
                 };
-                format!(" {} | {} | {} | {} | V:mode O:color E:fx P:peaks L:labels N:map({}) R:range({}) M:mic +/-:sens Q:quit ",
+                format!(" {} | {} | {} | {} | V:mode O:color E:fx B:bloom S:scan []:intensity P:peaks L:labels N:map({}) R:range({}) M:mic +/-:sens Q:quit ",
                     visualizer_name, color_scheme_name, mic_status, fx_status, map_name, range_label)
             } else {
-                format!(" {} | {} | {} | {} | V:mode O:color E:fx P:peaks L:labels N:map({}) M:mic +/-:sens Q:quit ",
+                format!(" {} | {} | {} | {} | V:mode O:color E:fx B:bloom S:scan []:intensity P:peaks L:labels N:map({}) M:mic +/-:sens Q:quit ",
                     visualizer_name, color_scheme_name, mic_status, fx_status, map_name)
             }
         } else {
-            format!(" {} | {} | {} | {} | V:mode O:color E:fx M:mic +/-:sens Q:quit ",
+            format!(" {} | {} | {} | {} | V:mode O:color E:fx B:bloom S:scan []:intensity M:mic +/-:sens Q:quit ",
                 visualizer_name, color_scheme_name, mic_status, fx_status)
         };
 
@@ -752,6 +847,18 @@ impl Application {
                             }
                             KeyCode::Char('e') | KeyCode::Char('E') => {
                                 self.toggle_effects();
+                            }
+                            KeyCode::Char('b') | KeyCode::Char('B') => {
+                                self.toggle_effect("Bloom");
+                            }
+                            KeyCode::Char('s') | KeyCode::Char('S') => {
+                                self.toggle_effect("Scanline");
+                            }
+                            KeyCode::Char('[') | KeyCode::Char('{') => {
+                                self.decrease_effect_intensity();
+                            }
+                            KeyCode::Char(']') | KeyCode::Char('}') => {
+                                self.increase_effect_intensity();
                             }
                             KeyCode::Char('m') | KeyCode::Char('M') => {
                                 self.toggle_microphone();
