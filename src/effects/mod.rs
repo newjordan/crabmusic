@@ -462,5 +462,92 @@ mod tests {
         assert_eq!(grid.get_cell(0, 5).character, '┼'); // Intersection
         assert_eq!(grid.get_cell(5, 5).character, '┼'); // Intersection
     }
+
+    #[test]
+    fn test_pipeline_performance_empty() {
+        use crate::dsp::AudioParameters;
+        use crate::visualization::GridBuffer;
+        use std::time::Instant;
+
+        let mut pipeline = EffectPipeline::new();
+        let mut grid = GridBuffer::new(200, 100); // Typical terminal size
+        let params = AudioParameters::default();
+
+        // Warm up
+        for _ in 0..10 {
+            pipeline.apply(&mut grid, &params);
+        }
+
+        // Benchmark: empty pipeline should be <0.1ms (100 microseconds)
+        let iterations = 1000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            pipeline.apply(&mut grid, &params);
+        }
+        let elapsed = start.elapsed();
+        let avg_micros = elapsed.as_micros() / iterations;
+
+        println!("Empty pipeline: {} µs/frame (target: <100 µs)", avg_micros);
+        assert!(avg_micros < 100, "Empty pipeline too slow: {} µs (target: <100 µs)", avg_micros);
+    }
+
+    #[test]
+    fn test_pipeline_performance_passthrough() {
+        use crate::dsp::AudioParameters;
+        use crate::visualization::GridBuffer;
+        use std::time::Instant;
+
+        let mut pipeline = EffectPipeline::new();
+        pipeline.add_effect(Box::new(PassthroughEffect::new()));
+        let mut grid = GridBuffer::new(200, 100); // Typical terminal size
+        let params = AudioParameters::default();
+
+        // Warm up
+        for _ in 0..10 {
+            pipeline.apply(&mut grid, &params);
+        }
+
+        // Benchmark: passthrough should be <0.5ms (500 microseconds)
+        let iterations = 1000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            pipeline.apply(&mut grid, &params);
+        }
+        let elapsed = start.elapsed();
+        let avg_micros = elapsed.as_micros() / iterations;
+
+        println!("Passthrough effect: {} µs/frame (target: <500 µs)", avg_micros);
+        assert!(avg_micros < 500, "Passthrough too slow: {} µs (target: <500 µs)", avg_micros);
+    }
+
+    #[test]
+    fn test_pipeline_performance_grid_overlay() {
+        use crate::dsp::AudioParameters;
+        use crate::visualization::GridBuffer;
+        use crate::effects::grid_overlay::GridOverlayEffect;
+        use std::time::Instant;
+
+        let mut pipeline = EffectPipeline::new();
+        pipeline.add_effect(Box::new(GridOverlayEffect::new(10)));
+        let mut grid = GridBuffer::new(200, 100); // Typical terminal size
+        let params = AudioParameters::default();
+
+        // Warm up
+        for _ in 0..10 {
+            pipeline.apply(&mut grid, &params);
+        }
+
+        // Benchmark: grid overlay should be <2ms (2000 microseconds)
+        let iterations = 1000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            pipeline.apply(&mut grid, &params);
+        }
+        let elapsed = start.elapsed();
+        let avg_micros = elapsed.as_micros() / iterations;
+
+        println!("Grid overlay effect: {} µs/frame (target: <2000 µs)", avg_micros);
+        assert!(avg_micros < 2000, "Grid overlay too slow: {} µs (target: <2000 µs)", avg_micros);
+    }
 }
 
