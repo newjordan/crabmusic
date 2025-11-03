@@ -577,7 +577,9 @@ impl Application {
                 config.show_grid = self.osc_show_grid;
                 config.waveform_mode = self.osc_waveform_mode;
                 config.trigger_slope = self.osc_trigger_slope;
-                Box::new(OscilloscopeVisualizer::new(config))
+                let mut viz = OscilloscopeVisualizer::new(config);
+                viz.set_color_scheme(self.color_scheme.clone());
+                Box::new(viz)
             }
         };
     }

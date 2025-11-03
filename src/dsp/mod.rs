@@ -703,12 +703,15 @@ impl DspProcessor {
     /// For small buffers: returns as-is (upsampling not needed for oscilloscope)
     /// For large buffers: downsamples using averaging for anti-aliasing
     ///
+    /// **Auto-scaling**: Normalizes waveform to full -1.0 to 1.0 range so visualizations
+    /// display full dynamic range regardless of system audio volume.
+    ///
     /// # Arguments
     /// * `buffer` - Audio buffer (may be stereo, will be mono-mixed)
     /// * `target_length` - Desired output length (typically 512)
     ///
     /// # Returns
-    /// Downsampled waveform normalized to -1.0 to 1.0
+    /// Downsampled waveform normalized to -1.0 to 1.0 range
     ///
     /// # Examples
     ///
@@ -743,6 +746,13 @@ impl DspProcessor {
         if input_len <= target_length {
             let mut result = mono_samples;
             result.resize(target_length, 0.0);
+
+            // Normalize to full range for consistent visualization
+            let max_abs = result.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
+            if max_abs > 0.001 {  // Avoid division by zero, ignore near-silence
+                result.iter_mut().for_each(|x| *x /= max_abs);
+            }
+
             return result;
         }
 
@@ -757,7 +767,14 @@ impl DspProcessor {
             let start = idx.saturating_sub(1);
             let end = (idx + 2).min(input_len);
             let avg = mono_samples[start..end].iter().sum::<f32>() / (end - start) as f32;
-            output.push(avg.clamp(-1.0, 1.0)); // Normalize
+            output.push(avg);
+        }
+
+        // Normalize to full -1.0 to 1.0 range for consistent visualization
+        // This ensures waveforms display at full height regardless of system volume
+        let max_abs = output.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
+        if max_abs > 0.001 {  // Avoid division by zero, ignore near-silence
+            output.iter_mut().for_each(|x| *x /= max_abs);
         }
 
         output
@@ -1157,7 +1174,7 @@ mod tests {
 
         // Build up low energy history
         for _ in 0..5 {
-            assert_eq!(detector.detect(0.1), false);
+            assert!(!detector.detect(0.1));
         }
 
         // Sudden energy spike should trigger beat
@@ -1202,17 +1219,19 @@ mod tests {
 
     #[test]
     fn test_beat_detector_sensitivity() {
-        // High sensitivity (easier to trigger)
-        let mut detector_sensitive = BeatDetector::new(2.0, 0.1);
+        // High sensitivity (easier to trigger) - use very short cooldown for testing
+        let mut detector_sensitive = BeatDetector::new(2.0, 0.001);
         for _ in 0..5 {
             detector_sensitive.detect(0.2);
+            std::thread::sleep(std::time::Duration::from_millis(2));
         }
         let beat_sensitive = detector_sensitive.detect(0.25);
 
         // Low sensitivity (harder to trigger)
-        let mut detector_normal = BeatDetector::new(1.0, 0.1);
+        let mut detector_normal = BeatDetector::new(1.0, 0.001);
         for _ in 0..5 {
             detector_normal.detect(0.2);
+            std::thread::sleep(std::time::Duration::from_millis(2));
         }
         let beat_normal = detector_normal.detect(0.25);
 
@@ -1248,13 +1267,14 @@ mod tests {
         let params_silent = processor.process(&silent);
         assert!(!params_silent.beat, "No beat in silence");
 
-        // Build low energy history
+        // Build low energy history with delays to avoid cooldown (100ms cooldown)
         let quiet = AudioBuffer::with_samples(vec![0.1; 2048], 44100, 1);
         for _ in 0..5 {
             processor.process(&quiet);
+            std::thread::sleep(std::time::Duration::from_millis(110));
         }
 
-        // Loud buffer - should trigger beat
+        // Loud buffer - should trigger beat (5x energy increase)
         let loud = AudioBuffer::with_samples(vec![0.5; 2048], 44100, 1);
         let params_loud = processor.process(&loud);
         assert!(params_loud.beat, "Should detect beat on energy spike");
@@ -1369,8 +1389,10 @@ mod tests {
         // Should pad to 512 samples
         assert_eq!(waveform.len(), 512);
 
-        // First 100 should have values, rest should be zero
-        assert!(waveform[0..100].iter().any(|&s| s.abs() > 0.1));
+        // First 100 should be normalized to 1.0 (since all values are 0.5, max_abs = 0.5)
+        // After normalization: 0.5 / 0.5 = 1.0
+        assert!(waveform[0..100].iter().all(|&s| (s - 1.0).abs() < 0.01));
+        // Rest should be zero (padding)
         assert!(waveform[100..512].iter().all(|&s| s == 0.0));
     }
 
@@ -1525,13 +1547,10 @@ mod tests {
         let mut processor = DspProcessor::new(44100, 2048).unwrap();
         let buffer = generate_sine_wave(440.0, 1.0, 44100, 2048);
 
-        let params = processor.process(&buffer);
+        let _params = processor.process(&buffer);
 
-        // beat_flux field should exist and be a bool
-        assert!(params.beat_flux == true || params.beat_flux == false);
-
-        // beat should also exist (hybrid)
-        assert!(params.beat == true || params.beat == false);
+        // beat_flux and beat fields exist and are booleans
+        // (no specific assertion needed - just verify they compile)
     }
 
     // ============================================================
@@ -1694,7 +1713,7 @@ mod tests {
                 processor.process(&quiet);
             }
             // Beat frame
-            let params = processor.process(&loud);
+            let _params = processor.process(&loud);
             // Small delay to simulate real timing
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
@@ -1728,6 +1747,6 @@ mod tests {
 
         // Configuration should be applied (we can't directly test internal state,
         // but we can verify the method doesn't panic)
-        assert!(true);
+        // Test passes if we reach here without panicking
     }
 }

@@ -112,6 +112,8 @@ pub struct OscilloscopeVisualizer {
     config: OscilloscopeConfig,
     /// Beat flash effect (0.0-1.0, decays over time)
     beat_flash: f32,
+    /// Color scheme for rendering
+    color_scheme: super::color_schemes::ColorScheme,
 }
 
 impl OscilloscopeVisualizer {
@@ -143,7 +145,13 @@ impl OscilloscopeVisualizer {
             waveform,
             config,
             beat_flash: 0.0,
+            color_scheme: super::color_schemes::ColorScheme::new(super::color_schemes::ColorSchemeType::Monochrome),
         }
+    }
+
+    /// Get the current waveform (for testing/debugging)
+    pub fn waveform(&self) -> &[f32] {
+        &self.waveform
     }
 
     /// Toggle reference grid on/off
@@ -167,6 +175,13 @@ impl OscilloscopeVisualizer {
             TriggerSlope::Negative => TriggerSlope::Both,
             TriggerSlope::Both => TriggerSlope::Positive,
         };
+    }
+
+    /// Update the color scheme for rendering
+    ///
+    /// Allows changing the color scheme at runtime for different visual styles
+    pub fn set_color_scheme(&mut self, color_scheme: super::color_schemes::ColorScheme) {
+        self.color_scheme = color_scheme;
     }
 
     /// Find trigger point in waveform for stable display
@@ -306,10 +321,17 @@ impl OscilloscopeVisualizer {
             if x > 0 {
                 if self.config.use_color {
                     let amplitude = waveform_value.abs();
-                    let beat_boost = (self.beat_flash * 100.0) as u8;
-                    let base_intensity = (amplitude * 180.0) as u8;
-                    let intensity = base_intensity.saturating_add(beat_boost).min(255);
-                    let color = Color::new(0, intensity.saturating_add(50), intensity);
+                    let intensity = (amplitude * 0.8 + self.beat_flash * 0.2).clamp(0.0, 1.0);
+
+                    // Use color scheme for consistent coloring across visualizers
+                    let color = match self.color_scheme.get_color(intensity) {
+                        Some(c) => c,
+                        None => {
+                            // Fallback to cyan/blue if monochrome
+                            let color_val = (intensity * 200.0).min(255.0) as u8;
+                            Color::new(0, color_val.saturating_add(50), color_val)
+                        }
+                    };
                     braille.draw_line_with_color(prev_x, prev_y, x, y, color);
                 } else {
                     braille.draw_line(prev_x, prev_y, x, y);
@@ -370,8 +392,23 @@ impl OscilloscopeVisualizer {
                 if (dot_y + dot_x) % 3 != 0 || distance < 0.3 {
                     if self.config.use_color {
                         let amplitude = waveform_value.abs();
-                        let intensity = ((amplitude * 80.0) as u8).saturating_add((self.beat_flash * 30.0) as u8);
-                        let color = Color::new(0, intensity / 3, intensity / 3);
+                        let intensity = (amplitude * 0.4 + self.beat_flash * 0.1).clamp(0.0, 1.0);
+
+                        // Use color scheme for fill, but dimmer than the line
+                        let color = match self.color_scheme.get_color(intensity) {
+                            Some(mut c) => {
+                                // Dim the fill color to 30% for subtle effect
+                                c.r = (c.r as f32 * 0.3) as u8;
+                                c.g = (c.g as f32 * 0.3) as u8;
+                                c.b = (c.b as f32 * 0.3) as u8;
+                                c
+                            }
+                            None => {
+                                // Fallback to dim cyan if monochrome
+                                let color_val = (intensity * 60.0) as u8;
+                                Color::new(0, color_val, color_val)
+                            }
+                        };
                         braille.set_dot_with_color(dot_x, dot_y, color);
                     } else {
                         braille.set_dot(dot_x, dot_y);
@@ -547,8 +584,8 @@ mod tests {
 
         // Waveform that crosses zero upward at index 10
         let mut waveform = vec![-0.5; 512];
-        for i in 10..512 {
-            waveform[i] = 0.5;
+        for item in waveform.iter_mut().take(512).skip(10) {
+            *item = 0.5;
         }
 
         let trigger = viz.find_trigger_point(&waveform, 0.0, TriggerSlope::Positive);
@@ -567,8 +604,8 @@ mod tests {
 
         // Waveform that crosses zero downward at index 20
         let mut waveform = vec![0.5; 512];
-        for i in 20..512 {
-            waveform[i] = -0.5;
+        for item in waveform.iter_mut().take(512).skip(20) {
+            *item = -0.5;
         }
 
         let trigger = viz.find_trigger_point(&waveform, 0.0, TriggerSlope::Negative);
