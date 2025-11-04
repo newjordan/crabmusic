@@ -16,6 +16,9 @@ mod effects;
 mod error;
 mod rendering;
 mod visualization;
+mod video;
+mod img;
+
 
 use audio::{AudioCaptureDevice, AudioOutputDevice, AudioRingBuffer, CpalAudioDevice};
 #[cfg(windows)]
@@ -29,7 +32,7 @@ use visualization::{
     GridBuffer, OscilloscopeConfig, OscilloscopeVisualizer, ScrollDirection, SineWaveConfig,
     SineWaveVisualizer, SpectrogramVisualizer, SpectrumConfig, SpectrumVisualizer, SpectrumMapping,
     TriggerSlope, Visualizer, WaveformMode, WaveformTunnelVisualizer,
-    IlluminatiEyeVisualizer, NightNightVisualizer,
+    FlowerOfLifeConfig, FlowerOfLifeVisualizer, MandalaConfig, MandalaVisualizer, NightNightVisualizer,
 };
 
 /// Global shutdown flag
@@ -107,6 +110,19 @@ struct Args {
     /// Show version information
     #[arg(long)]
     version_info: bool,
+
+    /// Play a video file in the terminal using Braille rendering (feature-gated)
+    #[arg(long, value_name = "FILE")]
+    video: Option<String>,
+
+        /// Display an image file as Braille art (requires feature: image)
+        #[arg(long, value_name = "FILE")]
+        image: Option<String>,
+
+        /// Start image drag-and-drop mode (paste file paths to render)
+        #[arg(long)]
+        image_drop: bool,
+
 }
 
 fn main() -> Result<()> {
@@ -129,6 +145,23 @@ fn main() -> Result<()> {
     init_logging(args.verbose, args.debug)?;
 
     tracing::info!("CrabMusic v{} starting...", env!("CARGO_PKG_VERSION"));
+
+    // Video mode takes over if requested
+    if let Some(path) = args.video.as_deref() {
+        tracing::info!("Starting video mode for file: {}", path);
+        return video::run_video_playback(path);
+    }
+
+    // Image modes take over if requested
+    if let Some(path) = args.image.as_deref() {
+        tracing::info!("Starting image mode for file: {}", path);
+        return img::render_image(path);
+    }
+    if args.image_drop {
+        tracing::info!("Starting image drag-and-drop mode");
+        return img::drop_loop();
+    }
+
 
     // Load configuration
     let config_path = args.config.as_deref().unwrap_or("config.yaml");
@@ -204,7 +237,8 @@ enum VisualizerMode {
     XYOscilloscope,
     Spectrogram,
     WaveformTunnel,
-    IlluminatiEye,
+    FlowerOfLife,
+    Mandala,
     NightNight,
 }
 
@@ -217,8 +251,9 @@ impl VisualizerMode {
             VisualizerMode::Oscilloscope => VisualizerMode::XYOscilloscope,
             VisualizerMode::XYOscilloscope => VisualizerMode::Spectrogram,
             VisualizerMode::Spectrogram => VisualizerMode::WaveformTunnel,
-            VisualizerMode::WaveformTunnel => VisualizerMode::IlluminatiEye,
-            VisualizerMode::IlluminatiEye => VisualizerMode::NightNight,
+            VisualizerMode::WaveformTunnel => VisualizerMode::FlowerOfLife,
+            VisualizerMode::FlowerOfLife => VisualizerMode::Mandala,
+            VisualizerMode::Mandala => VisualizerMode::NightNight,
             VisualizerMode::NightNight => VisualizerMode::SineWave,
         }
     }
@@ -232,7 +267,8 @@ impl VisualizerMode {
             VisualizerMode::XYOscilloscope => "XY Oscilloscope (Lissajous)",
             VisualizerMode::Spectrogram => "Spectrogram",
             VisualizerMode::WaveformTunnel => "Waveform Tunnel",
-            VisualizerMode::IlluminatiEye => "Illuminati Eye",
+            VisualizerMode::FlowerOfLife => "Flower of Life",
+            VisualizerMode::Mandala => "Mandala",
             VisualizerMode::NightNight => "Night Night",
         }
     }
@@ -711,8 +747,14 @@ impl Application {
                 let viz = WaveformTunnelVisualizer::new(self.color_scheme.clone());
                 Box::new(viz)
             }
-            VisualizerMode::IlluminatiEye => {
-                let viz = IlluminatiEyeVisualizer::new(self.color_scheme.clone());
+            VisualizerMode::FlowerOfLife => {
+                let mut viz = FlowerOfLifeVisualizer::new(FlowerOfLifeConfig::default());
+                viz.set_color_scheme(self.color_scheme.clone());
+                Box::new(viz)
+            }
+            VisualizerMode::Mandala => {
+                let mut viz = MandalaVisualizer::new(MandalaConfig::default());
+                viz.set_color_scheme(self.color_scheme.clone());
                 Box::new(viz)
             }
             VisualizerMode::NightNight => {

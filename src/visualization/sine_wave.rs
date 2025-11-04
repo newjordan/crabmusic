@@ -344,6 +344,8 @@ mod tests {
             tempo_confidence: 0.0,
             spectrum: vec![],
             waveform: vec![],
+            waveform_left: vec![],
+            waveform_right: vec![],
         };
 
         let initial_phase = viz.phase;
