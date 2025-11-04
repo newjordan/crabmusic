@@ -195,15 +195,12 @@ impl AudioCaptureDevice for CpalAudioDevice {
             .build_input_stream(
                 &config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    // Convert stereo to mono if needed
-                    let mono_samples = if channels == 2 {
-                        Self::stereo_to_mono(data)
-                    } else {
-                        data.to_vec()
-                    };
+                    // Keep stereo audio intact for XY oscilloscope (Lissajous curves)
+                    // AudioBuffer now stores stereo as interleaved [L, R, L, R, ...]
+                    let samples = data.to_vec();
 
-                    // Create audio buffer
-                    let buffer = AudioBuffer::with_samples(mono_samples, sample_rate, 1);
+                    // Create audio buffer with original channel count
+                    let buffer = AudioBuffer::with_samples(samples, sample_rate, channels);
 
                     // Push to ring buffer (non-blocking)
                     ring_buffer.push(buffer);

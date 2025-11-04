@@ -9,16 +9,26 @@ pub mod braille;
 mod sine_wave;
 mod spectrum;
 mod oscilloscope;
+mod xy_oscilloscope;
 pub mod spectrogram;
 pub mod waveform_tunnel;
+mod flower_of_life;
+mod mandala;
+mod illuminati_eye;
+mod night_night;
 
 // Re-export visualizers for external use
 pub use sine_wave::{SineWaveConfig, SineWaveVisualizer};
 pub use spectrum::{SpectrumConfig, SpectrumVisualizer, SpectrumMapping};
 pub use oscilloscope::{OscilloscopeConfig, OscilloscopeVisualizer, TriggerSlope, WaveformMode};
+pub use xy_oscilloscope::{XYOscilloscopeConfig, XYOscilloscopeVisualizer, XYDisplayMode};
 pub use spectrogram::{SpectrogramVisualizer, ScrollDirection};
 pub use waveform_tunnel::WaveformTunnelVisualizer;
+pub use flower_of_life::{FlowerOfLifeConfig, FlowerOfLifeVisualizer};
+pub use mandala::{MandalaConfig, MandalaVisualizer};
 pub use braille::BrailleGrid;
+pub use illuminati_eye::IlluminatiEyeVisualizer;
+pub use night_night::NightNightVisualizer;
 
 use crate::dsp::AudioParameters;
 

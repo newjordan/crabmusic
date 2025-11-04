@@ -215,18 +215,22 @@ impl WasapiLoopbackDevice {
                 // Convert to f32 samples
                 let samples = Self::convert_to_f32(&frame_bytes, &wave_format);
 
-                // Convert stereo to mono if needed
+                // Keep stereo audio intact for XY oscilloscope (Lissajous curves)
+                // Store as interleaved [L, R, L, R, ...] for stereo, or [M, M, ...] for mono
                 if samples.len() == 2 {
-                    // Average left and right channels
-                    all_samples.push((samples[0] + samples[1]) / 2.0);
+                    // Stereo: push both channels
+                    all_samples.push(samples[0]);
+                    all_samples.push(samples[1]);
                 } else {
-                    // Already mono or use first channel
+                    // Mono: duplicate to both channels for consistency
+                    all_samples.push(samples[0]);
                     all_samples.push(samples[0]);
                 }
 
                 // Push in consistent chunks to avoid jittery visualization
-                if all_samples.len() >= CHUNK_SIZE {
-                    let chunk: Vec<f32> = all_samples.drain(..CHUNK_SIZE).collect();
+                // Note: CHUNK_SIZE is now in stereo frames, so we need 2× samples
+                if all_samples.len() >= CHUNK_SIZE * 2 {
+                    let chunk: Vec<f32> = all_samples.drain(..CHUNK_SIZE * 2).collect();
 
                     // Debug: Check amplitude levels occasionally
                     static mut DEBUG_COUNTER: u32 = 0;
@@ -235,16 +239,16 @@ impl WasapiLoopbackDevice {
                         if DEBUG_COUNTER % 100 == 0 {
                             let rms = (chunk.iter().map(|s| s * s).sum::<f32>() / chunk.len() as f32).sqrt();
                             let max_amp = chunk.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
-                            debug!("Loopback audio - max: {:.4}, rms: {:.4}, samples: {}", max_amp, rms, chunk.len());
+                            debug!("Loopback audio - max: {:.4}, rms: {:.4}, samples: {}, channels: 2", max_amp, rms, chunk.len());
                         }
                     }
 
                     // NO NOISE GATE: FFT normalization handles showing patterns regardless of volume
                     // The visualizations will show the frequency patterns even at low system volume
                     // because the spectrum is normalized to the peak frequency in each frame
-                    let buffer = AudioBuffer::with_samples(chunk, sample_rate, 1);
+                    let buffer = AudioBuffer::with_samples(chunk, sample_rate, 2);  // Always stereo now
                     if !ring_buffer.push(buffer) {
-                        debug!("Ring buffer full, dropped {} samples", CHUNK_SIZE);
+                        debug!("Ring buffer full, dropped {} samples", CHUNK_SIZE * 2);
                     }
                 }
             }

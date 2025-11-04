@@ -623,6 +623,9 @@ impl DspProcessor {
         // 9. Extract waveform for oscilloscope visualization
         let waveform = self.downsample_for_waveform(buffer, 512);
 
+        // 10. Extract stereo waveforms for XY oscilloscope (Lissajous curves)
+        let (waveform_left, waveform_right) = self.downsample_stereo_waveforms(buffer, 512);
+
         AudioParameters {
             bass,
             mid,
@@ -634,6 +637,8 @@ impl DspProcessor {
             tempo_confidence, // Confidence in tempo estimate
             spectrum,         // Include full spectrum for advanced visualizers
             waveform,         // Include waveform for oscilloscope
+            waveform_left,    // Left channel for XY oscilloscope
+            waveform_right,   // Right channel for XY oscilloscope
         }
     }
 
@@ -779,6 +784,80 @@ impl DspProcessor {
 
         output
     }
+
+    /// Downsample stereo audio buffer to target length for XY oscilloscope
+    ///
+    /// Extracts separate left and right channels for Lissajous curve visualization.
+    /// For mono audio, both channels will be identical.
+    ///
+    /// **Auto-scaling**: Normalizes each channel independently to full -1.0 to 1.0 range.
+    ///
+    /// # Arguments
+    /// * `buffer` - Audio buffer (stereo or mono)
+    /// * `target_length` - Desired output length (typically 512)
+    ///
+    /// # Returns
+    /// Tuple of (left_channel, right_channel) normalized to -1.0 to 1.0 range
+    fn downsample_stereo_waveforms(&self, buffer: &AudioBuffer, target_length: usize) -> (Vec<f32>, Vec<f32>) {
+        // Separate stereo channels or duplicate mono
+        let (left_samples, right_samples): (Vec<f32>, Vec<f32>) = if buffer.channels == 2 {
+            // Stereo: de-interleave [L, R, L, R, ...] -> ([L, L, ...], [R, R, ...])
+            buffer
+                .samples
+                .chunks_exact(2)
+                .map(|chunk| (chunk[0], chunk[1]))
+                .unzip()
+        } else {
+            // Mono: duplicate to both channels
+            (buffer.samples.clone(), buffer.samples.clone())
+        };
+
+        // Helper function to downsample and normalize a single channel
+        let downsample_channel = |samples: Vec<f32>| -> Vec<f32> {
+            let input_len = samples.len();
+
+            // Handle empty buffer
+            if input_len == 0 {
+                return vec![0.0; target_length];
+            }
+
+            // If input is already small enough, pad with zeros
+            if input_len <= target_length {
+                let mut result = samples;
+                result.resize(target_length, 0.0);
+
+                // Normalize to full range
+                let max_abs = result.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
+                if max_abs > 0.001 {
+                    result.iter_mut().for_each(|x| *x /= max_abs);
+                }
+
+                return result;
+            }
+
+            // Downsample using decimation with averaging
+            let step = input_len as f32 / target_length as f32;
+            let mut output = Vec::with_capacity(target_length);
+
+            for i in 0..target_length {
+                let idx = (i as f32 * step) as usize;
+                let start = idx.saturating_sub(1);
+                let end = (idx + 2).min(input_len);
+                let avg = samples[start..end].iter().sum::<f32>() / (end - start) as f32;
+                output.push(avg);
+            }
+
+            // Normalize to full range
+            let max_abs = output.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
+            if max_abs > 0.001 {
+                output.iter_mut().for_each(|x| *x /= max_abs);
+            }
+
+            output
+        };
+
+        (downsample_channel(left_samples), downsample_channel(right_samples))
+    }
 }
 
 /// Audio parameters extracted from DSP processing
@@ -864,6 +943,20 @@ pub struct AudioParameters {
     /// Example: For a 1kHz sine wave, this would show one or more
     /// complete cycles with smooth positive and negative swings.
     pub waveform: Vec<f32>,
+
+    /// Left channel waveform for stereo visualization (XY oscilloscope)
+    ///
+    /// Downsampled left channel audio, normalized to -1.0 to 1.0 range.
+    /// Default length: 512 samples.
+    /// For mono audio, this will be identical to waveform.
+    pub waveform_left: Vec<f32>,
+
+    /// Right channel waveform for stereo visualization (XY oscilloscope)
+    ///
+    /// Downsampled right channel audio, normalized to -1.0 to 1.0 range.
+    /// Default length: 512 samples.
+    /// For mono audio, this will be identical to waveform.
+    pub waveform_right: Vec<f32>,
 }
 
 impl Default for AudioParameters {
@@ -879,6 +972,8 @@ impl Default for AudioParameters {
             tempo_confidence: 0.0, // No confidence initially
             spectrum: Vec::new(),
             waveform: Vec::new(),
+            waveform_left: Vec::new(),
+            waveform_right: Vec::new(),
         }
     }
 }

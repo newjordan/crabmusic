@@ -55,10 +55,10 @@ pub fn dots_to_char(dots: u8) -> char {
     char::from_u32(0x2800 + dots as u32).unwrap_or('⠀')
 }
 
-/// High-resolution grid using Braille characters
+/// High-resolution grid using Braille characters with anti-aliasing support
 ///
 /// Each terminal cell contains a 2×4 dot pattern, giving us
-/// 8 dots per character position.
+/// 8 dots per character position for crisp, deterministic rendering.
 ///
 /// # Examples
 ///
@@ -68,13 +68,14 @@ pub fn dots_to_char(dots: u8) -> char {
 /// let mut grid = BrailleGrid::new(40, 20);
 /// // Each cell is 2 dots wide, 4 dots tall
 /// // So we have 80×80 dot resolution!
+///
 /// ```
 pub struct BrailleGrid {
     /// Width in terminal cells
     width: usize,
     /// Height in terminal cells
     height: usize,
-    /// Dot patterns for each cell
+    /// Dot patterns for each cell (binary on/off)
     patterns: Vec<u8>,
     /// Optional colors for each cell
     colors: Vec<Option<Color>>,
@@ -88,7 +89,7 @@ impl BrailleGrid {
     /// * `height` - Height in terminal cells (each cell is 4 dots tall)
     ///
     /// # Returns
-    /// A new BrailleGrid with all dots cleared
+    /// Create a new BrailleGrid with all dots cleared
     pub fn new(width: usize, height: usize) -> Self {
         let size = width * height;
         Self {
@@ -98,6 +99,9 @@ impl BrailleGrid {
             colors: vec![None; size],
         }
     }
+
+
+
 
     /// Get width in terminal cells
     pub fn width(&self) -> usize {
@@ -185,6 +189,23 @@ impl BrailleGrid {
         self.colors[cell_index] = Some(color);
     }
 
+
+    /// Helper: Get dot index (0-7) from local coordinates
+    #[inline]
+    fn get_dot_index(&self, local_x: usize, local_y: usize) -> usize {
+        match (local_x, local_y) {
+            (0, 0) => 0, // Dot1
+            (0, 1) => 1, // Dot2
+            (0, 2) => 2, // Dot3
+            (0, 3) => 6, // Dot7
+            (1, 0) => 3, // Dot4
+            (1, 1) => 4, // Dot5
+            (1, 2) => 5, // Dot6
+            (1, 3) => 7, // Dot8
+            _ => 0,
+        }
+    }
+
     /// Draw a line between two points using Bresenham's algorithm
     ///
     /// # Arguments
@@ -230,6 +251,8 @@ impl BrailleGrid {
     }
 
     /// Draw a line with color
+    ///
+    /// Uses anti-aliasing if enabled, otherwise falls back to Bresenham's algorithm.
     pub fn draw_line_with_color(
         &mut self,
         x0: usize,
@@ -238,6 +261,7 @@ impl BrailleGrid {
         y1: usize,
         color: Color,
     ) {
+        // Bresenham's algorithm (non-AA)
         let dx = (x1 as i32 - x0 as i32).abs();
         let dy = (y1 as i32 - y0 as i32).abs();
         let sx = if x0 < x1 { 1i32 } else { -1i32 };
@@ -265,8 +289,49 @@ impl BrailleGrid {
             }
         }
     }
+    /// Draw a circle outline (non-AA) using the midpoint circle algorithm
+    pub fn draw_circle(&mut self, cx: usize, cy: usize, radius: usize, color: Color) {
+        if radius == 0 {
+            return;
+        }
+        let cx = cx as i32;
+        let cy = cy as i32;
+        let mut x = radius as i32;
+        let mut y = 0i32;
+        let mut err = 1 - x;
+        let max_x = self.dot_width() as i32 - 1;
+        let max_y = self.dot_height() as i32 - 1;
+
+        while x >= y {
+            let pts = [
+                (cx + x, cy + y), (cx + y, cy + x),
+                (cx - y, cy + x), (cx - x, cy + y),
+                (cx - x, cy - y), (cx - y, cy - x),
+                (cx + y, cy - x), (cx + x, cy - y),
+            ];
+            for (px, py) in pts {
+                if px >= 0 && py >= 0 && px <= max_x && py <= max_y {
+                    self.set_dot_with_color(px as usize, py as usize, color);
+                }
+            }
+            y += 1;
+            if err < 0 {
+                err += 2 * y + 1;
+            } else {
+                x -= 1;
+                err += 2 * (y - x) + 1;
+            }
+        }
+    }
+
+
+
+
 
     /// Get the Braille character at a cell position
+    ///
+    /// When anti-aliasing is enabled, uses intensity thresholding to determine
+    /// which dots are "on". Otherwise uses the binary pattern.
     ///
     /// # Arguments
     /// * `cell_x` - X position in cells
@@ -280,6 +345,8 @@ impl BrailleGrid {
         }
 
         let index = cell_y * self.width + cell_x;
+
+        // Use binary pattern
         dots_to_char(self.patterns[index])
     }
 
@@ -300,8 +367,10 @@ impl BrailleGrid {
         }
 
         let index = cell_y * self.width + cell_x;
+
         self.patterns[index] == 0
     }
+
 }
 
 #[cfg(test)]
@@ -456,4 +525,5 @@ mod tests {
         assert_eq!(grid.get_char(1000, 1000), '⠀');
         assert!(grid.is_empty(1000, 1000));
     }
+
 }

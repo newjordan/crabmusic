@@ -29,6 +29,7 @@ use visualization::{
     GridBuffer, OscilloscopeConfig, OscilloscopeVisualizer, ScrollDirection, SineWaveConfig,
     SineWaveVisualizer, SpectrogramVisualizer, SpectrumConfig, SpectrumVisualizer, SpectrumMapping,
     TriggerSlope, Visualizer, WaveformMode, WaveformTunnelVisualizer,
+    IlluminatiEyeVisualizer, NightNightVisualizer,
 };
 
 /// Global shutdown flag
@@ -200,8 +201,11 @@ enum VisualizerMode {
     SineWave,
     Spectrum,
     Oscilloscope,
+    XYOscilloscope,
     Spectrogram,
     WaveformTunnel,
+    IlluminatiEye,
+    NightNight,
 }
 
 impl VisualizerMode {
@@ -210,9 +214,12 @@ impl VisualizerMode {
         match self {
             VisualizerMode::SineWave => VisualizerMode::Spectrum,
             VisualizerMode::Spectrum => VisualizerMode::Oscilloscope,
-            VisualizerMode::Oscilloscope => VisualizerMode::Spectrogram,
+            VisualizerMode::Oscilloscope => VisualizerMode::XYOscilloscope,
+            VisualizerMode::XYOscilloscope => VisualizerMode::Spectrogram,
             VisualizerMode::Spectrogram => VisualizerMode::WaveformTunnel,
-            VisualizerMode::WaveformTunnel => VisualizerMode::SineWave,
+            VisualizerMode::WaveformTunnel => VisualizerMode::IlluminatiEye,
+            VisualizerMode::IlluminatiEye => VisualizerMode::NightNight,
+            VisualizerMode::NightNight => VisualizerMode::SineWave,
         }
     }
 
@@ -222,8 +229,11 @@ impl VisualizerMode {
             VisualizerMode::SineWave => "Sine Wave",
             VisualizerMode::Spectrum => "Spectrum Analyzer",
             VisualizerMode::Oscilloscope => "Oscilloscope",
+            VisualizerMode::XYOscilloscope => "XY Oscilloscope (Lissajous)",
             VisualizerMode::Spectrogram => "Spectrogram",
             VisualizerMode::WaveformTunnel => "Waveform Tunnel",
+            VisualizerMode::IlluminatiEye => "Illuminati Eye",
+            VisualizerMode::NightNight => "Night Night",
         }
     }
 }
@@ -683,6 +693,13 @@ impl Application {
                 viz.set_color_scheme(self.color_scheme.clone());
                 Box::new(viz)
             }
+            VisualizerMode::XYOscilloscope => {
+                let mut config = visualization::XYOscilloscopeConfig::default();
+                config.sensitivity *= self.sensitivity_multiplier;
+                let mut viz = visualization::XYOscilloscopeVisualizer::new(config);
+                viz.set_color_scheme(self.color_scheme.clone());
+                Box::new(viz)
+            }
             VisualizerMode::Spectrogram => {
                 let viz = SpectrogramVisualizer::new(
                     self.color_scheme.clone(),
@@ -692,6 +709,14 @@ impl Application {
             }
             VisualizerMode::WaveformTunnel => {
                 let viz = WaveformTunnelVisualizer::new(self.color_scheme.clone());
+                Box::new(viz)
+            }
+            VisualizerMode::IlluminatiEye => {
+                let viz = IlluminatiEyeVisualizer::new(self.color_scheme.clone());
+                Box::new(viz)
+            }
+            VisualizerMode::NightNight => {
+                let viz = NightNightVisualizer::new(self.color_scheme.clone());
                 Box::new(viz)
             }
         };
@@ -906,12 +931,13 @@ impl Application {
                             KeyCode::Char('8') => self.set_sensitivity_preset(8),
                             KeyCode::Char('9') => self.set_sensitivity_preset(9),
                             KeyCode::Char('g') | KeyCode::Char('G') => {
-                                // Toggle grid (Oscilloscope only)
+                                // Toggle grid (Oscilloscope only for now)
                                 if self.visualizer_mode == VisualizerMode::Oscilloscope {
                                     self.osc_show_grid = !self.osc_show_grid;
                                     self.recreate_visualizer();
                                     tracing::info!("Toggled oscilloscope grid: {}", self.osc_show_grid);
                                 }
+                                // XY Oscilloscope: Grid is always on by default, can be toggled via config
                             }
                             KeyCode::Char('f') | KeyCode::Char('F') => {
                                 // Toggle fill mode (Oscilloscope only)
@@ -940,6 +966,7 @@ impl Application {
                                     self.recreate_visualizer();
                                     tracing::info!("Peak hold toggled: {}", if self.spectrum_peak_hold { "ON" } else { "OFF" });
                                 }
+                                // Note: XY Oscilloscope persistence is always enabled by default
                             }
                             KeyCode::Char('n') | KeyCode::Char('N') => {
                                 // Toggle spectrum mapping mode (Spectrum only)
@@ -976,6 +1003,13 @@ impl Application {
                                         _ => ("A1-A6", 55.0, 1760.0),
                                     };
                                     tracing::info!("Spectrum note range preset: {}", label);
+                                }
+                                // Note: XY Oscilloscope rotation can be configured via XYOscilloscopeConfig
+                            }
+                            KeyCode::Char('z') | KeyCode::Char('Z') => {
+                                // XY Oscilloscope zoom control (future enhancement)
+                                if self.visualizer_mode == VisualizerMode::XYOscilloscope {
+                                    tracing::info!("XY Oscilloscope zoom control (use +/- for sensitivity)");
                                 }
                             }
                             _ => {}

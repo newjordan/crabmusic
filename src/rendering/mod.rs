@@ -19,12 +19,24 @@ use ratatui::{
 };
 use std::io::{self, Stdout};
 
+/// Zoom mode for rendering
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ZoomMode {
+    /// Normal rendering (1:1 mapping)
+    Normal,
+    /// 2× vertical resolution using half-block characters (▀▄)
+    Zoom2x,
+    /// 4× resolution using quarter-block characters
+    Zoom4x,
+}
+
 /// Terminal renderer
 ///
 /// Manages terminal state and renders GridBuffer to the terminal display.
 /// Uses ratatui and crossterm for cross-platform terminal manipulation.
 ///
 /// Supports automatic resize detection and handling.
+/// Supports zoom modes for higher effective resolution.
 ///
 /// # Examples
 ///
@@ -40,6 +52,7 @@ use std::io::{self, Stdout};
 pub struct TerminalRenderer {
     terminal: Terminal<CrosstermBackend<Stdout>>,
     last_size: (u16, u16),
+    zoom_mode: ZoomMode,
 }
 
 impl TerminalRenderer {
@@ -95,6 +108,7 @@ impl TerminalRenderer {
         Ok(Self {
             terminal,
             last_size: (width, height),
+            zoom_mode: ZoomMode::Normal,
         })
     }
 
