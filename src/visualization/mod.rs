@@ -14,7 +14,6 @@ pub mod spectrogram;
 pub mod waveform_tunnel;
 mod flower_of_life;
 mod mandala;
-mod illuminati_eye;
 mod night_night;
 
 // Re-export visualizers for external use
@@ -27,7 +26,6 @@ pub use waveform_tunnel::WaveformTunnelVisualizer;
 pub use flower_of_life::{FlowerOfLifeConfig, FlowerOfLifeVisualizer};
 pub use mandala::{MandalaConfig, MandalaVisualizer};
 pub use braille::BrailleGrid;
-pub use illuminati_eye::IlluminatiEyeVisualizer;
 pub use night_night::NightNightVisualizer;
 
 use crate::dsp::AudioParameters;
@@ -787,6 +785,8 @@ mod tests {
             tempo_confidence: 0.0,
             spectrum: vec![],
             waveform: vec![],
+            waveform_left: vec![],
+            waveform_right: vec![],
         };
 
         viz.update(&params);

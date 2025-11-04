@@ -402,6 +402,8 @@ mod tests {
             tempo_confidence: 0.8,
             spectrum: vec![],
             waveform: vec![],
+            waveform_left: vec![],
+            waveform_right: vec![],
         };
 
         viz.update(&params);

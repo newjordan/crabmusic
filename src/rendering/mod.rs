@@ -5,6 +5,7 @@
 
 use crate::error::RenderError;
 use crate::visualization::GridBuffer;
+use crate::visualization::braille::BrailleGrid;
 use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -184,6 +185,58 @@ impl TerminalRenderer {
                 let paragraph = Paragraph::new(lines);
 
                 // Render to frame
+                frame.render_widget(paragraph, area);
+            })
+            .map_err(|e| RenderError::RenderingFailed(e.to_string()))?;
+
+        Ok(())
+    }
+
+    /// Render a BrailleGrid to the terminal
+    pub fn render_braille(&mut self, grid: &BrailleGrid) -> Result<(), RenderError> {
+        self.terminal
+            .draw(|frame| {
+                let area = frame.size();
+
+                let lines: Vec<Line> = (0..grid.height())
+                    .map(|y| {
+                        let mut spans = Vec::new();
+                        let mut current_color: Option<ratatui::style::Color> = None;
+                        let mut current_text = String::new();
+
+                        for x in 0..grid.width() {
+                            let char = grid.get_char(x, y);
+                            let color = grid.get_color(x, y).map(|c| c.to_ratatui_color());
+
+                            if color != current_color {
+                                if !current_text.is_empty() {
+                                    let span = if let Some(color) = current_color {
+                                        Span::styled(current_text.clone(), Style::default().fg(color))
+                                    } else {
+                                        Span::raw(current_text.clone())
+                                    };
+                                    spans.push(span);
+                                    current_text.clear();
+                                }
+                                current_color = color;
+                            }
+                            current_text.push(char);
+                        }
+
+                        if !current_text.is_empty() {
+                            let span = if let Some(color) = current_color {
+                                Span::styled(current_text, Style::default().fg(color))
+                            } else {
+                                Span::raw(current_text)
+                            };
+                            spans.push(span);
+                        }
+
+                        Line::from(spans)
+                    })
+                    .collect();
+
+                let paragraph = Paragraph::new(lines);
                 frame.render_widget(paragraph, area);
             })
             .map_err(|e| RenderError::RenderingFailed(e.to_string()))?;

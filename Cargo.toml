@@ -42,6 +42,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { version = "1.35", features = ["fs", "time"], optional = true }
 ctrlc = "3.5.1"
 notify = { version = "7.0.0", features = ["serde"] }
+ffmpeg-next = { version = "8.0.0", optional = true }
+image = { version = "0.25.6", optional = true }
 
 # Windows WASAPI for native loopback capture
 [target.'cfg(windows)'.dependencies]
@@ -59,8 +61,11 @@ strip = true            # Strip symbols
 panic = "abort"         # Smaller binary, faster panic
 
 [features]
-default = []
+default = ["image"]
 hot-reload = ["tokio"]
+video = ["ffmpeg-next", "image"]
+ffmpeg-next = ["dep:ffmpeg-next"]
+image = ["dep:image"]
 
 [[bench]]
 name = "fft_benchmark"
