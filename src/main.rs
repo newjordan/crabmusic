@@ -123,6 +123,19 @@ struct Args {
         #[arg(long)]
         image_drop: bool,
 
+        /// Start morph between two images (provide both)
+        #[arg(long, value_name = "FILE")]
+        morph_a: Option<String>,
+
+        /// Second image for morph (B)
+        #[arg(long, value_name = "FILE")]
+        morph_b: Option<String>,
+
+        /// Morph duration in milliseconds for A→B leg
+        #[arg(long, value_name = "MS")]
+        morph_duration: Option<u64>,
+
+
 }
 
 fn main() -> Result<()> {
@@ -151,11 +164,17 @@ fn main() -> Result<()> {
         tracing::info!("Starting video mode for file: {}", path);
         return video::run_video_playback(path);
     }
+    // Image morph mode takes over if both morph_a and morph_b are provided
+    if let (Some(ref a), Some(ref b)) = (args.morph_a.as_ref(), args.morph_b.as_ref()) {
+        tracing::info!("Starting image morph mode: {} <-> {}", a, b);
+        return img::render_image(a.as_str(), Some(b.as_str()), args.morph_duration);
+    }
+
 
     // Image modes take over if requested
     if let Some(path) = args.image.as_deref() {
         tracing::info!("Starting image mode for file: {}", path);
-        return img::render_image(path);
+        return img::render_image(path, None, None);
     }
     if args.image_drop {
         tracing::info!("Starting image drag-and-drop mode");

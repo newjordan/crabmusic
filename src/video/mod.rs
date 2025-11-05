@@ -107,14 +107,14 @@ pub fn run_video_playback(path: &str) -> Result<()> {
 
     // Set up renderer and grids
     let mut renderer = TerminalRenderer::new()?;
-    let (w_cells, h_cells) = renderer.dimensions();
-    let (w_cells, h_cells) = (w_cells as usize, h_cells as usize);
+    let (w_cells0, h_cells0) = renderer.dimensions();
+    let (mut w_cells, mut h_cells) = (w_cells0 as usize, h_cells0 as usize);
     let mut grid = GridBuffer::new(w_cells, h_cells);
     let mut braille = BrailleGrid::new(w_cells, h_cells);
 
-    // Target dot resolution for thresholding
-    let target_dot_w = braille.dot_width();
-    let target_dot_h = braille.dot_height();
+    // Target dot resolution for thresholding (updated on resize)
+    let mut target_dot_w = braille.dot_width();
+    let mut target_dot_h = braille.dot_height();
 
     // Determine playback FPS
     let afr = input.avg_frame_rate();
@@ -177,10 +177,10 @@ pub fn run_video_playback(path: &str) -> Result<()> {
 
             renderer.render(&grid)?;
 
-            // Key handling: press q/Q/Esc to quit
+            // Input and resize handling
             while event::poll(Duration::from_millis(0))? {
-                if let Event::Key(k) = event::read()? {
-                    if k.kind == KeyEventKind::Press {
+                match event::read()? {
+                    Event::Key(k) if k.kind == KeyEventKind::Press => {
                         match k.code {
                             KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
                                 decoder.send_eof()?;
@@ -190,6 +190,16 @@ pub fn run_video_playback(path: &str) -> Result<()> {
                             _ => {}
                         }
                     }
+                    Event::Resize(new_w, new_h) => {
+                        // Rebuild buffers to new terminal size and update dot targets
+                        w_cells = new_w as usize;
+                        h_cells = new_h as usize;
+                        grid = GridBuffer::new(w_cells, h_cells);
+                        braille = BrailleGrid::new(w_cells, h_cells);
+                        target_dot_w = braille.dot_width();
+                        target_dot_h = braille.dot_height();
+                    }
+                    _ => {}
                 }
             }
 

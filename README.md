@@ -1,18 +1,22 @@
 # 🦀 CrabMusic
 
-**Real-time ASCII music visualizer for your terminal**
+Bold, high‑resolution ASCII/Braille rendering for your terminal — images, video, and audio.
 
-CrabMusic captures audio and renders beautiful ASCII visualizations directly in your terminal. Visualize your music, games, or any system audio in real-time!
+CrabMusic is a terminal renderer first. It turns pixels and samples into gorgeous Unicode Braille art with optional full RGB color. Audio reactivity is one module; you can also view images, morph between them, and even play video as Braille.
 
 ## ✨ Features
 
-- 🎵 **Real-time audio capture** - Microphone input or system audio (Windows WASAPI loopback)
-- 🎨 **Multiple character sets** - 7 different ASCII/Unicode styles (blocks, shading, dots, lines, braille, etc.)
-- ⚡ **High performance** - Written in Rust for smooth 60 FPS rendering
-- 🔧 **Highly configurable** - YAML-based configuration with hot-reload support
-- 🎛️ **Flexible audio routing** - Choose input/output devices independently
-- 🖥️ **Cross-platform** - Works on Linux, macOS, and Windows
-- 🎧 **Audio passthrough** - Hear your audio while visualizing it
+- 🟣 **Unicode Braille engine** for ultra-fine ASCII art (2×4 dots per cell)
+- 🌈 **Color modes**: Off → Grayscale → Full RGB
+- 🖼️ **Image viewer**: `--image <file>` or drag/paste paths with `--image-drop`
+- 🔁 **Two-image morph (crossfade + ping‑pong)**: `--morph-a <A> --morph-b <B> [--morph-duration ms]`
+- 🎚️ **Live controls**: speed `[ / ]`, reverse `r`, pause `Space`, letterbox `l`, color `c`, threshold `+/-`, auto-threshold `a`, save `s`
+- 📐 **Smart fit**: letterbox ON/OFF, live terminal resize handling, optional canvas maximize `x`
+- 🎞️ **Video playback**: `--video <file>` (feature-gated)
+- 🎵 **Audio visualization**: mic or Windows loopback capture, optional audio output
+- ⚡ **High performance** Rust + differential terminal updates
+- 🔧 **Configurable** via YAML with hot‑reload
+- 🖥️ **Cross‑platform** (Windows, macOS, Linux)
 
 ## 🚀 Quick Start
 
@@ -30,55 +34,61 @@ cargo build --release
 cargo run --release
 ```
 
-### Windows: System Audio Capture (Recommended!)
-
-On Windows, you can capture system audio directly without any virtual cables:
+### Quick Start: Images
 
 ```bash
-# Capture whatever is playing through your speakers
-cargo run --release -- --loopback
+# Open a single image (Braille art)
+cargo run --release -- --image ".\media\viper.jpg"
+
+# Start a morph that ping‑pongs between two images (A↔B)
+cargo run --release -- --morph-a ".\media\viper.jpg" --morph-b ".\media\tiger.jpg"
+
+# Optional: set morph duration per leg (ms)
+cargo run --release -- --morph-a ".\media\viper.jpg" --morph-b ".\media\tiger.jpg" --morph-duration 4000
+
+# Drag-and-paste mode: start, then paste paths to view
+cargo run --release -- --image-drop
 ```
 
-Play some music and watch it visualize! 🎵
-
-### Usage Examples
+### Quick Start: Audio
 
 ```bash
-# List available audio devices
+# Windows system audio (WASAPI loopback)
+cargo run --release -- --loopback
+
+# Mic input, pick devices
+cargo run --release -- --device "Microphone" --output-device "Speakers"
+```
+
+### Quick Start: Video (feature-gated)
+
+```bash
+# Play a video file as Braille
+cargo run --release -- --video ".\media\clip.mp4"
+```
+
+### More
+
+```bash
+# List audio devices
 cargo run --release -- --list-devices
 
-# Use specific input device (microphone, line-in, etc.)
-cargo run --release -- --device "Microphone"
-
-# Use specific output device for playback
-cargo run --release -- --output-device "Speakers"
-
-# Adjust sensitivity (if audio is too quiet/loud)
-cargo run --release -- --sensitivity 2.0
-
-# Use different character set
-cargo run --release -- --charset shading
-
-# Combine options (Windows system audio + specific output)
-cargo run --release -- --loopback --output-device "Headphones"
-
-# Enable verbose logging for debugging
-cargo run --release -- --verbose
-
-# Show all available options
+# Show all options
 cargo run --release -- --help
 ```
 
-## ⌨️ Keyboard Controls
+## ⌨️ Image Mode Controls
 
-- **`Q`** or **`ESC`** - Quit the application
-- **`C`** - Cycle through character sets (basic → extended → blocks → shading → dots → lines → braille)
-- **`O`** - Cycle through color schemes (monochrome → rainbow → heat map → blue-purple → green-yellow → cyan-magenta)
-- **`V`** - Cycle through visualizer modes (sine wave → spectrum analyzer → oscilloscope)
-- **`M`** - Toggle microphone input on/off
-- **`+`** or **`=`** - Increase sensitivity by 10%
-- **`-`** or **`_`** - Decrease sensitivity by 10%
-- **`1-9`** - Set sensitivity preset (1=0.5x, 2=1.0x, 3=1.5x, ..., 9=4.5x)
+- `m` - start/stop morph (prompt for second image when starting from single image)
+- `Space` - pause/unpause morph
+- `r` - reverse morph direction instantly
+- `[` / `]` - faster / slower (shorter/longer duration per leg)
+- `l` - letterbox ON/OFF (preserve aspect vs fill)
+- `c` - color mode: Off → Grayscale → Full RGB
+- `+` / `-` - manual threshold up/down; `a` - toggle auto-threshold
+- `x` - attempt to maximize canvas (some terminals may not allow programmatic resize)
+- `s` - save current Braille art to `<image_stem>.braille.txt` next to the image
+- `Esc` - clears typed input/morph prompt; `Esc` again (empty) quits; `q` also quits
 
 ## 📝 Configuration
 
@@ -207,27 +217,22 @@ Built with these excellent Rust crates:
 
 ## 📊 Current Status
 
-**Version**: 0.1.0 - MVP Complete! ✅
+**Version**: 0.1.0
 
-**Implemented Features:**
-- ✅ Real-time audio capture (microphone + Windows system audio)
-- ✅ Windows WASAPI loopback (no virtual cables needed!)
-- ✅ FFT-based frequency analysis with configurable parameters
-- ✅ Audio-reactive sine wave visualization
-- ✅ 7 character sets (basic, extended, blocks, shading, dots, lines, braille)
-- ✅ 60 FPS terminal rendering with differential updates
-- ✅ Device selection for input and output
-- ✅ Audio passthrough (hear while visualizing)
-- ✅ Adjustable sensitivity and DSP parameters
-- ✅ YAML configuration with hot-reload
-- ✅ Comprehensive test suite (124 tests)
+**Implemented:**
+- ✅ Unicode Braille renderer with full RGB color mode (Off → Grayscale → Full)
+- ✅ Image viewer: `--image`, drag/paste with `--image-drop`
+- ✅ Two-image morph (crossfade, ping‑pong): `--morph-a`, `--morph-b`, optional `--morph-duration`
+- ✅ Live controls: `[ / ]` speed, `r` reverse, `Space` pause, `l` letterbox, `c` color, `+/-` threshold, `a` auto-threshold, `x` maximize, `s` save
+- ✅ Live terminal-resize handling
+- ✅ Save Braille art to `<stem>.braille.txt`
+- ✅ Audio capture (mic + Windows WASAPI loopback) and audio output
+- ✅ Differential terminal updates + YAML config with hot‑reload
+- ✅ Video playback entrypoint (`--video`, feature‑gated)
 
-**Planned Features:**
-- 🎨 Color support and themes
-- 📊 Spectrum analyzer mode
-- 🌊 Oscilloscope mode
-- 🎵 Beat detection and rhythm analysis
-- 🎛️ Real-time sensitivity controls (keyboard shortcuts)
-- 📈 Peak detection and visualization
-- 🎨 More visual effects and character sets
+**Next up (roadmap):**
+- 🔁 Image playlists (3+ images) with selectable transitions
+- ✨ Additional transitions (noise dissolve, wipe/slide, radial)
+- 📊 Simpler, accurate spectrum analyzer (Spectrum 2) and beat‑reactive effects
+- 🧭 XY oscilloscope refinements
 

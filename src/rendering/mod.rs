@@ -8,8 +8,11 @@ use crate::visualization::GridBuffer;
 use crate::visualization::braille::BrailleGrid;
 use crossterm::{
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{
+        disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen, SetSize,
+    },
 };
+
 use ratatui::{
     backend::CrosstermBackend,
     layout::Rect,
@@ -299,6 +302,37 @@ impl TerminalRenderer {
             false
         }
     }
+
+    /// Request a specific terminal size in character cells (best-effort)
+    /// Note: The terminal/OS may clamp to supported limits.
+    pub fn set_size(&mut self, width: u16, height: u16) -> Result<(), RenderError> {
+        let mut stdout = io::stdout();
+        execute!(stdout, SetSize(width, height))
+            .map_err(|e| RenderError::RenderingFailed(e.to_string()))?;
+        // Update cached size to current actual size
+        self.last_size = self.dimensions();
+        Ok(())
+    }
+
+    /// Try to maximize canvas by requesting large sizes (best-effort growth)
+    /// Returns when a larger size is achieved or after attempts are exhausted.
+    pub fn maximize_canvas(&mut self) -> Result<(), RenderError> {
+        let before = self.dimensions();
+        // Try progressively smaller large sizes; terminal will clamp as needed
+        let candidates: &[(u16, u16)] = &[
+            (400, 200), (360, 180), (320, 160), (300, 150), (280, 140),
+            (260, 130), (240, 120), (220, 110), (200, 100),
+        ];
+        for &(w, h) in candidates {
+            let _ = self.set_size(w, h);
+            let after = self.dimensions();
+            if after.0 > before.0 || after.1 > before.1 {
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+
 
     /// Get the last known terminal size
     ///
