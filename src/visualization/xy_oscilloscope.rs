@@ -38,6 +38,10 @@ pub struct XYOscilloscopeConfig {
     pub use_color: bool,
     /// Dot size for rendering
     pub dot_size: f32,
+    /// Enable beat flash effect
+    pub enable_beat_flash: bool,
+    /// Intensity of the beat flash (0.0-1.0)
+    pub beat_flash_intensity: f32,
 }
 
 impl Default for XYOscilloscopeConfig {
@@ -53,6 +57,8 @@ impl Default for XYOscilloscopeConfig {
             show_crosshair: false,   // Disabled by default - cleaner look
             use_color: true,
             dot_size: 2.0,
+            enable_beat_flash: true,
+            beat_flash_intensity: 0.5,
         }
     }
 }
@@ -187,6 +193,21 @@ impl XYOscilloscopeVisualizer {
         }
     }
 
+    /// Toggle beat flash effect on/off
+    pub fn toggle_beat_flash(&mut self) {
+        self.config.enable_beat_flash = !self.config.enable_beat_flash;
+    }
+
+    /// Increase beat flash intensity
+    pub fn increase_beat_flash_intensity(&mut self) {
+        self.config.beat_flash_intensity = (self.config.beat_flash_intensity + 0.1).min(1.0);
+    }
+
+    /// Decrease beat flash intensity
+    pub fn decrease_beat_flash_intensity(&mut self) {
+        self.config.beat_flash_intensity = (self.config.beat_flash_intensity - 0.1).max(0.0);
+    }
+
     /// Update the color scheme for rendering
     pub fn set_color_scheme(&mut self, color_scheme: super::color_schemes::ColorScheme) {
         self.color_scheme = color_scheme;
@@ -205,6 +226,17 @@ impl XYOscilloscopeVisualizer {
         let y_rot = x * sin_r + y * cos_r;
 
         (x_rot, y_rot)
+    }
+
+    /// Apply beat flash effect to a color
+    fn apply_beat_flash_to_color(&self, mut color: Color) -> Color {
+        if self.config.enable_beat_flash && self.beat_flash > 0.0 {
+            let flash_amount = self.beat_flash * self.config.beat_flash_intensity;
+            color.r = color.r.saturating_add((flash_amount * 255.0) as u8);
+            color.g = color.g.saturating_add((flash_amount * 255.0) as u8);
+            color.b = color.b.saturating_add((flash_amount * 255.0) as u8);
+        }
+        color
     }
 
     /// Render reference grid
@@ -335,11 +367,13 @@ impl XYOscilloscopeVisualizer {
         for (i, &(x, y)) in points.iter().enumerate() {
             if x >= 0.0 && y >= 0.0 && x < braille.dot_width() as f32 && y < braille.dot_height() as f32 {
                 let intensity = i as f32 / points.len() as f32;
-                let color = if self.config.use_color {
+                let mut color = if self.config.use_color {
                     self.color_scheme.get_color(intensity).unwrap_or(Color::new(255, 255, 255))
                 } else {
                     Color::new(255, 255, 255)
                 };
+
+                color = self.apply_beat_flash_to_color(color);
 
                 braille.set_dot_with_color(x as usize, y as usize, color);
             }
@@ -365,11 +399,13 @@ impl XYOscilloscopeVisualizer {
             let (x1, y1) = points[i];
 
             let intensity = i as f32 / points.len() as f32;
-            let color = if self.config.use_color {
+            let mut color = if self.config.use_color {
                 self.color_scheme.get_color(intensity).unwrap_or(Color::new(255, 255, 255))
             } else {
                 Color::new(255, 255, 255)
             };
+
+            color = self.apply_beat_flash_to_color(color);
 
             // Draw with integer pixel lines (non-AA)
             let dot_w = braille.dot_width() as f32;
