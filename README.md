@@ -1,22 +1,25 @@
 # 🦀 CrabMusic
 
-Bold, high‑resolution ASCII/Braille rendering for your terminal — images, video, and audio.
+CrabMusic is an experimental project into the boundaries of ASCII control, utilizing a Rust framework.
 
-CrabMusic is a terminal renderer first. It turns pixels and samples into gorgeous Unicode Braille art with optional full RGB color. Audio reactivity is one module; you can also view images, morph between them, and even play video as Braille.
+Made with love by Frosty40. Build bridges not bombs.
 
-## ✨ Features
+## ✨ Current Capabilities
 
-- 🟣 **Unicode Braille engine** for ultra-fine ASCII art (2×4 dots per cell)
-- 🌈 **Color modes**: Off → Grayscale → Full RGB
-- 🖼️ **Image viewer**: `--image <file>` or drag/paste paths with `--image-drop`
-- 🔁 **Two-image morph (crossfade + ping‑pong)**: `--morph-a <A> --morph-b <B> [--morph-duration ms]`
-- 🎚️ **Live controls**: speed `[ / ]`, reverse `r`, pause `Space`, letterbox `l`, color `c`, threshold `+/-`, auto-threshold `a`, save `s`
-- 📐 **Smart fit**: letterbox ON/OFF, live terminal resize handling, optional canvas maximize `x`
-- 🎞️ **Video playback**: `--video <file>` (feature-gated)
-- 🎵 **Audio visualization**: mic or Windows loopback capture, optional audio output
-- ⚡ **High performance** Rust + differential terminal updates
-- 🔧 **Configurable** via YAML with hot‑reload
-- 🖥️ **Cross‑platform** (Windows, macOS, Linux)
+- 🟣 Unicode Braille engine for ultra‑fine ASCII art (2×4 dots per cell)
+- 🌈 Color modes: Off → Grayscale → Full RGB
+- � Multiple character sets for audio visuals (7 styles)
+- �🖼️ Image viewer: `--image <file>` or drag/paste with `--image-drop`
+- 🔁 Two‑image morph (crossfade, ping‑pong loop): `--morph-a <A>` `--morph-b <B>` `[--morph-duration ms]`
+- �️ Live image controls: `[ / ]` speed, `r` reverse, `Space` pause, `l` letterbox, `c` color, `+/-` threshold, `a` auto‑threshold, `x` maximize, `s` save
+- 💾 Save Braille art to text: writes `<image_stem>.braille.txt`
+- 📐 Smart fit: letterbox ON/OFF, live terminal resize handling, optional canvas maximize `x`
+- 🎞️ Video playback: `--video <file>` (feature‑gated)
+- 🎵 Audio visualization: microphone and Windows WASAPI loopback capture
+- 🔊 Audio output (hear while visualizing) and device selection for input/output
+- ⚙️ Configurable via YAML with hot‑reload
+- ⚡ High‑performance Rust renderer with differential updates
+- 🖥️ Cross‑platform (Windows, macOS, Linux)
 
 ## 🚀 Quick Start
 
