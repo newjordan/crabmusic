@@ -76,7 +76,7 @@ enum ColorMode {
 /// Decodes frames with FFmpeg, maps to Braille, and renders to the terminal.
 #[cfg(feature = "video")]
 pub fn run_video_playback(path: &str) -> Result<()> {
-    use anyhow::{Context, Result};
+    use anyhow::Context;
     use crossterm::event::{self, Event, KeyCode, KeyEventKind};
     use ffmpeg_next as ffmpeg;
     use ffmpeg::{
@@ -124,6 +124,10 @@ pub fn run_video_playback(path: &str) -> Result<()> {
     // Threshold controls for image extraction (manual/auto)
     let mut manual_threshold: u8 = 128;
     let mut auto_thresh: bool = false;
+
+    // HUD visibility and last used threshold for on-screen display
+    let mut show_hud: bool = true;
+    let mut last_used_threshold: u8 = manual_threshold;
 
 
     // Default: loop playback forever until the user quits
@@ -237,6 +241,9 @@ pub fn run_video_playback(path: &str) -> Result<()> {
                 } else {
                     manual_threshold
                 };
+                // Remember for HUD display
+                last_used_threshold = used_threshold;
+
                 blit_luma_to_braille(
                     gray.as_raw(),
                     dst_w,
@@ -306,74 +313,95 @@ pub fn run_video_playback(path: &str) -> Result<()> {
 
                 // Apply effects then render
                 effect_pipeline.apply(&mut grid, &audio_params);
+                // Tiny HUD overlay after effects, before render
+                if show_hud {
+                    draw_video_hud(
+                        &mut grid,
+                        path,
+                        last_used_threshold,
+                        auto_thresh,
+                        letterbox,
+                        color_mode,
+                        &effect_pipeline,
+                        &last_effect,
+                    );
+                }
+
                 renderer.render(&grid)?;
 
                 // Input and resize handling
                 while event::poll(Duration::from_millis(0))? {
                     match event::read()? {
-                        Event::Key(k) if k.kind == KeyEventKind::Press => {
+                        Event::Key(k) => {
                             match k.code {
-                                KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
+                                // Quit: only on initial press
+                                KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc if k.kind == KeyEventKind::Press => {
                                     decoder.send_eof()?;
                                     renderer.cleanup()?;
                                     return Ok(());
                                 }
-                                // Color mode cycle
-                                KeyCode::Char('c') | KeyCode::Char('C') => {
+                                // Color mode cycle: only on press (avoid rapid cycling on repeat)
+                                KeyCode::Char('c') | KeyCode::Char('C') if k.kind == KeyEventKind::Press => {
                                     color_mode = match color_mode {
                                         ColorMode::Off => ColorMode::Grayscale,
                                         ColorMode::Grayscale => ColorMode::Full,
                                         ColorMode::Full => ColorMode::Off,
                                     };
                                 }
-                                // Letterbox aspect-preserving resize
-                                KeyCode::Char('l') | KeyCode::Char('L') => {
+                                // Letterbox toggle: only on press
+                                KeyCode::Char('l') | KeyCode::Char('L') if k.kind == KeyEventKind::Press => {
                                     letterbox = !letterbox;
                                 }
-                                // Toggle effects pipeline
-                                KeyCode::Char('e') | KeyCode::Char('E') => {
+                                // Toggle HUD (F1): only on press
+                                KeyCode::F(1) if k.kind == KeyEventKind::Press => {
+                                    show_hud = !show_hud;
+                                }
+
+                                // Toggle effects pipeline: only on press
+                                KeyCode::Char('e') | KeyCode::Char('E') if k.kind == KeyEventKind::Press => {
                                     effect_pipeline.set_enabled(!effect_pipeline.is_enabled());
                                 }
-                                // Toggle individual effects and set last_effect
-                                KeyCode::Char('b') | KeyCode::Char('B') => {
+                                // Toggle individual effects and set last_effect: only on press
+                                KeyCode::Char('b') | KeyCode::Char('B') if k.kind == KeyEventKind::Press => {
                                     if let Some(eff) = effect_pipeline.get_effect_mut("Bloom") {
                                         eff.set_enabled(!eff.is_enabled());
                                         last_effect = "Bloom".to_string();
                                     }
                                 }
-                                KeyCode::Char('s') | KeyCode::Char('S') => {
+                                KeyCode::Char('s') | KeyCode::Char('S') if k.kind == KeyEventKind::Press => {
                                     if let Some(eff) = effect_pipeline.get_effect_mut("Scanline") {
                                         eff.set_enabled(!eff.is_enabled());
                                         last_effect = "Scanline".to_string();
                                     }
                                 }
-                                KeyCode::Char('h') | KeyCode::Char('H') => {
+                                KeyCode::Char('h') | KeyCode::Char('H') if k.kind == KeyEventKind::Press => {
                                     if let Some(eff) = effect_pipeline.get_effect_mut("Phosphor") {
                                         eff.set_enabled(!eff.is_enabled());
                                         last_effect = "Phosphor".to_string();
                                     }
                                 }
-                                // Intensity adjust for last-toggled effect
-                                KeyCode::Char('[') | KeyCode::Char('{') => {
+                                // Intensity adjust for last-toggled effect: respond to press and repeat
+                                KeyCode::Char('[') | KeyCode::Char('{') if matches!(k.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
                                     if let Some(eff) = effect_pipeline.get_effect_mut(&last_effect) {
                                         let new_i = (eff.intensity() - 0.1).max(0.0);
                                         eff.set_intensity(new_i);
                                     }
                                 }
-                                KeyCode::Char(']') | KeyCode::Char('}') => {
+                                KeyCode::Char(']') | KeyCode::Char('}') if matches!(k.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
                                     if let Some(eff) = effect_pipeline.get_effect_mut(&last_effect) {
                                         let new_i = (eff.intensity() + 0.1).min(1.0);
                                         eff.set_intensity(new_i);
                                     }
                                 }
-                                // Image extraction threshold controls
-                                KeyCode::Char('+') | KeyCode::Char('=') => {
+                                // Image extraction threshold controls: respond to press and repeat
+                                KeyCode::Char('+') | KeyCode::Char('=') if matches!(k.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
                                     if manual_threshold < 250 { manual_threshold = manual_threshold.saturating_add(5); }
                                 }
-                                KeyCode::Char('-') | KeyCode::Char('_') => {
+                                KeyCode::Char('-') | KeyCode::Char('_') if matches!(k.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
                                     if manual_threshold > 5 { manual_threshold = manual_threshold.saturating_sub(5); }
                                 }
-                                KeyCode::Char('a') | KeyCode::Char('A') => {
+                                // Auto threshold toggle: only on press
+                                KeyCode::Char('a') | KeyCode::Char('A') if k.kind == KeyEventKind::Press => {
                                     auto_thresh = !auto_thresh;
                                 }
                                 _ => {}
@@ -414,6 +442,60 @@ pub fn run_video_playback(path: &str) -> Result<()> {
 }
 
 /// Map an 8-bit luminance image onto a BrailleGrid via nearest-neighbor scaling
+
+#[cfg(feature = "video")]
+fn draw_centered(grid: &mut GridBuffer, text: &str) {
+    let start_x = (grid.width().saturating_sub(text.len())) / 2;
+    for (i, ch) in text.chars().enumerate() {
+        let x = start_x + i;
+        if x < grid.width() {
+            grid.set_cell(x, 0, ch);
+        }
+    }
+}
+
+#[cfg(feature = "video")]
+fn draw_video_hud(
+    grid: &mut GridBuffer,
+    path: &str,
+    used_threshold: u8,
+    auto_thresh: bool,
+    letterbox: bool,
+    color_mode: ColorMode,
+    pipeline: &crate::effects::EffectPipeline,
+    last_effect: &str,
+) {
+    use std::path::Path;
+    let name = Path::new(path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("(none)");
+    let color_str = match color_mode {
+        ColorMode::Off => "OFF",
+        ColorMode::Grayscale => "GRAY",
+        ColorMode::Full => "FULL",
+    };
+    let eff = if pipeline.is_enabled() {
+        if let Some(e) = pipeline.get_effect(last_effect) {
+            format!("ON {} {:.1}", last_effect, e.intensity())
+        } else {
+            "ON".to_string()
+        }
+    } else {
+        "OFF".to_string()
+    };
+    let status = format!(
+        "{} | +/- thr={} | a auto={} | l letterbox={} | c color={} | fx={}",
+        name,
+        used_threshold,
+        if auto_thresh { "ON" } else { "OFF" },
+        if letterbox { "ON" } else { "OFF" },
+        color_str,
+        eff
+    );
+    draw_centered(grid, &status);
+}
+
 /// and binary thresholding.
 ///
 /// - luma: length = img_w * img_h
