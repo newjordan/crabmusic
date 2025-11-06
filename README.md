@@ -121,6 +121,8 @@ cargo run --release -- --video ".\media\clip.mp4"
 
 cargo run --release --features video -- --video "media/clip.mp4"
 
+```
+
 ### Quick Start: 3D OBJ Viewer
 
 - Put your `.obj` files in the `models/` folder (we ignore `.mtl`).
