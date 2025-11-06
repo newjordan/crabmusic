@@ -411,6 +411,9 @@ struct Application {
     // Raycaster 3D configuration state
     ray3d_mode: crate::visualization::ray_tracer::RenderMode,
     ray3d_brightness_boost: f32,
+    ray3d_wire_step_rad: f32,
+    ray3d_wire_tol_rad: f32,
+
     // Effect control state
     selected_effect_for_intensity: Option<String>, // Track which effect to adjust intensity for
     // UI overlays
@@ -579,8 +582,13 @@ impl Application {
             spectrum_mapping: SpectrumMapping::NoteBars,
             spectrum_range_preset_index: 1, // Default to A1–A5
             // Raycaster 3D defaults
-            ray3d_mode: crate::visualization::ray_tracer::RenderMode::Wireframe,
+            ray3d_mode: crate::visualization::ray_tracer::RenderMode::Wireframe {
+                step_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_STEP_RAD,
+                tol_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_TOL_RAD,
+            },
             ray3d_brightness_boost: 0.0,
+            ray3d_wire_step_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_STEP_RAD,
+            ray3d_wire_tol_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_TOL_RAD,
             // Effect control defaults
             selected_effect_for_intensity: None, // No effect selected initially
             // UI overlays defaults
@@ -881,8 +889,17 @@ impl Application {
                 Box::new(viz)
             }
             VisualizerMode::Raycaster3D => {
+                let mode = match self.ray3d_mode {
+                    crate::visualization::ray_tracer::RenderMode::Wireframe { .. } => {
+                        crate::visualization::ray_tracer::RenderMode::Wireframe {
+                            step_rad: self.ray3d_wire_step_rad,
+                            tol_rad: self.ray3d_wire_tol_rad,
+                        }
+                    }
+                    crate::visualization::ray_tracer::RenderMode::Solid => crate::visualization::ray_tracer::RenderMode::Solid,
+                };
                 let viz = Raycaster3DVisualizer::new_with(
-                    self.ray3d_mode,
+                    mode,
                     self.ray3d_brightness_boost,
                 );
                 Box::new(viz)
@@ -1029,6 +1046,14 @@ impl Application {
                     channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status, map_name
                 )
             }
+        } else if self.visualizer_mode == VisualizerMode::Raycaster3D {
+            let step_deg = self.ray3d_wire_step_rad.to_degrees();
+            let tol = self.ray3d_wire_tol_rad;
+            let mode_name = match self.ray3d_mode { crate::visualization::ray_tracer::RenderMode::Wireframe { .. } => "WF", crate::visualization::ray_tracer::RenderMode::Solid => "SOL" };
+            format!(
+                " {}{}({}) | {} | {} | {} | W:mode G/H:step({:.0}°) T/Y:thick({:.3}) Up/Down:bright ←/→ V:chan I:num O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
+                channel_prefix, visualizer_name, mode_name, color_scheme_name, mic_status, fx_status, step_deg, tol
+            )
         } else {
             format!(
                 " {}{} | {} | {} | {} | ←/→ V:chan I:num O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
@@ -1159,7 +1184,27 @@ impl Application {
                                         KeyCode::Char('e') | KeyCode::Char('E') => { self.toggle_effects(); }
                                         KeyCode::Char('b') | KeyCode::Char('B') => { self.toggle_effect("Bloom"); }
                                         KeyCode::Char('s') | KeyCode::Char('S') => { self.toggle_effect("Scanline"); }
-                                        KeyCode::Char('h') | KeyCode::Char('H') => { self.toggle_effect("Phosphor"); }
+                                        KeyCode::Char('h') | KeyCode::Char('H') => {
+                                            if self.visualizer_mode == VisualizerMode::Raycaster3D {
+                                                // Increase wireframe grid density (larger step means fewer lines? Here we treat H as increase step -> sparser)
+                                                let step_prev = self.ray3d_wire_step_rad;
+                                                self.ray3d_wire_step_rad = (self.ray3d_wire_step_rad + (2.0_f32.to_radians())).min(45.0_f32.to_radians());
+                                                if let crate::visualization::ray_tracer::RenderMode::Wireframe { .. } = self.ray3d_mode {
+                                                    self.ray3d_mode = crate::visualization::ray_tracer::RenderMode::Wireframe {
+                                                        step_rad: self.ray3d_wire_step_rad,
+                                                        tol_rad: self.ray3d_wire_tol_rad,
+                                                    };
+                                                }
+                                                self.recreate_visualizer();
+                                                tracing::info!(
+                                                    "Raycaster 3D wireframe step: {:.1}° (was {:.1}°)",
+                                                    self.ray3d_wire_step_rad.to_degrees(),
+                                                    step_prev.to_degrees()
+                                                );
+                                            } else {
+                                                self.toggle_effect("Phosphor");
+                                            }
+                                        }
                                         KeyCode::Char('[') | KeyCode::Char('{') => { self.decrease_effect_intensity(); }
                                         KeyCode::Char(']') | KeyCode::Char('}') => { self.increase_effect_intensity(); }
                                         KeyCode::Char('m') | KeyCode::Char('M') => { self.toggle_microphone(); }
@@ -1182,11 +1227,14 @@ impl Application {
                                         KeyCode::Char('w') | KeyCode::Char('W') => {
                                             if self.visualizer_mode == VisualizerMode::Raycaster3D {
                                                 self.ray3d_mode = match self.ray3d_mode {
-                                                    crate::visualization::ray_tracer::RenderMode::Wireframe => crate::visualization::ray_tracer::RenderMode::Solid,
-                                                    crate::visualization::ray_tracer::RenderMode::Solid => crate::visualization::ray_tracer::RenderMode::Wireframe,
+                                                    crate::visualization::ray_tracer::RenderMode::Wireframe { .. } => crate::visualization::ray_tracer::RenderMode::Solid,
+                                                    crate::visualization::ray_tracer::RenderMode::Solid => crate::visualization::ray_tracer::RenderMode::Wireframe {
+                                                        step_rad: self.ray3d_wire_step_rad,
+                                                        tol_rad: self.ray3d_wire_tol_rad,
+                                                    },
                                                 };
                                                 self.recreate_visualizer();
-                                                let mode_name = match self.ray3d_mode { crate::visualization::ray_tracer::RenderMode::Wireframe => "WIREFRAME", crate::visualization::ray_tracer::RenderMode::Solid => "SOLID" };
+                                                let mode_name = match self.ray3d_mode { crate::visualization::ray_tracer::RenderMode::Wireframe { .. } => "WIREFRAME", crate::visualization::ray_tracer::RenderMode::Solid => "SOLID" };
                                                 tracing::info!("Raycaster 3D mode toggled: {}", mode_name);
                                             }
                                         }
@@ -1205,7 +1253,23 @@ impl Application {
                                             }
                                         }
                                         KeyCode::Char('g') | KeyCode::Char('G') => {
-                                            if self.visualizer_mode == VisualizerMode::Oscilloscope {
+                                            if self.visualizer_mode == VisualizerMode::Raycaster3D {
+                                                // Decrease wireframe step (denser grid)
+                                                let step_prev = self.ray3d_wire_step_rad;
+                                                self.ray3d_wire_step_rad = (self.ray3d_wire_step_rad - (2.0_f32.to_radians())).max(2.0_f32.to_radians());
+                                                if let crate::visualization::ray_tracer::RenderMode::Wireframe { .. } = self.ray3d_mode {
+                                                    self.ray3d_mode = crate::visualization::ray_tracer::RenderMode::Wireframe {
+                                                        step_rad: self.ray3d_wire_step_rad,
+                                                        tol_rad: self.ray3d_wire_tol_rad,
+                                                    };
+                                                }
+                                                self.recreate_visualizer();
+                                                tracing::info!(
+                                                    "Raycaster 3D wireframe step: {:.1} deg (was {:.1} deg)",
+                                                    self.ray3d_wire_step_rad.to_degrees(),
+                                                    step_prev.to_degrees()
+                                                );
+                                            } else if self.visualizer_mode == VisualizerMode::Oscilloscope {
                                                 self.osc_show_grid = !self.osc_show_grid;
                                                 self.recreate_visualizer();
                                                 tracing::info!("Toggled oscilloscope grid: {}", self.osc_show_grid);
@@ -1248,7 +1312,23 @@ impl Application {
                                             }
                                         }
                                         KeyCode::Char('t') | KeyCode::Char('T') => {
-                                            if self.visualizer_mode == VisualizerMode::Oscilloscope {
+                                            if self.visualizer_mode == VisualizerMode::Raycaster3D {
+                                                // Decrease tolerance (thinner lines)
+                                                let tol_prev = self.ray3d_wire_tol_rad;
+                                                self.ray3d_wire_tol_rad = (self.ray3d_wire_tol_rad - 0.005).max(0.002);
+                                                if let crate::visualization::ray_tracer::RenderMode::Wireframe { .. } = self.ray3d_mode {
+                                                    self.ray3d_mode = crate::visualization::ray_tracer::RenderMode::Wireframe {
+                                                        step_rad: self.ray3d_wire_step_rad,
+                                                        tol_rad: self.ray3d_wire_tol_rad,
+                                                    };
+                                                }
+                                                self.recreate_visualizer();
+                                                tracing::info!(
+                                                    "Raycaster 3D wireframe thickness (tol): {:.3} rad (was {:.3} rad)",
+                                                    self.ray3d_wire_tol_rad,
+                                                    tol_prev
+                                                );
+                                            } else if self.visualizer_mode == VisualizerMode::Oscilloscope {
                                                 self.osc_trigger_slope = match self.osc_trigger_slope {
                                                     TriggerSlope::Positive => TriggerSlope::Negative,
                                                     TriggerSlope::Negative => TriggerSlope::Both,
@@ -1256,6 +1336,25 @@ impl Application {
                                                 };
                                                 self.recreate_visualizer();
                                                 tracing::info!("Toggled oscilloscope trigger mode");
+                                            }
+                                        }
+                                        KeyCode::Char('y') | KeyCode::Char('Y') => {
+                                            if self.visualizer_mode == VisualizerMode::Raycaster3D {
+                                                // Increase tolerance (thicker lines)
+                                                let tol_prev = self.ray3d_wire_tol_rad;
+                                                self.ray3d_wire_tol_rad = (self.ray3d_wire_tol_rad + 0.005).min(0.15);
+                                                if let crate::visualization::ray_tracer::RenderMode::Wireframe { .. } = self.ray3d_mode {
+                                                    self.ray3d_mode = crate::visualization::ray_tracer::RenderMode::Wireframe {
+                                                        step_rad: self.ray3d_wire_step_rad,
+                                                        tol_rad: self.ray3d_wire_tol_rad,
+                                                    };
+                                                }
+                                                self.recreate_visualizer();
+                                                tracing::info!(
+                                                    "Raycaster 3D wireframe thickness (tol): {:.3} rad (was {:.3} rad)",
+                                                    self.ray3d_wire_tol_rad,
+                                                    tol_prev
+                                                );
                                             }
                                         }
                                         KeyCode::Char('r') | KeyCode::Char('R') => {

@@ -5,7 +5,7 @@ fn test_wireframe_mode_produces_lines() {
     let scene = Scene::new_with_sphere();
     let camera = Camera::new(Vector3::new(0.0, 0.0, 0.0), 4.0, 3.0);
     let (w, h) = (80_usize, 60_usize);
-    let buffer = render(&scene, &camera, w, h, RenderMode::Wireframe);
+    let buffer = render(&scene, &camera, w, h, RenderMode::Wireframe { step_rad: DEFAULT_WIREFRAME_STEP_RAD, tol_rad: DEFAULT_WIREFRAME_TOL_RAD });
 
     // Sample a horizontal scanline through the center and ensure we see some bright points
     let y = h / 2;

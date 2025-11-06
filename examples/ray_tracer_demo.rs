@@ -6,8 +6,12 @@ fn main() {
 
     let (w, h) = (160_usize, 96_usize);
 
-    let mode = std::env::args().nth(1).unwrap_or_else(|| "wireframe".to_string());
-    let mode = if mode.eq_ignore_ascii_case("solid") { RenderMode::Solid } else { RenderMode::Wireframe };
+    let mode_arg = std::env::args().nth(1).unwrap_or_else(|| "wireframe".to_string());
+    let mode = if mode_arg.eq_ignore_ascii_case("solid") {
+        RenderMode::Solid
+    } else {
+        RenderMode::Wireframe { step_rad: DEFAULT_WIREFRAME_STEP_RAD, tol_rad: DEFAULT_WIREFRAME_TOL_RAD }
+    };
 
     let buffer = render(&scene, &camera, w, h, mode);
     let text = intensity_buffer_to_green_braille(&buffer);

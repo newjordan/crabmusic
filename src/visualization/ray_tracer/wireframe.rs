@@ -2,38 +2,70 @@
 
 use super::math::Vector3;
 
-/// Returns true if the hit point lies on a wireframe grid line of the sphere.
-/// `center` and `radius` describe the sphere being rendered.
-pub fn is_on_wireframe(point: Vector3, center: Vector3, radius: f32) -> bool {
-    let p = point - center;
-    let r = radius.max(1e-6);
-    let x = p.x / r; let y = p.y / r; let z = p.z / r;
-    // Normalize to reduce numeric drift
-    let len = (x * x + y * y + z * z).sqrt().max(1e-6);
-    let x = x / len; let y = y / len; let z = z / len;
+/// Default wireframe grid spacing (radians) and tolerance (thickness in radians)
+pub const DEFAULT_WIREFRAME_STEP_RAD: f32 = 10.0_f32.to_radians();
+pub const DEFAULT_WIREFRAME_TOL_RAD: f32 = 0.03; // ~1.7 degrees
 
-    // Spherical coordinates
-    // theta: longitude in [-pi, pi]
-    let theta = z.atan2(x);
-    // phi: polar angle from +Y axis (0 at top, pi at bottom).
-    let phi = (y).clamp(-1.0, 1.0).acos();
+/// Returns true if the surface normal lies on a wireframe grid line.
+/// Uses only the normal, so it works regardless of sphere center/radius.
+pub fn is_on_wireframe_normal(normal: Vector3, step_rad: f32, tol_rad: f32) -> bool {
+    // Normal should already be unit length, but normalize defensively
+    let len = (normal.x * normal.x + normal.y * normal.y + normal.z * normal.z).sqrt().max(1e-6);
+    let x = normal.x / len;
+    let y = normal.y / len;
+    let z = normal.z / len;
 
-    // Grid every 10 degrees (~0.174533 radians). Use a small threshold
-    // so the lines are thin.
-    let step = 10.0_f32.to_radians();
-    let tol = 0.03; // radians ~ 1.7 degree thickness
+    // Spherical coordinates from normal
+    let theta = z.atan2(x); // longitude [-pi, pi]
+    let phi = y.clamp(-1.0, 1.0).acos(); // polar angle [0, pi] from +Y
 
     // Distance to nearest multiple of step (in radians)
     let d_theta = {
-        let m = theta.rem_euclid(step);
-        m.min(step - m)
+        let m = theta.rem_euclid(step_rad);
+        m.min(step_rad - m)
     };
     let d_phi = {
-        let m = phi.rem_euclid(step);
-        m.min(step - m)
+        let m = phi.rem_euclid(step_rad);
+        m.min(step_rad - m)
     };
 
-    d_theta < tol || d_phi < tol
+    d_theta < tol_rad || d_phi < tol_rad
+}
+
+/// Rotate a normal by yaw (Y axis) then pitch (X axis)
+pub fn rotate_normal_yaw_pitch(normal: Vector3, yaw: f32, pitch: f32) -> Vector3 {
+    let (sy, cy) = yaw.sin_cos();
+    let (sp, cp) = pitch.sin_cos();
+    // Yaw around Y
+    let x1 =  cy * normal.x + sy * normal.z;
+    let y1 =  normal.y;
+    let z1 = -sy * normal.x + cy * normal.z;
+    // Pitch around X
+    let x2 = x1;
+    let y2 =  cp * y1 - sp * z1;
+    let z2 =  sp * y1 + cp * z1;
+    Vector3::new(x2, y2, z2)
+}
+
+/// Wireframe test with an additional orientation (rotation) applied before grid check
+pub fn is_on_wireframe_normal_rotated(
+    normal: Vector3,
+    step_rad: f32,
+    tol_rad: f32,
+    yaw: f32,
+    pitch: f32,
+) -> bool {
+    let r = rotate_normal_yaw_pitch(normal, yaw, pitch);
+    is_on_wireframe_normal(r, step_rad, tol_rad)
+}
+
+
+/// Backward-compatible helper: check wireframe using point/center/radius with default params.
+pub fn is_on_wireframe(point: Vector3, center: Vector3, radius: f32) -> bool {
+    let p = point - center;
+    let r = radius.max(1e-6);
+    let normal = Vector3::new(p.x / r, p.y / r, p.z / r);
+    is_on_wireframe_normal(normal, DEFAULT_WIREFRAME_STEP_RAD, DEFAULT_WIREFRAME_TOL_RAD)
 }
 
 #[cfg(test)]
