@@ -51,7 +51,7 @@ impl ScanlineEffect {
     pub fn new(spacing: usize) -> Self {
         Self {
             enabled: true,
-            intensity: 0.5, // Default to 50% intensity
+            intensity: 0.5,          // Default to 50% intensity
             spacing: spacing.max(1), // Minimum spacing of 1
         }
     }
@@ -93,7 +93,7 @@ impl Effect for ScanlineEffect {
         for y in (0..grid.height()).step_by(self.spacing) {
             for x in 0..grid.width() {
                 let cell = grid.get_cell_mut(x, y);
-                
+
                 // Only dim cells that have a foreground color
                 if let Some(color) = cell.foreground_color {
                     // Reduce RGB values by intensity factor
@@ -172,7 +172,7 @@ mod tests {
     #[test]
     fn test_scanline_intensity() {
         let mut effect = ScanlineEffect::new(2);
-        
+
         effect.set_intensity(0.0);
         assert_eq!(effect.intensity(), 0.0);
 
@@ -193,7 +193,7 @@ mod tests {
     #[test]
     fn test_scanline_set_spacing() {
         let mut effect = ScanlineEffect::new(2);
-        
+
         effect.set_spacing(4);
         assert_eq!(effect.spacing(), 4);
 
@@ -246,7 +246,7 @@ mod tests {
 
         let mut effect = ScanlineEffect::new(2);
         effect.set_enabled(false);
-        
+
         let mut grid = GridBuffer::new(10, 10);
         let params = AudioParameters::default();
 
@@ -272,4 +272,3 @@ mod tests {
         }
     }
 }
-

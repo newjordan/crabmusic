@@ -138,4 +138,3 @@ fn render_braille_grid(grid: &BrailleGrid) {
 
     stdout.flush().unwrap();
 }
-

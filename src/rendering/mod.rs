@@ -4,8 +4,8 @@
 #![allow(dead_code)]
 
 use crate::error::RenderError;
-use crate::visualization::GridBuffer;
 use crate::visualization::braille::BrailleGrid;
+use crate::visualization::GridBuffer;
 use crossterm::{
     execute,
     terminal::{
@@ -157,7 +157,10 @@ impl TerminalRenderer {
                             if cell_color != current_color {
                                 if !current_text.is_empty() {
                                     let span = if let Some(color) = current_color {
-                                        Span::styled(current_text.clone(), Style::default().fg(color))
+                                        Span::styled(
+                                            current_text.clone(),
+                                            Style::default().fg(color),
+                                        )
                                     } else {
                                         Span::raw(current_text.clone())
                                     };
@@ -214,7 +217,10 @@ impl TerminalRenderer {
                             if color != current_color {
                                 if !current_text.is_empty() {
                                     let span = if let Some(color) = current_color {
-                                        Span::styled(current_text.clone(), Style::default().fg(color))
+                                        Span::styled(
+                                            current_text.clone(),
+                                            Style::default().fg(color),
+                                        )
                                     } else {
                                         Span::raw(current_text.clone())
                                     };
@@ -320,8 +326,15 @@ impl TerminalRenderer {
         let before = self.dimensions();
         // Try progressively smaller large sizes; terminal will clamp as needed
         let candidates: &[(u16, u16)] = &[
-            (400, 200), (360, 180), (320, 160), (300, 150), (280, 140),
-            (260, 130), (240, 120), (220, 110), (200, 100),
+            (400, 200),
+            (360, 180),
+            (320, 160),
+            (300, 150),
+            (280, 140),
+            (260, 130),
+            (240, 120),
+            (220, 110),
+            (200, 100),
         ];
         for &(w, h) in candidates {
             let _ = self.set_size(w, h);
@@ -332,7 +345,6 @@ impl TerminalRenderer {
         }
         Ok(())
     }
-
 
     /// Get the last known terminal size
     ///

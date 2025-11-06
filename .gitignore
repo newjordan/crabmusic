@@ -14,3 +14,4 @@ Cargo.lock
 # OS
 .DS_Store
 Thumbs.db
+\n# Local test target\n/target-test/

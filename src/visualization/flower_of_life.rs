@@ -82,7 +82,8 @@ pub struct FlowerOfLifeVisualizer {
 impl FlowerOfLifeVisualizer {
     /// Create a new Flower of Life visualizer
     pub fn new(config: FlowerOfLifeConfig) -> Self {
-        let circle_positions = Self::calculate_circle_positions(config.num_rings, config.base_radius);
+        let circle_positions =
+            Self::calculate_circle_positions(config.num_rings, config.base_radius);
 
         Self {
             config,
@@ -174,7 +175,6 @@ impl Visualizer for FlowerOfLifeVisualizer {
         let height = grid.height();
         let mut braille = BrailleGrid::new(width, height);
 
-
         // Calculate center and scale
         let center_x = braille.dot_width() as f32 / 2.0;
         let center_y = braille.dot_height() as f32 / 2.0;
@@ -199,7 +199,8 @@ impl Visualizer for FlowerOfLifeVisualizer {
             let radius = self.config.base_radius * self.pulse_scale * scale;
 
             // Calculate color based on position and treble
-            let color_intensity = (i as f32 / self.circle_positions.len() as f32 + self.treble) % 1.0;
+            let color_intensity =
+                (i as f32 / self.circle_positions.len() as f32 + self.treble) % 1.0;
             let color = if self.config.use_color {
                 self.color_scheme
                     .get_color(color_intensity)
@@ -217,8 +218,12 @@ impl Visualizer for FlowerOfLifeVisualizer {
             );
 
             // Draw circle (non-AA)
-            let cx_i = screen_x.round().clamp(0.0, braille.dot_width() as f32 - 1.0) as usize;
-            let cy_i = screen_y.round().clamp(0.0, braille.dot_height() as f32 - 1.0) as usize;
+            let cx_i = screen_x
+                .round()
+                .clamp(0.0, braille.dot_width() as f32 - 1.0) as usize;
+            let cy_i = screen_y
+                .round()
+                .clamp(0.0, braille.dot_height() as f32 - 1.0) as usize;
             let r_i = radius.max(1.0).round() as usize;
             braille.draw_circle(cx_i, cy_i, r_i, final_color);
         }
@@ -322,4 +327,3 @@ mod tests {
         assert_eq!(viz.beat_flash, 1.0);
     }
 }
-

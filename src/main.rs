@@ -14,25 +14,25 @@ mod config;
 mod dsp;
 mod effects;
 mod error;
-mod rendering;
-mod visualization;
-mod video;
 mod img;
+mod rendering;
+mod video;
+mod visualization;
 
-
-use audio::{AudioCaptureDevice, AudioOutputDevice, AudioRingBuffer, CpalAudioDevice};
 #[cfg(windows)]
 use audio::WasapiLoopbackDevice;
+use audio::{AudioCaptureDevice, AudioOutputDevice, AudioRingBuffer, CpalAudioDevice};
 use dsp::DspProcessor;
 use effects::EffectPipeline;
 use rendering::TerminalRenderer;
 use visualization::{
     character_sets::{get_all_character_sets, get_character_set, CharacterSet, CharacterSetType},
     color_schemes::{ColorScheme, ColorSchemeType},
-    GridBuffer, OscilloscopeConfig, OscilloscopeVisualizer, ScrollDirection, SineWaveConfig,
-    SineWaveVisualizer, SpectrogramVisualizer, SpectrumConfig, SpectrumVisualizer, SpectrumMapping,
-    TriggerSlope, Visualizer, WaveformMode, WaveformTunnelVisualizer,
-    FlowerOfLifeConfig, FlowerOfLifeVisualizer, MandalaConfig, MandalaVisualizer, NightNightVisualizer,
+    FlowerOfLifeConfig, FlowerOfLifeVisualizer, GridBuffer, ImageChannelVisualizer, MandalaConfig,
+    MandalaVisualizer, ObjViewerVisualizer, NightNightVisualizer, OscilloscopeConfig,
+    OscilloscopeVisualizer, Raycaster3DVisualizer, ScrollDirection, SineWaveConfig,
+    SineWaveVisualizer, SpectrogramVisualizer, SpectrumConfig, SpectrumMapping, SpectrumVisualizer,
+    TriggerSlope, VideoChannelVisualizer, Visualizer, WaveformMode, WaveformTunnelVisualizer,
 };
 
 /// Global shutdown flag
@@ -115,27 +115,25 @@ struct Args {
     #[arg(long, value_name = "FILE")]
     video: Option<String>,
 
-        /// Display an image file as Braille art (requires feature: image)
-        #[arg(long, value_name = "FILE")]
-        image: Option<String>,
+    /// Display an image file as Braille art (requires feature: image)
+    #[arg(long, value_name = "FILE")]
+    image: Option<String>,
 
-        /// Start image drag-and-drop mode (paste file paths to render)
-        #[arg(long)]
-        image_drop: bool,
+    /// Start image drag-and-drop mode (paste file paths to render)
+    #[arg(long)]
+    image_drop: bool,
 
-        /// Start morph between two images (provide both)
-        #[arg(long, value_name = "FILE")]
-        morph_a: Option<String>,
+    /// Start morph between two images (provide both)
+    #[arg(long, value_name = "FILE")]
+    morph_a: Option<String>,
 
-        /// Second image for morph (B)
-        #[arg(long, value_name = "FILE")]
-        morph_b: Option<String>,
+    /// Second image for morph (B)
+    #[arg(long, value_name = "FILE")]
+    morph_b: Option<String>,
 
-        /// Morph duration in milliseconds for A→B leg
-        #[arg(long, value_name = "MS")]
-        morph_duration: Option<u64>,
-
-
+    /// Morph duration in milliseconds for A→B leg
+    #[arg(long, value_name = "MS")]
+    morph_duration: Option<u64>,
 }
 
 fn main() -> Result<()> {
@@ -170,7 +168,6 @@ fn main() -> Result<()> {
         return img::render_image(a.as_str(), Some(b.as_str()), args.morph_duration);
     }
 
-
     // Image modes take over if requested
     if let Some(path) = args.image.as_deref() {
         tracing::info!("Starting image mode for file: {}", path);
@@ -180,7 +177,6 @@ fn main() -> Result<()> {
         tracing::info!("Starting image drag-and-drop mode");
         return img::drop_loop();
     }
-
 
     // Load configuration
     let config_path = args.config.as_deref().unwrap_or("config.yaml");
@@ -197,7 +193,7 @@ fn main() -> Result<()> {
         tracing::info!("Overriding sensitivity from CLI: {}", sensitivity);
     }
 
-    if let Some(device) = args.device {
+    if let Some(ref device) = args.device {
         config.audio.device_name = Some(device.clone());
         tracing::info!("Overriding input audio device from CLI: {}", device);
     }
@@ -228,14 +224,47 @@ fn main() -> Result<()> {
     // Setup Ctrl+C handler
     setup_shutdown_handler()?;
 
-    // Determine if we should use loopback
+    // Determine if we should use loopback (persisted via config; CLI overrides)
     #[cfg(windows)]
-    let use_loopback = args.loopback;
+    let use_loopback = if args.loopback {
+        true
+    } else if args.device.is_some() {
+        false
+    } else {
+        config.audio.use_loopback
+    };
     #[cfg(not(windows))]
     let use_loopback = false;
 
+    // Persist the resolved loopback preference for next runs
+    // If config file doesn't exist yet, save current preference to create it
+    if !std::path::Path::new(config_path).exists() {
+        let mut cfg_to_save = config.clone();
+        cfg_to_save.audio.use_loopback = use_loopback;
+        if let Err(e) = cfg_to_save.save(config_path) {
+            tracing::warn!("Failed to save initial config (creating file): {}", e);
+        } else {
+            tracing::info!("Created {} with loopback preference", config_path);
+        }
+    }
+
+    if config.audio.use_loopback != use_loopback {
+        config.audio.use_loopback = use_loopback;
+        if let Err(e) = config.save(config_path) {
+            tracing::warn!("Failed to save config (loopback preference): {}", e);
+        } else {
+            tracing::info!("Saved loopback preference to {}", config_path);
+        }
+    }
+
     // Create and run application
-    let app = Application::new_with_config(config, args.no_audio_output, use_loopback, args.show_labels)?;
+    let app =
+        Application::new_with_config(config, args.no_audio_output, use_loopback, args.show_labels)?;
+
+    // Friendly tip: if loopback is off, mic starts OFF too until you press 'M'
+    if !use_loopback {
+        tracing::warn!("No system loopback. MIC starts OFF. Press 'M' to enable mic input, or run with --loopback to capture system audio.");
+    }
 
     if args.test {
         app.run_test_mode()?;
@@ -258,7 +287,11 @@ enum VisualizerMode {
     WaveformTunnel,
     FlowerOfLife,
     Mandala,
+    Raycaster3D,
+    ObjViewer,
     NightNight,
+    Image,
+    Video,
 }
 
 impl VisualizerMode {
@@ -272,8 +305,31 @@ impl VisualizerMode {
             VisualizerMode::Spectrogram => VisualizerMode::WaveformTunnel,
             VisualizerMode::WaveformTunnel => VisualizerMode::FlowerOfLife,
             VisualizerMode::FlowerOfLife => VisualizerMode::Mandala,
-            VisualizerMode::Mandala => VisualizerMode::NightNight,
-            VisualizerMode::NightNight => VisualizerMode::SineWave,
+            VisualizerMode::Mandala => VisualizerMode::Raycaster3D,
+            VisualizerMode::Raycaster3D => VisualizerMode::ObjViewer,
+            VisualizerMode::ObjViewer => VisualizerMode::NightNight,
+            VisualizerMode::NightNight => VisualizerMode::Image,
+            VisualizerMode::Image => VisualizerMode::Video,
+            VisualizerMode::Video => VisualizerMode::SineWave,
+        }
+    }
+
+    /// Get the previous visualizer mode in the cycle
+    fn prev(&self) -> Self {
+        match self {
+            VisualizerMode::SineWave => VisualizerMode::Video,
+            VisualizerMode::Spectrum => VisualizerMode::SineWave,
+            VisualizerMode::Oscilloscope => VisualizerMode::Spectrum,
+            VisualizerMode::XYOscilloscope => VisualizerMode::Oscilloscope,
+            VisualizerMode::Spectrogram => VisualizerMode::XYOscilloscope,
+            VisualizerMode::WaveformTunnel => VisualizerMode::Spectrogram,
+            VisualizerMode::FlowerOfLife => VisualizerMode::WaveformTunnel,
+            VisualizerMode::Mandala => VisualizerMode::FlowerOfLife,
+            VisualizerMode::Raycaster3D => VisualizerMode::Mandala,
+            VisualizerMode::ObjViewer => VisualizerMode::Raycaster3D,
+            VisualizerMode::NightNight => VisualizerMode::ObjViewer,
+            VisualizerMode::Image => VisualizerMode::NightNight,
+            VisualizerMode::Video => VisualizerMode::Image,
         }
     }
 
@@ -288,8 +344,36 @@ impl VisualizerMode {
             VisualizerMode::WaveformTunnel => "Waveform Tunnel",
             VisualizerMode::FlowerOfLife => "Flower of Life",
             VisualizerMode::Mandala => "Mandala",
+            VisualizerMode::Raycaster3D => "Raycaster 3D",
+            VisualizerMode::ObjViewer => "OBJ Viewer",
             VisualizerMode::NightNight => "Night Night",
+            VisualizerMode::Image => "Image Viewer",
+            VisualizerMode::Video => "Video Player",
         }
+    }
+
+    /// Get zero-based index of the mode (for channel number)
+    fn index(&self) -> usize {
+        match self {
+            VisualizerMode::SineWave => 0,
+            VisualizerMode::Spectrum => 1,
+            VisualizerMode::Oscilloscope => 2,
+            VisualizerMode::XYOscilloscope => 3,
+            VisualizerMode::Spectrogram => 4,
+            VisualizerMode::WaveformTunnel => 5,
+            VisualizerMode::FlowerOfLife => 6,
+            VisualizerMode::Mandala => 7,
+            VisualizerMode::Raycaster3D => 8,
+            VisualizerMode::ObjViewer => 9,
+            VisualizerMode::NightNight => 10,
+            VisualizerMode::Image => 11,
+            VisualizerMode::Video => 12,
+        }
+    }
+
+    /// Total number of channels
+    fn count() -> usize {
+        13
     }
 }
 
@@ -327,16 +411,44 @@ struct Application {
     spectrum_peak_hold: bool,
     spectrum_mapping: SpectrumMapping,
     spectrum_range_preset_index: usize,
+    // Raycaster 3D configuration state
+    ray3d_mode: crate::visualization::ray_tracer::RenderMode,
+    ray3d_brightness_boost: f32,
+    ray3d_wire_step_rad: f32,
+    ray3d_wire_tol_rad: f32,
+    ray3d_rotation_speed_y: f32,
+    ray3d_auto_rotate: bool,
+    // Model Viewer configuration state
+    model_viewer_index: usize,
+    model_viewer_auto_rotate: bool,
+
     // Effect control state
     selected_effect_for_intensity: Option<String>, // Track which effect to adjust intensity for
+    // UI overlays
+    show_channel_number: bool,
+    // File input prompt state (Image/Video channels)
+    file_prompt_active: bool,
+    file_prompt_buffer: String,
+    file_prompt_error: Option<String>,
+    // Suppress char-by-char events immediately after a paste to avoid duplication
+    paste_suppress_deadline: Option<Instant>,
 }
 
 impl Application {
     /// Create a new application instance with configuration
-    fn new_with_config(config: config::AppConfig, no_audio_output: bool, use_loopback: bool, show_labels: bool) -> Result<Self> {
+    fn new_with_config(
+        config: config::AppConfig,
+        no_audio_output: bool,
+        use_loopback: bool,
+        show_labels: bool,
+    ) -> Result<Self> {
         tracing::info!("Initializing components with configuration...");
-        tracing::debug!("Configuration: sample_rate={}, fft_size={}, fps={}",
-            config.audio.sample_rate, config.dsp.fft_size, config.rendering.target_fps);
+        tracing::debug!(
+            "Configuration: sample_rate={}, fft_size={}, fps={}",
+            config.audio.sample_rate,
+            config.dsp.fft_size,
+            config.rendering.target_fps
+        );
 
         // Create ring buffer for audio pipeline
         // REDUCED from 10 to 4 for lower latency - just enough to prevent dropouts
@@ -386,13 +498,13 @@ impl Application {
 
         // Initialize DSP processor with actual sample rate from audio device
         tracing::debug!("Initializing DSP processor...");
-        let dsp_processor = DspProcessor::new(
+        let dsp_processor = DspProcessor::new(actual_sample_rate, config.dsp.fft_size)
+            .context("Failed to initialize DSP processor")?;
+        tracing::info!(
+            "DSP processor initialized: sample_rate={}, fft_size={}",
             actual_sample_rate,
-            config.dsp.fft_size,
-        )
-        .context("Failed to initialize DSP processor")?;
-        tracing::info!("DSP processor initialized: sample_rate={}, fft_size={}",
-            actual_sample_rate, config.dsp.fft_size);
+            config.dsp.fft_size
+        );
 
         // Determine initial character set
         let charset_type = match config.visualization.character_set.as_str() {
@@ -428,10 +540,15 @@ impl Application {
             amplitude_sensitivity: config.visualization.sine_wave.amplitude,
             ..Default::default()
         };
-        let visualizer: Box<dyn Visualizer> = Box::new(SineWaveVisualizer::new(viz_config.clone(), current_charset.clone()));
+        let visualizer: Box<dyn Visualizer> = Box::new(SineWaveVisualizer::new(
+            viz_config.clone(),
+            current_charset.clone(),
+        ));
         let visualizer_mode = VisualizerMode::SineWave;
-        tracing::info!("Visualizer initialized: type=sine_wave, sensitivity={}",
-            config.visualization.sine_wave.amplitude);
+        tracing::info!(
+            "Visualizer initialized: type=sine_wave, sensitivity={}",
+            config.visualization.sine_wave.amplitude
+        );
 
         // Initialize terminal renderer
         tracing::debug!("Initializing terminal renderer...");
@@ -451,11 +568,15 @@ impl Application {
         // Add scanline effect (CRT-style horizontal lines)
         effect_pipeline.add_effect(Box::new(effects::scanline::ScanlineEffect::new(2)));
         // Add phosphor glow effect (temporal persistence for CRT-style trails)
-        effect_pipeline.add_effect(Box::new(effects::phosphor::PhosphorGlowEffect::new(0.3, 0.7)));
+        effect_pipeline.add_effect(Box::new(effects::phosphor::PhosphorGlowEffect::new(
+            0.3, 0.7,
+        )));
         // Add grid overlay effect for testing (optional)
         // effect_pipeline.add_effect(Box::new(effects::grid_overlay::GridOverlayEffect::new(10)));
         effect_pipeline.set_enabled(false); // Start with effects disabled
-        tracing::debug!("Effect pipeline initialized with Bloom + Scanline + Phosphor effects (disabled)");
+        tracing::debug!(
+            "Effect pipeline initialized with Bloom + Scanline + Phosphor effects (disabled)"
+        );
 
         Ok(Self {
             audio_device,
@@ -483,11 +604,32 @@ impl Application {
             osc_waveform_mode: WaveformMode::LineAndFill,
             osc_trigger_slope: TriggerSlope::Positive,
             // Spectrum defaults
-            spectrum_peak_hold: true,  // Start with peaks enabled
+            spectrum_peak_hold: true, // Start with peaks enabled
             spectrum_mapping: SpectrumMapping::NoteBars,
             spectrum_range_preset_index: 1, // Default to A1–A5
+            // Raycaster 3D defaults
+            ray3d_mode: crate::visualization::ray_tracer::RenderMode::Wireframe {
+                step_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_STEP_RAD,
+                tol_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_TOL_RAD,
+            },
+            ray3d_rotation_speed_y: 0.6,
+            ray3d_auto_rotate: true,
+
+            ray3d_brightness_boost: 0.0,
+            ray3d_wire_step_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_STEP_RAD,
+            ray3d_wire_tol_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_TOL_RAD,
+            // Model Viewer defaults
+            model_viewer_index: 0, // Start with first model (cube)
+            model_viewer_auto_rotate: true,
             // Effect control defaults
             selected_effect_for_intensity: None, // No effect selected initially
+            // UI overlays defaults
+            show_channel_number: true,
+            // File prompt defaults
+            file_prompt_active: false,
+            file_prompt_buffer: String::new(),
+            file_prompt_error: None,
+            paste_suppress_deadline: None,
         })
     }
 
@@ -523,13 +665,8 @@ impl Application {
                 }
                 Err(e) => {
                     tracing::error!("Failed to initialize WASAPI loopback: {}", e);
-                    return Err(e).context(
-                        "Failed to initialize WASAPI loopback. \
-                         Please ensure:\n\
-                         - You are running on Windows\n\
-                         - An audio output device is active\n\
-                         - Audio is playing or will play soon"
-                    );
+                    tracing::info!("Falling back to standard input device (microphone) via CPAL");
+                    // Continue to CPAL fallback below
                 }
             }
         }
@@ -539,7 +676,10 @@ impl Application {
             match CpalAudioDevice::new_with_device(ring_buffer.clone(), device_name.clone()) {
                 Ok(device) => {
                     if attempt > 0 {
-                        tracing::info!("Audio capture initialized successfully after {} retries", attempt);
+                        tracing::info!(
+                            "Audio capture initialized successfully after {} retries",
+                            attempt
+                        );
                     }
                     return Ok(Box::new(device));
                 }
@@ -555,7 +695,11 @@ impl Application {
                         );
                         std::thread::sleep(Duration::from_millis(delay));
                     } else {
-                        tracing::error!("Failed to initialize audio capture after {} attempts: {}", MAX_RETRIES, e);
+                        tracing::error!(
+                            "Failed to initialize audio capture after {} attempts: {}",
+                            MAX_RETRIES,
+                            e
+                        );
                         return Err(e).context(format!(
                             "Failed to initialize audio capture after {} attempts. \
                              Please ensure:\n\
@@ -578,10 +722,7 @@ impl Application {
         let charsets = get_all_character_sets();
         self.charset_index = (self.charset_index + 1) % charsets.len();
         self.current_charset = charsets[self.charset_index].clone();
-        tracing::info!(
-            "Switched to character set: {}",
-            self.current_charset.name
-        );
+        tracing::info!("Switched to character set: {}", self.current_charset.name);
     }
 
     /// Cycle to the next color scheme
@@ -630,12 +771,18 @@ impl Application {
                 let old_intensity = effect.intensity();
                 let new_intensity = (old_intensity + 0.1).min(1.0);
                 effect.set_intensity(new_intensity);
-                tracing::info!("{} intensity: {:.1}% → {:.1}%",
-                    effect_name, old_intensity * 100.0, new_intensity * 100.0);
+                tracing::info!(
+                    "{} intensity: {:.1}% → {:.1}%",
+                    effect_name,
+                    old_intensity * 100.0,
+                    new_intensity * 100.0
+                );
             }
         } else {
             // Adjust all effects - collect names as owned Strings to avoid borrow issues
-            let effect_names: Vec<String> = self.effect_pipeline.effect_names()
+            let effect_names: Vec<String> = self
+                .effect_pipeline
+                .effect_names()
                 .into_iter()
                 .map(|s| s.to_string())
                 .collect();
@@ -657,12 +804,18 @@ impl Application {
                 let old_intensity = effect.intensity();
                 let new_intensity = (old_intensity - 0.1).max(0.0);
                 effect.set_intensity(new_intensity);
-                tracing::info!("{} intensity: {:.1}% → {:.1}%",
-                    effect_name, old_intensity * 100.0, new_intensity * 100.0);
+                tracing::info!(
+                    "{} intensity: {:.1}% → {:.1}%",
+                    effect_name,
+                    old_intensity * 100.0,
+                    new_intensity * 100.0
+                );
             }
         } else {
             // Adjust all effects - collect names as owned Strings to avoid borrow issues
-            let effect_names: Vec<String> = self.effect_pipeline.effect_names()
+            let effect_names: Vec<String> = self
+                .effect_pipeline
+                .effect_names()
                 .into_iter()
                 .map(|s| s.to_string())
                 .collect();
@@ -680,14 +833,20 @@ impl Application {
     fn increase_sensitivity(&mut self) {
         self.sensitivity_multiplier = (self.sensitivity_multiplier + 0.1).min(5.0);
         self.recreate_visualizer();
-        tracing::info!("Sensitivity increased to {:.1}x", self.sensitivity_multiplier);
+        tracing::info!(
+            "Sensitivity increased to {:.1}x",
+            self.sensitivity_multiplier
+        );
     }
 
     /// Decrease sensitivity by 10%
     fn decrease_sensitivity(&mut self) {
         self.sensitivity_multiplier = (self.sensitivity_multiplier - 0.1).max(0.1);
         self.recreate_visualizer();
-        tracing::info!("Sensitivity decreased to {:.1}x", self.sensitivity_multiplier);
+        tracing::info!(
+            "Sensitivity decreased to {:.1}x",
+            self.sensitivity_multiplier
+        );
     }
 
     /// Set sensitivity to a preset value (1-9 = 0.5x to 4.5x)
@@ -695,13 +854,24 @@ impl Application {
         if (1..=9).contains(&preset) {
             self.sensitivity_multiplier = 0.5 * preset as f32;
             self.recreate_visualizer();
-            tracing::info!("Sensitivity preset {} set to {:.1}x", preset, self.sensitivity_multiplier);
+            tracing::info!(
+                "Sensitivity preset {} set to {:.1}x",
+                preset,
+                self.sensitivity_multiplier
+            );
         }
     }
 
     /// Switch to the next visualizer mode
     fn next_visualizer_mode(&mut self) {
         self.visualizer_mode = self.visualizer_mode.next();
+        self.recreate_visualizer();
+        tracing::info!("Switched to visualizer: {}", self.visualizer_mode.name());
+    }
+
+    /// Switch to the previous visualizer mode
+    fn prev_visualizer_mode(&mut self) {
+        self.visualizer_mode = self.visualizer_mode.prev();
         self.recreate_visualizer();
         tracing::info!("Switched to visualizer: {}", self.visualizer_mode.name());
     }
@@ -733,7 +903,8 @@ impl Application {
                     config.freq_min = min;
                     config.freq_max = max;
                 }
-                let mut viz = SpectrumVisualizer::new(config, self.sample_rate, self.current_charset.clone());
+                let mut viz =
+                    SpectrumVisualizer::new(config, self.sample_rate, self.current_charset.clone());
                 viz.set_color_scheme(self.color_scheme.clone());
                 Box::new(viz)
             }
@@ -776,8 +947,40 @@ impl Application {
                 viz.set_color_scheme(self.color_scheme.clone());
                 Box::new(viz)
             }
+            VisualizerMode::Raycaster3D => {
+                let mode = match self.ray3d_mode {
+                    crate::visualization::ray_tracer::RenderMode::Wireframe { .. } => {
+                        crate::visualization::ray_tracer::RenderMode::Wireframe {
+                            step_rad: self.ray3d_wire_step_rad,
+                            tol_rad: self.ray3d_wire_tol_rad,
+                        }
+                    }
+                    crate::visualization::ray_tracer::RenderMode::Solid => {
+                        crate::visualization::ray_tracer::RenderMode::Solid
+                    }
+                };
+                let mut viz = Raycaster3DVisualizer::new_with(mode, self.ray3d_brightness_boost);
+                viz.set_rotation_speed_y(self.ray3d_rotation_speed_y);
+                viz.set_auto_rotate(self.ray3d_auto_rotate);
+                Box::new(viz)
+            }
+            VisualizerMode::ObjViewer => {
+                let mut viz = ObjViewerVisualizer::new_with_model_index(self.model_viewer_index);
+                viz.set_auto_rotate(self.model_viewer_auto_rotate);
+                Box::new(viz)
+            }
             VisualizerMode::NightNight => {
                 let viz = NightNightVisualizer::new(self.color_scheme.clone());
+                Box::new(viz)
+            }
+            VisualizerMode::Image => {
+                let mut viz = ImageChannelVisualizer::new(self.color_scheme.clone());
+                viz.set_color_scheme(self.color_scheme.clone());
+                Box::new(viz)
+            }
+            VisualizerMode::Video => {
+                let mut viz = VideoChannelVisualizer::new(self.color_scheme.clone());
+                viz.set_color_scheme(self.color_scheme.clone());
                 Box::new(viz)
             }
         };
@@ -819,12 +1022,41 @@ impl Application {
         }
     }
 
+    /// Try to load a file into the current channel (Image/Video)
+    fn try_load_current_channel_path(&mut self, path: &str) -> Result<(), String> {
+        match self.visualizer_mode {
+            VisualizerMode::Image => {
+                if let Some(v) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                    .downcast_mut::<crate::visualization::ImageChannelVisualizer>()
+                {
+                    v.try_load(path)
+                } else {
+                    Err("internal visualizer type mismatch (Image)".into())
+                }
+            }
+            VisualizerMode::Video => {
+                if let Some(v) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                    .downcast_mut::<crate::visualization::VideoChannelVisualizer>()
+                {
+                    v.try_load(path)
+                } else {
+                    Err("internal visualizer type mismatch (Video)".into())
+                }
+            }
+            _ => Err("File input is only available in Image/Video channels".into()),
+        }
+    }
+
     /// Add UI overlay with renderer info and controls
     fn add_ui_overlay(&self, grid: &mut GridBuffer) {
         let visualizer_name = self.visualizer.name();
         let scheme_type = self.color_scheme.scheme_type();
         let color_scheme_name = scheme_type.name();
-        let mic_status = if self.microphone_enabled { "MIC:ON" } else { "MIC:OFF" };
+        let mic_status = if self.microphone_enabled {
+            "MIC:ON"
+        } else {
+            "MIC:OFF"
+        };
 
         // Build effect status string with individual effect states
         let mut fx_parts = Vec::new();
@@ -853,29 +1085,76 @@ impl Application {
         }
         let fx_status = fx_parts.join(" ");
 
+        // Optional channel prefix (e.g., "CH 3/11: ")
+        let channel_prefix = if self.show_channel_number {
+            format!(
+                "CH {}/{}: ",
+                self.visualizer_mode.index() + 1,
+                VisualizerMode::count()
+            )
+        } else {
+            String::new()
+        };
+
         let info_text = if self.visualizer_mode == VisualizerMode::Oscilloscope {
-            format!(" {} | {} | {} | {} | V:mode O:color E:fx B:bloom S:scan H:phosphor []:intensity G:grid F:fill T:trigger M:mic Q:quit ",
-                visualizer_name, color_scheme_name, mic_status, fx_status)
+            format!(
+                " {}{} | {} | {} | {} | ←/→ V:chan I:num O:color E:fx B:bloom S:scan H:phosphor []:intensity G:grid F:fill T:trigger M:mic Q:quit ",
+                channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status
+            )
         } else if self.visualizer_mode == VisualizerMode::Spectrum {
-            let map_name = match self.spectrum_mapping { SpectrumMapping::NoteBars => "NOTES", SpectrumMapping::LogBars => "LOG" };
+            let map_name = match self.spectrum_mapping {
+                SpectrumMapping::NoteBars => "NOTES",
+                SpectrumMapping::LogBars => "LOG",
+            };
             if matches!(self.spectrum_mapping, SpectrumMapping::NoteBars) {
                 let (range_label, _min, _max) = match self.spectrum_range_preset_index % 3 {
                     0 => ("A2-A5", 110.0, 880.0),
                     1 => ("A1-A5", 55.0, 880.0),
                     _ => ("A1-A6", 55.0, 1760.0),
                 };
-                format!(" {} | {} | {} | {} | V:mode O:color E:fx B:bloom S:scan H:phosphor []:intensity P:peaks L:labels N:map({}) R:range({}) M:mic +/-:sens Q:quit ",
-                    visualizer_name, color_scheme_name, mic_status, fx_status, map_name, range_label)
+                format!(
+                    " {}{} | {} | {} | {} | ←/→ V:chan I:num O:color E:fx B:bloom S:scan H:phosphor []:intensity P:peaks L:labels N:map({}) R:range({}) M:mic +/-:sens Q:quit ",
+                    channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status, map_name, range_label
+                )
             } else {
-                format!(" {} | {} | {} | {} | V:mode O:color E:fx B:bloom S:scan H:phosphor []:intensity P:peaks L:labels N:map({}) M:mic +/-:sens Q:quit ",
-                    visualizer_name, color_scheme_name, mic_status, fx_status, map_name)
+                format!(
+                    " {}{} | {} | {} | {} | ←/→ V:chan I:num O:color E:fx B:bloom S:scan H:phosphor []:intensity P:peaks L:labels N:map({}) M:mic +/-:sens Q:quit ",
+                    channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status, map_name
+                )
             }
+        } else if self.visualizer_mode == VisualizerMode::Raycaster3D {
+            let step_deg = self.ray3d_wire_step_rad.to_degrees();
+            let tol = self.ray3d_wire_tol_rad;
+            let mode_name = match self.ray3d_mode {
+                crate::visualization::ray_tracer::RenderMode::Wireframe { .. } => "WF",
+                crate::visualization::ray_tracer::RenderMode::Solid => "SOL",
+            };
+            let auto_label = if self.ray3d_auto_rotate { "ON" } else { "OFF" };
+            let rot_speed = self.ray3d_rotation_speed_y;
+            format!(
+                " {}{}({}) | {} | {} | {} | W:mode G/H:step({:.0}°) T/Y:thick({:.3}) J/K:rot({:.1}) R:auto({}) Up/Down:bright ←/→ V:chan I:num O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
+                channel_prefix, visualizer_name, mode_name, color_scheme_name, mic_status, fx_status, step_deg, tol, rot_speed, auto_label
+            )
+        } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+            let (model_name, line_px, dot_px) = if let Some(viz) = (&*self.visualizer as &dyn std::any::Any)
+                .downcast_ref::<crate::visualization::ObjViewerVisualizer>()
+            {
+                let (lp, dp) = viz.wire_px().unwrap_or((1, 2));
+                (viz.model_name(), lp, dp)
+            } else {
+                ("Unknown", 1, 2)
+            };
+            let auto_label = if self.model_viewer_auto_rotate { "ON" } else { "OFF" };
+            format!(
+                " {}{} | {} | {} | {} | Model: {} | W:mode A/D:yaw J/K:pitch ,/.:roll G/H:line({}px) T/Y:dot({}px) Z/X:zoom F:focus R:auto({}) Up/Down:switch ←/→ V:chan I:num O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
+                channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status, model_name, line_px, dot_px, auto_label
+            )
         } else {
-            format!(" {} | {} | {} | {} | V:mode O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
-                visualizer_name, color_scheme_name, mic_status, fx_status)
+            format!(
+                " {}{} | {} | {} | {} | ←/→ V:chan I:num O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
+                channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status
+            )
         };
-
-
 
         // Draw info bar at the top
         let start_x = (grid.width().saturating_sub(info_text.len())) / 2;
@@ -883,6 +1162,22 @@ impl Application {
             let x = start_x + i;
             if x < grid.width() {
                 grid.set_cell(x, 0, ch);
+            }
+        }
+
+        // Secondary hint: Image/Video temporarily disabled
+        if matches!(
+            self.visualizer_mode,
+            VisualizerMode::Image | VisualizerMode::Video
+        ) {
+            let y = 1usize;
+            let hint = "White noise mode: image/video temporarily disabled";
+            for (i, ch) in hint.chars().enumerate() {
+                if i < grid.width() {
+                    grid.set_cell(i, y, ch);
+                } else {
+                    break;
+                }
             }
         }
     }
@@ -894,8 +1189,6 @@ impl Application {
         // Start audio capture
         self.audio_device
             .start_capture()
-
-
             .context("Failed to start audio capture")?;
 
         // Start audio output (playback) if enabled
@@ -924,157 +1217,569 @@ impl Application {
                 break;
             }
 
-            // Check for keyboard input with debouncing
+            // Check for keyboard/paste input
             if event::poll(Duration::from_millis(0)).unwrap_or(false) {
-                if let Ok(Event::Key(KeyEvent { code, .. })) = event::read() {
-                    // Check if enough time has passed since last key press (debouncing)
-                    let now = Instant::now();
-                    let time_since_last_press = now.duration_since(self.last_key_press);
-
-                    // Always allow quit key without debouncing
-                    let is_quit_key = matches!(code, KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc);
-
-                    if is_quit_key || time_since_last_press.as_millis() >= self.key_debounce_ms as u128 {
-                        // Update last key press time for non-quit keys
-                        if !is_quit_key {
-                            self.last_key_press = now;
+                if let Ok(ev) = event::read() {
+                    match ev {
+                        Event::Paste(_s) => {
+                            // Image/Video inline path input temporarily disabled; ignore paste
                         }
+                        Event::Key(KeyEvent { code, .. }) => {
+                            // When file prompt is active, handle editing without debounce
+                            if self.file_prompt_active {
+                                match code {
+                                    KeyCode::Esc => {
+                                        self.file_prompt_active = false;
+                                        self.file_prompt_buffer.clear();
+                                        self.file_prompt_error = None;
+                                        self.paste_suppress_deadline = None;
+                                    }
+                                    KeyCode::Enter => {
+                                        let candidate_owned = self.file_prompt_buffer.clone();
+                                        let path =
+                                            candidate_owned.trim().trim_matches('"').to_string();
+                                        if path.is_empty() {
+                                            self.file_prompt_error = Some("Empty path".to_string());
+                                        } else {
+                                            match self.try_load_current_channel_path(&path) {
+                                                Ok(_) => {
+                                                    self.file_prompt_active = false;
+                                                    self.file_prompt_error = None;
+                                                    self.paste_suppress_deadline = None;
+                                                }
+                                                Err(err) => {
+                                                    self.file_prompt_error = Some(err);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    KeyCode::Backspace => {
+                                        self.file_prompt_buffer.pop();
+                                    }
+                                    KeyCode::Char(c) => {
+                                        // Avoid duplicating paste content from terminals that also emit Char events
+                                        if let Some(deadline) = self.paste_suppress_deadline {
+                                            if Instant::now() <= deadline { /* skip */
+                                            } else {
+                                                self.file_prompt_buffer.push(c);
+                                            }
+                                        } else {
+                                            self.file_prompt_buffer.push(c);
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                                // Skip normal key handling when in prompt
+                            } else {
+                                // Normal key handling with debounce
+                                let now = Instant::now();
+                                let time_since_last_press = now.duration_since(self.last_key_press);
+                                let is_quit_key = matches!(
+                                    code,
+                                    KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc
+                                );
+                                if is_quit_key
+                                    || time_since_last_press.as_millis()
+                                        >= self.key_debounce_ms as u128
+                                {
+                                    if !is_quit_key {
+                                        self.last_key_press = now;
+                                    }
+                                    match code {
+                                        KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
+                                            tracing::info!("Quit key pressed");
+                                            break;
+                                        }
+                                        // Enter: no-op (image/video inline path input disabled temporarily)
+                                        KeyCode::Enter => {}
+                                        KeyCode::Char('o') | KeyCode::Char('O') => {
+                                            self.next_color_scheme();
+                                        }
+                                        KeyCode::Char('e') | KeyCode::Char('E') => {
+                                            self.toggle_effects();
+                                        }
+                                        KeyCode::Char('b') | KeyCode::Char('B') => {
+                                            self.toggle_effect("Bloom");
+                                        }
+                                        KeyCode::Char('s') | KeyCode::Char('S') => {
+                                            self.toggle_effect("Scanline");
+                                        }
+                                        KeyCode::Char('h') | KeyCode::Char('H') => {
+                                            if self.visualizer_mode == VisualizerMode::Raycaster3D {
+                                                // Increase wireframe grid step (sparser)
+                                                let step_prev = self.ray3d_wire_step_rad;
+                                                self.ray3d_wire_step_rad = (self.ray3d_wire_step_rad + (2.0_f32.to_radians()))
+                                                    .min(45.0_f32.to_radians());
+                                                if let crate::visualization::ray_tracer::RenderMode::Wireframe { .. } = self.ray3d_mode {
+                                                    self.ray3d_mode = crate::visualization::ray_tracer::RenderMode::Wireframe {
+                                                        step_rad: self.ray3d_wire_step_rad,
+                                                        tol_rad: self.ray3d_wire_tol_rad,
+                                                    };
+                                                }
+                                                self.recreate_visualizer();
+                                                tracing::info!(
+                                                    "Raycaster 3D wireframe step: {:.1}° (was {:.1}°)",
+                                                    self.ray3d_wire_step_rad.to_degrees(),
+                                                    step_prev.to_degrees()
+                                                );
+                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
+                                                {
+                                                    let (step_prev, _tol) = viz.wire_params().unwrap_or((crate::visualization::ray_tracer::DEFAULT_WIREFRAME_STEP_RAD, crate::visualization::ray_tracer::DEFAULT_WIREFRAME_TOL_RAD));
+                                                    let new_step = (step_prev + 2.0_f32.to_radians()).min(45.0_f32.to_radians());
+                                                    viz.set_wire_step_rad(new_step);
+                                                    tracing::info!(
+                                                        "OBJ Viewer wireframe step: {:.1}° (was {:.1}°)",
+                                                        new_step.to_degrees(),
+                                                        step_prev.to_degrees()
+                                                    );
+                                                }
+                                            } else {
+                                                self.toggle_effect("Phosphor");
+                                            }
+                                        }
+                                        KeyCode::Char('[') | KeyCode::Char('{') => {
+                                            self.decrease_effect_intensity();
+                                        }
+                                        KeyCode::Char(']') | KeyCode::Char('}') => {
+                                            self.increase_effect_intensity();
+                                        }
+                                        KeyCode::Char('m') | KeyCode::Char('M') => {
+                                            self.toggle_microphone();
+                                        }
+                                        KeyCode::Right => {
+                                            self.next_visualizer_mode();
+                                        }
+                                        KeyCode::Left => {
+                                            self.prev_visualizer_mode();
+                                        }
+                                        KeyCode::Char('v') | KeyCode::Char('V') => {
+                                            self.next_visualizer_mode();
+                                        }
+                                        KeyCode::Char('i') | KeyCode::Char('I') => {
+                                            self.show_channel_number = !self.show_channel_number;
+                                        }
+                                        KeyCode::Char('+') | KeyCode::Char('=') => {
+                                            self.increase_sensitivity();
+                                        }
+                                        KeyCode::Char('-') | KeyCode::Char('_') => {
+                                            self.decrease_sensitivity();
+                                        }
+                                        KeyCode::Char('1') => self.set_sensitivity_preset(1),
+                                        KeyCode::Char('2') => self.set_sensitivity_preset(2),
+                                        KeyCode::Char('3') => self.set_sensitivity_preset(3),
+                                        KeyCode::Char('4') => self.set_sensitivity_preset(4),
+                                        KeyCode::Char('5') => self.set_sensitivity_preset(5),
+                                        KeyCode::Char('6') => self.set_sensitivity_preset(6),
+                                        KeyCode::Char('7') => self.set_sensitivity_preset(7),
+                                        KeyCode::Char('8') => self.set_sensitivity_preset(8),
+                                        KeyCode::Char('9') => self.set_sensitivity_preset(9),
+                                        // Raycaster 3D specific controls
+                                        KeyCode::Char('w') | KeyCode::Char('W') => {
+                                            if self.visualizer_mode == VisualizerMode::Raycaster3D {
+                                                self.ray3d_mode = match self.ray3d_mode {
+                                                    crate::visualization::ray_tracer::RenderMode::Wireframe { .. } => crate::visualization::ray_tracer::RenderMode::Solid,
+                                                    crate::visualization::ray_tracer::RenderMode::Solid => crate::visualization::ray_tracer::RenderMode::Wireframe {
+                                                        step_rad: self.ray3d_wire_step_rad,
+                                                        tol_rad: self.ray3d_wire_tol_rad,
+                                                    },
+                                                };
+                                                self.recreate_visualizer();
+                                                let mode_name = match self.ray3d_mode { crate::visualization::ray_tracer::RenderMode::Wireframe { .. } => "WIREFRAME", crate::visualization::ray_tracer::RenderMode::Solid => "SOLID" };
+                                                tracing::info!(
+                                                    "Raycaster 3D mode toggled: {}",
+                                                    mode_name
+                                                );
+                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
+                                                {
+                                                    viz.toggle_render_mode();
+                                                    tracing::info!("OBJ Viewer: render mode toggled");
+                                                }
+                                            }
+                                        }
+                                        KeyCode::Up => {
+                                            if self.visualizer_mode == VisualizerMode::Raycaster3D {
+                                                self.ray3d_brightness_boost =
+                                                    (self.ray3d_brightness_boost + 0.05).min(0.7);
+                                                self.recreate_visualizer();
+                                                tracing::info!(
+                                                    "Raycaster 3D brightness boost: +{:.2}",
+                                                    self.ray3d_brightness_boost
+                                                );
+                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                                // Next model
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
+                                                {
+                                                    viz.next_model();
+                                                    tracing::info!("OBJ Viewer: {}", viz.model_name());
+                                                }
+                                            }
+                                        }
+                                        KeyCode::Down => {
+                                            if self.visualizer_mode == VisualizerMode::Raycaster3D {
+                                                self.ray3d_brightness_boost =
+                                                    (self.ray3d_brightness_boost - 0.05).max(-0.3);
+                                                self.recreate_visualizer();
+                                                tracing::info!(
+                                                    "Raycaster 3D brightness boost: +{:.2}",
+                                                    self.ray3d_brightness_boost
+                                                );
+                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                                // Previous model
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
+                                                {
+                                                    viz.prev_model();
+                                                    tracing::info!("OBJ Viewer: {}", viz.model_name());
+                                                }
+                                            }
+                                        }
+                                        KeyCode::Char('g') | KeyCode::Char('G') => {
+                                            if self.visualizer_mode == VisualizerMode::Raycaster3D {
+                                                // Decrease wireframe step (denser grid)
+                                                let step_prev = self.ray3d_wire_step_rad;
+                                                self.ray3d_wire_step_rad = (self.ray3d_wire_step_rad - (2.0_f32.to_radians()))
+                                                    .max(2.0_f32.to_radians());
+                                                if let crate::visualization::ray_tracer::RenderMode::Wireframe { .. } = self.ray3d_mode {
+                                                    self.ray3d_mode = crate::visualization::ray_tracer::RenderMode::Wireframe {
+                                                        step_rad: self.ray3d_wire_step_rad,
+                                                        tol_rad: self.ray3d_wire_tol_rad,
+                                                    };
+                                                }
+                                                self.recreate_visualizer();
+                                                tracing::info!(
+                                                    "Raycaster 3D wireframe step: {:.1} deg (was {:.1} deg)",
+                                                    self.ray3d_wire_step_rad.to_degrees(),
+                                                    step_prev.to_degrees()
+                                                );
+                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
+                                                {
+                                                    let (step_prev, _tol) = viz.wire_params().unwrap_or((crate::visualization::ray_tracer::DEFAULT_WIREFRAME_STEP_RAD, crate::visualization::ray_tracer::DEFAULT_WIREFRAME_TOL_RAD));
+                                                    let new_step = (step_prev - 2.0_f32.to_radians()).max(2.0_f32.to_radians());
+                                                    viz.set_wire_step_rad(new_step);
+                                                    tracing::info!(
+                                                        "OBJ Viewer wireframe step: {:.1} deg (was {:.1} deg)",
+                                                        new_step.to_degrees(),
+                                                        step_prev.to_degrees()
+                                                    );
+                                                }
+                                            } else if self.visualizer_mode == VisualizerMode::Oscilloscope {
+                                                self.osc_show_grid = !self.osc_show_grid;
+                                                self.recreate_visualizer();
+                                                tracing::info!(
+                                                    "Toggled oscilloscope grid: {}",
+                                                    self.osc_show_grid
+                                                );
+                                            }
+                                        }
+                                        KeyCode::Char('f') | KeyCode::Char('F') => {
+                                            if self.visualizer_mode == VisualizerMode::Oscilloscope {
+                                                self.osc_waveform_mode = match self.osc_waveform_mode {
+                                                    WaveformMode::Line => WaveformMode::Filled,
+                                                    WaveformMode::Filled => WaveformMode::LineAndFill,
+                                                    WaveformMode::LineAndFill => WaveformMode::Line,
+                                                };
+                                                self.recreate_visualizer();
+                                                tracing::info!("Toggled oscilloscope fill mode");
+                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
+                                                {
+                                                    viz.focus_fit();
+                                                    tracing::info!("OBJ Viewer: focus fit");
+                                                }
+                                            }
+                                        }
+                                        KeyCode::Char('l') | KeyCode::Char('L') => {
+                                            if self.visualizer_mode == VisualizerMode::Spectrum {
+                                                self.show_labels = !self.show_labels;
+                                                self.recreate_visualizer();
+                                                tracing::info!(
+                                                    "Labels toggled: {}",
+                                                    if self.show_labels { "ON" } else { "OFF" }
+                                                );
+                                            }
+                                        }
+                                        KeyCode::Char('p') | KeyCode::Char('P') => {
+                                            if self.visualizer_mode == VisualizerMode::Spectrum {
+                                                self.spectrum_peak_hold = !self.spectrum_peak_hold;
+                                                self.recreate_visualizer();
+                                                tracing::info!(
+                                                    "Peak hold toggled: {}",
+                                                    if self.spectrum_peak_hold {
+                                                        "ON"
+                                                    } else {
+                                                        "OFF"
+                                                    }
+                                                );
+                                            }
+                                        }
+                                        KeyCode::Char('n') | KeyCode::Char('N') => {
+                                            if self.visualizer_mode == VisualizerMode::Spectrum {
+                                                self.spectrum_mapping = match self.spectrum_mapping
+                                                {
+                                                    SpectrumMapping::NoteBars => {
+                                                        SpectrumMapping::LogBars
+                                                    }
+                                                    SpectrumMapping::LogBars => {
+                                                        SpectrumMapping::NoteBars
+                                                    }
+                                                };
+                                                self.recreate_visualizer();
+                                                let name = match self.spectrum_mapping {
+                                                    SpectrumMapping::NoteBars => "NOTES",
+                                                    SpectrumMapping::LogBars => "LOG",
+                                                };
+                                                tracing::info!(
+                                                    "Spectrum mapping toggled: {}",
+                                                    name
+                                                );
+                                            }
+                                        }
+                                        KeyCode::Char('t') | KeyCode::Char('T') => {
+                                            if self.visualizer_mode == VisualizerMode::Raycaster3D {
+                                                // Decrease tolerance (thinner lines)
+                                                let tol_prev = self.ray3d_wire_tol_rad;
+                                                self.ray3d_wire_tol_rad =
+                                                    (self.ray3d_wire_tol_rad - 0.005).max(0.002);
+                                                if let crate::visualization::ray_tracer::RenderMode::Wireframe { .. } = self.ray3d_mode {
+                                                    self.ray3d_mode = crate::visualization::ray_tracer::RenderMode::Wireframe {
+                                                        step_rad: self.ray3d_wire_step_rad,
+                                                        tol_rad: self.ray3d_wire_tol_rad,
+                                                    };
+                                                }
+                                                self.recreate_visualizer();
+                                                tracing::info!(
+                                                    "Raycaster 3D wireframe thickness (tol): {:.3} rad (was {:.3} rad)",
+                                                    self.ray3d_wire_tol_rad,
+                                                    tol_prev
+                                                );
+                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
+                                                {
+                                                    let (_step, tol_prev) = viz.wire_params().unwrap_or((crate::visualization::ray_tracer::DEFAULT_WIREFRAME_STEP_RAD, crate::visualization::ray_tracer::DEFAULT_WIREFRAME_TOL_RAD));
+                                                    let new_tol = (tol_prev - 0.005).max(0.002);
+                                                    viz.set_wire_tol_rad(new_tol);
+                                                    tracing::info!(
+                                                        "OBJ Viewer wireframe thickness (tol): {:.3} rad (was {:.3} rad)",
+                                                        new_tol,
+                                                        tol_prev
+                                                    );
+                                                }
+                                            } else if self.visualizer_mode == VisualizerMode::Oscilloscope {
+                                                self.osc_trigger_slope = match self.osc_trigger_slope {
+                                                    TriggerSlope::Positive => TriggerSlope::Negative,
+                                                    TriggerSlope::Negative => TriggerSlope::Both,
+                                                    TriggerSlope::Both => TriggerSlope::Positive,
+                                                };
+                                                self.recreate_visualizer();
+                                                tracing::info!("Toggled oscilloscope trigger mode");
+                                            }
+                                        }
+                                        KeyCode::Char('y') | KeyCode::Char('Y') => {
+                                            if self.visualizer_mode == VisualizerMode::Raycaster3D {
+                                                // Increase tolerance (thicker lines)
+                                                let tol_prev = self.ray3d_wire_tol_rad;
+                                                self.ray3d_wire_tol_rad = (self.ray3d_wire_tol_rad + 0.005).min(0.15);
+                                                if let crate::visualization::ray_tracer::RenderMode::Wireframe { .. } = self.ray3d_mode {
+                                                    self.ray3d_mode = crate::visualization::ray_tracer::RenderMode::Wireframe {
+                                                        step_rad: self.ray3d_wire_step_rad,
+                                                        tol_rad: self.ray3d_wire_tol_rad,
+                                                    };
+                                                }
+                                                self.recreate_visualizer();
+                                                tracing::info!(
+                                                    "Raycaster 3D wireframe thickness (tol): {:.3} rad (was {:.3} rad)",
+                                                    self.ray3d_wire_tol_rad,
+                                                    tol_prev
+                                                );
+                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
+                                                {
+                                                    let (_step, tol_prev) = viz.wire_params().unwrap_or((crate::visualization::ray_tracer::DEFAULT_WIREFRAME_STEP_RAD, crate::visualization::ray_tracer::DEFAULT_WIREFRAME_TOL_RAD));
+                                                    let new_tol = (tol_prev + 0.005).min(0.15);
+                                                    viz.set_wire_tol_rad(new_tol);
+                                                    tracing::info!(
+                                                        "OBJ Viewer wireframe thickness (tol): {:.3} rad (was {:.3} rad)",
+                                                        new_tol,
+                                                        tol_prev
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        KeyCode::Char('j') | KeyCode::Char('J') => {
+                                            if self.visualizer_mode == VisualizerMode::Raycaster3D {
+                                                let prev = self.ray3d_rotation_speed_y;
+                                                self.ray3d_rotation_speed_y =
+                                                    (self.ray3d_rotation_speed_y - 0.1).max(0.0);
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::Raycaster3DVisualizer>()
+                                                {
+                                                    viz.set_rotation_speed_y(self.ray3d_rotation_speed_y);
+                                                }
+                                                tracing::info!("Raycaster 3D rotation speed: {:.2} rad/s (was {:.2})", self.ray3d_rotation_speed_y, prev);
+                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
+                                                {
+                                                    let step = 5.0_f32.to_radians();
+                                                    viz.pitch_up(step);
+                                                    tracing::info!("OBJ Viewer: pitch up ({:.1}°)", 5.0);
+                                                }
+                                            }
+                                        }
+                                        KeyCode::Char('k') | KeyCode::Char('K') => {
+                                            if self.visualizer_mode == VisualizerMode::Raycaster3D {
+                                                let prev = self.ray3d_rotation_speed_y;
+                                                self.ray3d_rotation_speed_y =
+                                                    (self.ray3d_rotation_speed_y + 0.1).min(5.0);
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::Raycaster3DVisualizer>()
+                                                {
+                                                    viz.set_rotation_speed_y(self.ray3d_rotation_speed_y);
+                                                }
+                                                tracing::info!("Raycaster 3D rotation speed: {:.2} rad/s (was {:.2})", self.ray3d_rotation_speed_y, prev);
+                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
+                                                {
+                                                    let step = 5.0_f32.to_radians();
+                                                    viz.pitch_down(step);
+                                                    tracing::info!("OBJ Viewer: pitch down ({:.1}°)", 5.0);
+                                                }
+                                            }
+                                        }
 
-                        match code {
-                            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
-                                tracing::info!("Quit key pressed");
-                                break;
-                            }
-                            // Charset cycling disabled - all visualizers now use Braille rendering
-                            // KeyCode::Char('c') | KeyCode::Char('C') => {
-                            //     self.next_charset();
-                            // }
-                            KeyCode::Char('o') | KeyCode::Char('O') => {
-                                self.next_color_scheme();
-                            }
-                            KeyCode::Char('e') | KeyCode::Char('E') => {
-                                self.toggle_effects();
-                            }
-                            KeyCode::Char('b') | KeyCode::Char('B') => {
-                                self.toggle_effect("Bloom");
-                            }
-                            KeyCode::Char('s') | KeyCode::Char('S') => {
-                                self.toggle_effect("Scanline");
-                            }
-                            KeyCode::Char('h') | KeyCode::Char('H') => {
-                                self.toggle_effect("Phosphor");
-                            }
-                            KeyCode::Char('[') | KeyCode::Char('{') => {
-                                self.decrease_effect_intensity();
-                            }
-                            KeyCode::Char(']') | KeyCode::Char('}') => {
-                                self.increase_effect_intensity();
-                            }
-                            KeyCode::Char('m') | KeyCode::Char('M') => {
-                                self.toggle_microphone();
-                            }
-                            KeyCode::Char('v') | KeyCode::Char('V') => {
-                                self.next_visualizer_mode();
-                            }
-                            KeyCode::Char('+') | KeyCode::Char('=') => {
-                                self.increase_sensitivity();
-                            }
-                            KeyCode::Char('-') | KeyCode::Char('_') => {
-                                self.decrease_sensitivity();
-                            }
-                            KeyCode::Char('1') => self.set_sensitivity_preset(1),
-                            KeyCode::Char('2') => self.set_sensitivity_preset(2),
-                            KeyCode::Char('3') => self.set_sensitivity_preset(3),
-                            KeyCode::Char('4') => self.set_sensitivity_preset(4),
-                            KeyCode::Char('5') => self.set_sensitivity_preset(5),
-                            KeyCode::Char('6') => self.set_sensitivity_preset(6),
-                            KeyCode::Char('7') => self.set_sensitivity_preset(7),
-                            KeyCode::Char('8') => self.set_sensitivity_preset(8),
-                            KeyCode::Char('9') => self.set_sensitivity_preset(9),
-                            KeyCode::Char('g') | KeyCode::Char('G') => {
-                                // Toggle grid (Oscilloscope only for now)
-                                if self.visualizer_mode == VisualizerMode::Oscilloscope {
-                                    self.osc_show_grid = !self.osc_show_grid;
-                                    self.recreate_visualizer();
-                                    tracing::info!("Toggled oscilloscope grid: {}", self.osc_show_grid);
-                                }
-                                // XY Oscilloscope: Grid is always on by default, can be toggled via config
-                            }
-                            KeyCode::Char('f') | KeyCode::Char('F') => {
-                                // Toggle fill mode (Oscilloscope only)
-                                if self.visualizer_mode == VisualizerMode::Oscilloscope {
-                                    self.osc_waveform_mode = match self.osc_waveform_mode {
-                                        WaveformMode::Line => WaveformMode::Filled,
-                                        WaveformMode::Filled => WaveformMode::LineAndFill,
-                                        WaveformMode::LineAndFill => WaveformMode::Line,
-                                    };
-                                    self.recreate_visualizer();
-                                    tracing::info!("Toggled oscilloscope fill mode");
-                                }
-                            }
-                            KeyCode::Char('l') | KeyCode::Char('L') => {
-                                // Toggle labels (Spectrum only)
-                                if self.visualizer_mode == VisualizerMode::Spectrum {
-                                    self.show_labels = !self.show_labels;
-                                    self.recreate_visualizer();
-                                    tracing::info!("Labels toggled: {}", if self.show_labels { "ON" } else { "OFF" });
-                                }
-                            }
-                            KeyCode::Char('p') | KeyCode::Char('P') => {
-                                // Toggle peak hold (Spectrum only)
-                                if self.visualizer_mode == VisualizerMode::Spectrum {
-                                    self.spectrum_peak_hold = !self.spectrum_peak_hold;
-                                    self.recreate_visualizer();
-                                    tracing::info!("Peak hold toggled: {}", if self.spectrum_peak_hold { "ON" } else { "OFF" });
-                                }
-                                // Note: XY Oscilloscope persistence is always enabled by default
-                            }
-                            KeyCode::Char('n') | KeyCode::Char('N') => {
-                                // Toggle spectrum mapping mode (Spectrum only)
-                                if self.visualizer_mode == VisualizerMode::Spectrum {
-                                    self.spectrum_mapping = match self.spectrum_mapping {
-                                        SpectrumMapping::NoteBars => SpectrumMapping::LogBars,
-                                        SpectrumMapping::LogBars => SpectrumMapping::NoteBars,
-                                    };
-                                    self.recreate_visualizer();
-                                    let name = match self.spectrum_mapping { SpectrumMapping::NoteBars => "NOTES", SpectrumMapping::LogBars => "LOG" };
-                                    tracing::info!("Spectrum mapping toggled: {}", name);
-                                }
-                            }
-                            KeyCode::Char('t') | KeyCode::Char('T') => {
-                                // Toggle trigger mode (Oscilloscope only)
-                                if self.visualizer_mode == VisualizerMode::Oscilloscope {
-                                    self.osc_trigger_slope = match self.osc_trigger_slope {
-                                        TriggerSlope::Positive => TriggerSlope::Negative,
-                                        TriggerSlope::Negative => TriggerSlope::Both,
-                                        TriggerSlope::Both => TriggerSlope::Positive,
-                                    };
-                                    self.recreate_visualizer();
-                                    tracing::info!("Toggled oscilloscope trigger mode");
-                                }
-                            }
-                            KeyCode::Char('r') | KeyCode::Char('R') => {
-                                // Cycle Spectrum note range presets (Spectrum+NoteBars only)
-                                if self.visualizer_mode == VisualizerMode::Spectrum && matches!(self.spectrum_mapping, SpectrumMapping::NoteBars) {
-                                    self.spectrum_range_preset_index = (self.spectrum_range_preset_index + 1) % 3;
-                                    self.recreate_visualizer();
-                                    let (label, _min, _max) = match self.spectrum_range_preset_index % 3 {
-                                        0 => ("A2-A5", 110.0, 880.0),
-                                        1 => ("A1-A5", 55.0, 880.0),
-                                        _ => ("A1-A6", 55.0, 1760.0),
-                                    };
-                                    tracing::info!("Spectrum note range preset: {}", label);
-                                }
-                                // Note: XY Oscilloscope rotation can be configured via XYOscilloscopeConfig
-                            }
-                            KeyCode::Char('z') | KeyCode::Char('Z') => {
-                                // XY Oscilloscope zoom control (future enhancement)
-                                if self.visualizer_mode == VisualizerMode::XYOscilloscope {
-                                    tracing::info!("XY Oscilloscope zoom control (use +/- for sensitivity)");
+                                        KeyCode::Char('r') | KeyCode::Char('R') => {
+                                            if self.visualizer_mode == VisualizerMode::Raycaster3D {
+                                                self.ray3d_auto_rotate = !self.ray3d_auto_rotate;
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::Raycaster3DVisualizer>()
+                                                {
+                                                    viz.set_auto_rotate(self.ray3d_auto_rotate);
+                                                }
+                                                tracing::info!(
+                                                    "Raycaster 3D auto-rotate: {}",
+                                                    if self.ray3d_auto_rotate {
+                                                        "ON"
+                                                    } else {
+                                                        "OFF"
+                                                    }
+                                                );
+                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                                self.model_viewer_auto_rotate = !self.model_viewer_auto_rotate;
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
+                                                {
+                                                    viz.set_auto_rotate(self.model_viewer_auto_rotate);
+                                                }
+                                                tracing::info!(
+                                                    "OBJ Viewer auto-rotate: {}",
+                                                    if self.model_viewer_auto_rotate { "ON" } else { "OFF" }
+                                                );
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::Spectrum
+                                                && matches!(
+                                                    self.spectrum_mapping,
+                                                    SpectrumMapping::NoteBars
+                                                )
+                                            {
+                                                self.spectrum_range_preset_index =
+                                                    (self.spectrum_range_preset_index + 1) % 3;
+                                                self.recreate_visualizer();
+                                                let (label, _min, _max) =
+                                                    match self.spectrum_range_preset_index % 3 {
+                                                        0 => ("A2-A5", 110.0, 880.0),
+                                                        1 => ("A1-A5", 55.0, 880.0),
+                                                        _ => ("A1-A6", 55.0, 1760.0),
+                                                    };
+                                                tracing::info!(
+                                                    "Spectrum note range preset: {}",
+                                                    label
+                                                );
+                                            }
+                                        }
+                                        KeyCode::Char('a') | KeyCode::Char('A') => {
+                                            if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
+                                                {
+                                                    let step = 5.0_f32.to_radians();
+                                                    viz.yaw_left(step);
+                                                    tracing::info!("OBJ Viewer: yaw left ({:.1}°)", 5.0);
+                                                }
+                                            }
+                                        }
+                                        KeyCode::Char('d') | KeyCode::Char('D') => {
+                                            if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
+                                                {
+                                                    let step = 5.0_f32.to_radians();
+                                                    viz.yaw_right(step);
+                                                    tracing::info!("OBJ Viewer: yaw right ({:.1}°)", 5.0);
+                                                }
+                                            }
+                                        }
+                                        KeyCode::Char(',') => {
+                                            if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
+                                                {
+                                                    let step = 5.0_f32.to_radians();
+                                                    viz.roll_ccw(step);
+                                                    tracing::info!("OBJ Viewer: roll CCW ({:.1}°)", 5.0);
+                                                }
+                                            }
+                                        }
+                                        KeyCode::Char('.') => {
+                                            if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
+                                                {
+                                                    let step = 5.0_f32.to_radians();
+                                                    viz.roll_cw(step);
+                                                    tracing::info!("OBJ Viewer: roll CW ({:.1}°)", 5.0);
+                                                }
+                                            }
+                                        }
+
+                                        KeyCode::Char('z') | KeyCode::Char('Z') => {
+                                            if self.visualizer_mode == VisualizerMode::XYOscilloscope {
+                                                tracing::info!("XY Oscilloscope zoom control (use +/- for sensitivity)");
+                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
+                                                {
+                                                    viz.zoom_in();
+                                                    tracing::info!("OBJ Viewer: zoom in");
+                                                }
+                                            }
+                                        }
+                                        KeyCode::Char('x') | KeyCode::Char('X') => {
+                                            if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
+                                                {
+                                                    viz.zoom_out();
+                                                    tracing::info!("OBJ Viewer: zoom out");
+                                                }
+                                            }
+                                        }
+                                        _ => {}
+                                    }
                                 }
                             }
-                            _ => {}
                         }
+                        _ => {}
                     }
                 }
             }

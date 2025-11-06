@@ -49,12 +49,12 @@ impl Default for XYOscilloscopeConfig {
         Self {
             sample_count: 512,
             sensitivity: 1.0,
-            persistence: 0.85,  // 85% persistence = nice trails
+            persistence: 0.85, // 85% persistence = nice trails
             rotation: 0.0,
             zoom: 1.0,
-            display_mode: XYDisplayMode::Lines,  // Temporarily use simple lines for debugging
-            show_grid: false,        // Disabled by default - cleaner look
-            show_crosshair: false,   // Disabled by default - cleaner look
+            display_mode: XYDisplayMode::Lines, // Temporarily use simple lines for debugging
+            show_grid: false,                   // Disabled by default - cleaner look
+            show_crosshair: false,              // Disabled by default - cleaner look
             use_color: true,
             dot_size: 2.0,
             enable_beat_flash: true,
@@ -308,10 +308,16 @@ impl XYOscilloscopeVisualizer {
         unsafe {
             PLOT_LOG += 1;
             if PLOT_LOG == 1 {
-                eprintln!("XY: render_xy_plot - left_channel.len()={}, right_channel.len()={}",
-                    self.left_channel.len(), self.right_channel.len());
+                eprintln!(
+                    "XY: render_xy_plot - left_channel.len()={}, right_channel.len()={}",
+                    self.left_channel.len(),
+                    self.right_channel.len()
+                );
                 if self.left_channel.len() > 0 {
-                    eprintln!("  left[0]={:.3}, right[0]={:.3}", self.left_channel[0], self.right_channel[0]);
+                    eprintln!(
+                        "  left[0]={:.3}, right[0]={:.3}",
+                        self.left_channel[0], self.right_channel[0]
+                    );
                 }
             }
         }
@@ -335,7 +341,11 @@ impl XYOscilloscopeVisualizer {
             total_count += 1;
 
             // Check if point is within bounds
-            if screen_x >= 0.0 && screen_x < dot_width as f32 && screen_y >= 0.0 && screen_y < dot_height as f32 {
+            if screen_x >= 0.0
+                && screen_x < dot_width as f32
+                && screen_y >= 0.0
+                && screen_y < dot_height as f32
+            {
                 points.push((screen_x, screen_y));
             } else {
                 clipped_count += 1;
@@ -347,8 +357,13 @@ impl XYOscilloscopeVisualizer {
         unsafe {
             RENDER_LOG += 1;
             if RENDER_LOG == 1 {
-                eprintln!("XY: render called, total={}, clipped={}, visible_points={}, mode={:?}",
-                    total_count, clipped_count, points.len(), self.config.display_mode);
+                eprintln!(
+                    "XY: render called, total={}, clipped={}, visible_points={}, mode={:?}",
+                    total_count,
+                    clipped_count,
+                    points.len(),
+                    self.config.display_mode
+                );
                 if points.len() > 0 {
                     eprintln!("  First point: ({:.1}, {:.1})", points[0].0, points[0].1);
                 }
@@ -365,10 +380,16 @@ impl XYOscilloscopeVisualizer {
     /// Render as individual dots
     fn render_dots(&self, braille: &mut BrailleGrid, points: &[(f32, f32)]) {
         for (i, &(x, y)) in points.iter().enumerate() {
-            if x >= 0.0 && y >= 0.0 && x < braille.dot_width() as f32 && y < braille.dot_height() as f32 {
+            if x >= 0.0
+                && y >= 0.0
+                && x < braille.dot_width() as f32
+                && y < braille.dot_height() as f32
+            {
                 let intensity = i as f32 / points.len() as f32;
                 let mut color = if self.config.use_color {
-                    self.color_scheme.get_color(intensity).unwrap_or(Color::new(255, 255, 255))
+                    self.color_scheme
+                        .get_color(intensity)
+                        .unwrap_or(Color::new(255, 255, 255))
                 } else {
                     Color::new(255, 255, 255)
                 };
@@ -388,8 +409,10 @@ impl XYOscilloscopeVisualizer {
             if LINE_LOG == 1 {
                 eprintln!("XY: render_lines called with {} points", points.len());
                 if points.len() >= 2 {
-                    eprintln!("  First: ({:.1}, {:.1}) -> ({:.1}, {:.1})",
-                        points[0].0, points[0].1, points[1].0, points[1].1);
+                    eprintln!(
+                        "  First: ({:.1}, {:.1}) -> ({:.1}, {:.1})",
+                        points[0].0, points[0].1, points[1].0, points[1].1
+                    );
                 }
             }
         }
@@ -400,7 +423,9 @@ impl XYOscilloscopeVisualizer {
 
             let intensity = i as f32 / points.len() as f32;
             let mut color = if self.config.use_color {
-                self.color_scheme.get_color(intensity).unwrap_or(Color::new(255, 255, 255))
+                self.color_scheme
+                    .get_color(intensity)
+                    .unwrap_or(Color::new(255, 255, 255))
             } else {
                 Color::new(255, 255, 255)
             };
@@ -442,7 +467,9 @@ impl XYOscilloscopeVisualizer {
 
                 let intensity = (i as f32 / old_points.len() as f32) * fade;
                 let base_color = if self.config.use_color {
-                    self.color_scheme.get_color(intensity).unwrap_or(Color::new(255, 255, 255))
+                    self.color_scheme
+                        .get_color(intensity)
+                        .unwrap_or(Color::new(255, 255, 255))
                 } else {
                     Color::new(255, 255, 255)
                 };
@@ -613,4 +640,3 @@ mod tests {
         assert_ne!(viz.config.display_mode, initial);
     }
 }
-

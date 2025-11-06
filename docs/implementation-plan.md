@@ -284,6 +284,53 @@ After MVP validation, prioritize based on user feedback:
 - Recursive nested patterns
 - Integration with existing sacred geometry work
 
+**Phase 5 - 3D Visualization** 🆕:
+- **Epic 10: Braille-Based 3D Model Viewer** - Software ray tracer with green wireframe aesthetic
+  - VIZ-009: Ray Tracing Primitives & Math Foundation
+  - VIZ-010: Camera & Rendering Pipeline
+  - VIZ-011: Wireframe Rendering & Shading Modes (green-on-black default)
+  - VIZ-012: Braille Conversion & Green Terminal Display
+
+---
+
+### Epic 10: Braille-Based 3D Model Viewer 🆕
+**Goal**: Implement a software-based ray tracer that renders 3D wireframe scenes in classic green-on-black terminal aesthetic
+**Priority**: P3 (Experimental/Post-MVP)
+**Estimated Effort**: 8-12 days
+**Status**: Draft
+
+**Vision**: Extend CrabMusic's terminal visualization capabilities into the third dimension by implementing a ray tracer that renders 3D objects (spheres, eventually models) using Braille characters with a **classic green wireframe on black background aesthetic** - think Matrix, vintage vector displays, and retro CRT terminals. This creates a unique retro-futuristic look and demonstrates advanced terminal rendering techniques.
+
+**Visual Aesthetic**: **Green wireframe on black background** - the quintessential retro terminal look with latitude/longitude grid lines and high-contrast Braille rendering.
+
+**Stories**:
+1. [VIZ-009](stories/VIZ-009-ray-tracing-primitives.md) - Ray Tracing Primitives & Math Foundation
+2. [VIZ-010](stories/VIZ-010-camera-rendering.md) - Camera & Rendering Pipeline
+3. [VIZ-011](stories/VIZ-011-wireframe-shading.md) - Wireframe Rendering & Shading Modes
+4. [VIZ-012](stories/VIZ-012-braille-3d-display.md) - Braille Conversion & Green Terminal Display
+
+**Dependencies**:
+- VIZ-001 (Grid Buffer) - For Braille character rendering
+- RENDER-002 (Ratatui Integration) - For terminal output (optional)
+
+**Success Criteria**:
+- Ray tracer renders wireframe sphere with latitude/longitude grid lines (primary mode)
+- Solid shading mode available as alternative
+- Output displays in green ANSI colors on black background
+- Output converts to Braille characters with proper wireframe representation
+- Renders to terminal at acceptable performance (<100ms for 80x24)
+- Pure Rust implementation with no external graphics dependencies
+- Extensible architecture for future 3D objects and materials
+- Classic retro terminal aesthetic achieved
+
+**Future Enhancements** (Post-Epic):
+- Multiple objects and materials
+- OBJ/STL model file loading
+- Reflections and refractions
+- Audio-reactive 3D visualizations (geometry morphing with music)
+- Shadow casting
+- Anti-aliasing for smoother appearance
+
 ---
 
 ## Story File Format

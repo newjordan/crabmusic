@@ -20,11 +20,11 @@ const FRAME_DURATION: Duration = Duration::from_millis(50); // Faster refresh ra
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // --- Audio Setup ---
     let ring_buffer = Arc::new(AudioRingBuffer::new(10));
-        let mut audio_device = CpalAudioDevice::new_with_device(ring_buffer.clone(), None)
+    let mut audio_device = CpalAudioDevice::new_with_device(ring_buffer.clone(), None)
         .context("Failed to initialize audio device")?;
     let sample_rate = audio_device.get_config().sample_rate;
-    let mut dsp_processor = DspProcessor::new(sample_rate, 2048)
-        .context("Failed to initialize DSP processor")?;
+    let mut dsp_processor =
+        DspProcessor::new(sample_rate, 2048).context("Failed to initialize DSP processor")?;
     audio_device.start_capture()?;
 
     // --- Renderer and Animation Setup ---
@@ -50,7 +50,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        let dt = frame_start.saturating_duration_since(last_frame).as_secs_f32().min(0.12);
+        let dt = frame_start
+            .saturating_duration_since(last_frame)
+            .as_secs_f32()
+            .min(0.12);
         last_frame = frame_start;
 
         // --- Audio Processing ---
@@ -249,7 +252,13 @@ impl IlluminatiAnimation {
             let wobble = (self.time * 0.6 + t * TAU).sin() * 0.8;
             let base_pos = pos.add(normal.mul(wobble));
 
-            let thickness = [(-2.4, 0.28), (-1.3, 0.58), (0.0, 1.0), (1.2, 0.58), (2.3, 0.28)];
+            let thickness = [
+                (-2.4, 0.28),
+                (-1.3, 0.58),
+                (0.0, 1.0),
+                (1.2, 0.58),
+                (2.3, 0.28),
+            ];
             for (offset, weight) in thickness {
                 let offset_pos = base_pos.add(normal.mul(offset));
                 plot_layer(braille, layers, width, offset_pos, layer, weight);
@@ -276,7 +285,14 @@ impl IlluminatiAnimation {
             let t = step as f32 / steps as f32;
             let pos = start.lerp(end, t);
             let pulse = ((self.time * pulse_speed + t * 5.1).sin() * 0.5 + 0.5) * strength;
-            plot_layer(braille, layers, width, pos, Layer::Sigil, 0.24 + pulse * 0.8);
+            plot_layer(
+                braille,
+                layers,
+                width,
+                pos,
+                Layer::Sigil,
+                0.24 + pulse * 0.8,
+            );
         }
     }
 
@@ -326,16 +342,15 @@ impl IlluminatiAnimation {
                 let dx = px - center.x;
                 let dy = py - center.y;
 
-                let frame_metric =
-                    (dx * dx) / (frame_radius_x * frame_radius_x)
-                        + (dy * dy) / (frame_radius_y * frame_radius_y);
+                let frame_metric = (dx * dx) / (frame_radius_x * frame_radius_x)
+                    + (dy * dy) / (frame_radius_y * frame_radius_y);
                 if frame_metric > 1.08 {
                     continue;
                 }
 
                 if frame_metric >= 0.86 {
-                    let rim = (1.12 - frame_metric).max(0.0) * 3.0
-                        + (frame_metric - 0.86).max(0.0) * 2.4;
+                    let rim =
+                        (1.12 - frame_metric).max(0.0) * 3.0 + (frame_metric - 0.86).max(0.0) * 2.4;
                     plot_layer(
                         braille,
                         layers,
@@ -347,9 +362,8 @@ impl IlluminatiAnimation {
                     continue;
                 }
 
-                let shadow_metric =
-                    (dx * dx) / (frame_shadow_radius_x * frame_shadow_radius_x)
-                        + (dy * dy) / (frame_shadow_radius_y * frame_shadow_radius_y);
+                let shadow_metric = (dx * dx) / (frame_shadow_radius_x * frame_shadow_radius_x)
+                    + (dy * dy) / (frame_shadow_radius_y * frame_shadow_radius_y);
                 if shadow_metric >= 0.7 {
                     let depth = (0.86 - shadow_metric).max(0.0);
                     if depth > 0.0 {
@@ -364,17 +378,16 @@ impl IlluminatiAnimation {
                     }
                 }
 
-                let eye_metric =
-                    (dx * dx) / (eye_radius_x * eye_radius_x)
-                        + (dy * dy) / (eye_radius_y * eye_radius_y);
+                let eye_metric = (dx * dx) / (eye_radius_x * eye_radius_x)
+                    + (dy * dy) / (eye_radius_y * eye_radius_y);
                 if eye_metric > 1.05 {
                     continue;
                 }
 
                 if dy.abs() > visible_height {
-                    let eyelid_amount =
-                        ((dy.abs() - visible_height) / (eye_radius_y - visible_height))
-                            .clamp(0.0, 1.0);
+                    let eyelid_amount = ((dy.abs() - visible_height)
+                        / (eye_radius_y - visible_height))
+                        .clamp(0.0, 1.0);
                     let sweep = 0.45 + dy.signum() * 0.08;
                     plot_layer(
                         braille,
@@ -455,8 +468,14 @@ impl IlluminatiAnimation {
             let theta = step as f32 / eyelid_steps as f32 * PI;
             let cos = theta.cos();
             let sin = theta.sin();
-            let top = Vec2::new(center.x + eye_radius_x * cos, center.y - visible_height * sin);
-            let bottom = Vec2::new(center.x + eye_radius_x * cos, center.y + visible_height * sin);
+            let top = Vec2::new(
+                center.x + eye_radius_x * cos,
+                center.y - visible_height * sin,
+            );
+            let bottom = Vec2::new(
+                center.x + eye_radius_x * cos,
+                center.y + visible_height * sin,
+            );
             let weight_top = (1.0 - cos * cos).powf(0.28) * (0.55 + (1.0 - open) * 0.85);
             let weight_bottom = (1.0 - cos * cos).powf(0.3) * (0.4 + (1.0 - open) * 0.6);
 
@@ -648,7 +667,11 @@ impl IlluminatiAnimation {
             color = blend(color, Color::new(110, 70, 170), (mix.sigil * 0.7).min(1.0));
         }
         if mix.glow > 0.0 {
-            color = add_color(color, Color::new(170, 200, 120), (mix.glow * 0.55 + bass_glow * 0.4).min(1.0));
+            color = add_color(
+                color,
+                Color::new(170, 200, 120),
+                (mix.glow * 0.55 + bass_glow * 0.4).min(1.0),
+            );
         }
         if mix.edge > 0.0 {
             color = blend(color, Color::new(245, 220, 150), (mix.edge * 0.9).min(1.0));
@@ -666,16 +689,28 @@ impl IlluminatiAnimation {
             color = blend(color, Color::new(210, 150, 90), (mix.eyelid * 0.8).min(1.0));
         }
         if mix.highlight > 0.0 {
-            color = blend(color, Color::new(255, 255, 255), (mix.highlight + treble_sparkle).min(1.0));
+            color = blend(
+                color,
+                Color::new(255, 255, 255),
+                (mix.highlight + treble_sparkle).min(1.0),
+            );
         }
         if mix.drip > 0.0 {
             color = add_color(color, Color::new(105, 230, 170), (mix.drip * 0.7).min(1.0));
         }
         if mix.frame > 0.0 {
-            color = blend(color, Color::new(245, 215, 150), (mix.frame * 0.85).min(1.0));
+            color = blend(
+                color,
+                Color::new(245, 215, 150),
+                (mix.frame * 0.85).min(1.0),
+            );
         }
         if mix.frame_shadow > 0.0 {
-            color = blend(color, Color::new(80, 55, 35), (mix.frame_shadow * 0.6).min(1.0));
+            color = blend(
+                color,
+                Color::new(80, 55, 35),
+                (mix.frame_shadow * 0.6).min(1.0),
+            );
         }
 
         color
@@ -719,7 +754,11 @@ impl IlluminatiAnimation {
 
         let base_r = 12.0 + swirl * 18.0 + pulse * 10.0 + self.bass_level * 40.0;
         let base_g = 20.0 + swirl * 24.0 + (1.0 - vertical) * 22.0 + self.mid_level * 30.0;
-        let base_b = 28.0 + swirl * 35.0 + vertical * 18.0 + (1.0 - dist).max(0.0) * 24.0 + self.treble_level * 25.0;
+        let base_b = 28.0
+            + swirl * 35.0
+            + vertical * 18.0
+            + (1.0 - dist).max(0.0) * 24.0
+            + self.treble_level * 25.0;
 
         Color::new(
             base_r.clamp(0.0, 255.0) as u8,
@@ -796,22 +835,67 @@ struct Vec2 {
 }
 
 impl Vec2 {
-    fn new(x: f32, y: f32) -> Self { Self { x, y } }
-    fn add(self, other: Vec2) -> Self { Self { x: self.x + other.x, y: self.y + other.y } }
-    fn sub(self, other: Vec2) -> Self { Self { x: self.x - other.x, y: self.y - other.y } }
-    fn mul(self, scalar: f32) -> Self { Self { x: self.x * scalar, y: self.y * scalar } }
-    fn length(self) -> f32 { (self.x * self.x + self.y * self.y).sqrt() }
+    fn new(x: f32, y: f32) -> Self {
+        Self { x, y }
+    }
+    fn add(self, other: Vec2) -> Self {
+        Self {
+            x: self.x + other.x,
+            y: self.y + other.y,
+        }
+    }
+    fn sub(self, other: Vec2) -> Self {
+        Self {
+            x: self.x - other.x,
+            y: self.y - other.y,
+        }
+    }
+    fn mul(self, scalar: f32) -> Self {
+        Self {
+            x: self.x * scalar,
+            y: self.y * scalar,
+        }
+    }
+    fn length(self) -> f32 {
+        (self.x * self.x + self.y * self.y).sqrt()
+    }
     fn normalized(self) -> Self {
         let len = self.length();
-        if len < 1e-5 { Self { x: 0.0, y: 0.0 } } else { self.mul(1.0 / len) }
+        if len < 1e-5 {
+            Self { x: 0.0, y: 0.0 }
+        } else {
+            self.mul(1.0 / len)
+        }
     }
-    fn perp(self) -> Self { Self { x: -self.y, y: self.x } }
-    fn lerp(self, other: Vec2, t: f32) -> Self { self.add((other - self).mul(t)) }
-    fn from_polar(radius: f32, angle: f32) -> Self { Self { x: radius * angle.cos(), y: radius * angle.sin() } }
+    fn perp(self) -> Self {
+        Self {
+            x: -self.y,
+            y: self.x,
+        }
+    }
+    fn lerp(self, other: Vec2, t: f32) -> Self {
+        self.add((other - self).mul(t))
+    }
+    fn from_polar(radius: f32, angle: f32) -> Self {
+        Self {
+            x: radius * angle.cos(),
+            y: radius * angle.sin(),
+        }
+    }
 }
 
-impl std::ops::Add for Vec2 { type Output = Vec2; fn add(self, rhs: Vec2) -> Vec2 { self.add(rhs) } }
-impl std::ops::Sub for Vec2 { type Output = Vec2; fn sub(self, rhs: Vec2) -> Vec2 { self.sub(rhs) } }
+impl std::ops::Add for Vec2 {
+    type Output = Vec2;
+    fn add(self, rhs: Vec2) -> Vec2 {
+        self.add(rhs)
+    }
+}
+impl std::ops::Sub for Vec2 {
+    type Output = Vec2;
+    fn sub(self, rhs: Vec2) -> Vec2 {
+        self.sub(rhs)
+    }
+}
 
 fn plot_layer(
     braille: &mut BrailleGrid,
@@ -823,10 +907,14 @@ fn plot_layer(
 ) {
     let dot_x = pos.x.round() as isize;
     let dot_y = pos.y.round() as isize;
-    if dot_x < 0 || dot_y < 0 { return; }
+    if dot_x < 0 || dot_y < 0 {
+        return;
+    }
     let (dot_x, dot_y) = (dot_x as usize, dot_y as usize);
 
-    if dot_x >= braille.dot_width() || dot_y >= braille.dot_height() { return; }
+    if dot_x >= braille.dot_width() || dot_y >= braille.dot_height() {
+        return;
+    }
     braille.set_dot(dot_x, dot_y);
 
     let (cell_x, cell_y) = (dot_x / 2, dot_y / 4);
@@ -880,9 +968,15 @@ fn add_color(base: Color, addition: Color, weight: f32) -> Color {
     let r = base.r as f32 + addition.r as f32 * w;
     let g = base.g as f32 + addition.g as f32 * w;
     let b = base.b as f32 + addition.b as f32 * w;
-    Color::new(r.clamp(0.0, 255.0) as u8, g.clamp(0.0, 255.0) as u8, b.clamp(0.0, 255.0) as u8)
+    Color::new(
+        r.clamp(0.0, 255.0) as u8,
+        g.clamp(0.0, 255.0) as u8,
+        b.clamp(0.0, 255.0) as u8,
+    )
 }
 
 fn lerp_channel(a: u8, b: u8, t: f32) -> u8 {
-    (a as f32 + (b as f32 - a as f32) * t).clamp(0.0, 255.0).round() as u8
+    (a as f32 + (b as f32 - a as f32) * t)
+        .clamp(0.0, 255.0)
+        .round() as u8
 }

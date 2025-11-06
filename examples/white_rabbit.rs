@@ -21,7 +21,9 @@ const MATRIX_CHARS: &str = "アイウエオカキクケコサシスセソタチ�
 
 // Box drawing for geometric structures (reserved for future use)
 #[allow(dead_code)]
-const BOX_CHARS: &[char] = &['╔', '═', '╗', '║', '╚', '╝', '├', '┤', '┬', '┴', '┼', '─', '│'];
+const BOX_CHARS: &[char] = &[
+    '╔', '═', '╗', '║', '╚', '╝', '├', '┤', '┬', '┴', '┼', '─', '│',
+];
 
 // Block characters for depth and shadows (reserved for future use)
 #[allow(dead_code)]
@@ -78,7 +80,11 @@ impl MatrixColumn {
             if y_pos >= 0 && y_pos < height as i32 {
                 let fade = 1.0 - (i as f32 / self.length as f32);
                 let green = (255.0 * fade * self.intensity) as u8;
-                let color = CColor::Rgb { r: 0, g: green, b: green / 4 };
+                let color = CColor::Rgb {
+                    r: 0,
+                    g: green,
+                    b: green / 4,
+                };
                 buffer[y_pos as usize][self.x] = (ch, color);
             }
         }
@@ -119,31 +125,36 @@ impl WhiteRabbit {
 
     fn get_rabbit_art(&self) -> Vec<&str> {
         match self.state {
-            0 => vec![  // Kanji rabbit - "White Rabbit" (白兎)
+            0 => vec![
+                // Kanji rabbit - "White Rabbit" (白兎)
                 "  白兎  ",
                 "〈○ ○〉",
                 " ╰━━╯ ",
                 "  ∪∪  ",
             ],
-            1 => vec![  // Block character rabbit with Japanese
+            1 => vec![
+                // Block character rabbit with Japanese
                 " ▄兎▄ ",
                 "█◉ ◉█",
                 "▐▌▀▀▐▌",
                 " ▀月▀ ",
             ],
-            2 => vec![  // Matrix code rabbit
+            2 => vec![
+                // Matrix code rabbit
                 "╭─◯◯─╮",
                 "│夢╰╯夢│",
                 "├──┬─┤",
                 "╰──┴─╯",
             ],
-            3 => vec![  // Mixed Matrix rabbit
+            3 => vec![
+                // Mixed Matrix rabbit
                 " 「白兎」",
                 "⟨█▓▓█⟩",
                 " ▒══▒ ",
                 " ░運░ ",
             ],
-            _ => vec![  // Digital glitch rabbit
+            _ => vec![
+                // Digital glitch rabbit
                 "  /\\  /\\  ",
                 " (◉ ◉) ",
                 "  (><)  ",
@@ -164,7 +175,14 @@ impl WhiteRabbit {
                     let sx = start_x + dx as i32 + 2;
                     let sy = start_y + dy as i32 + 1;
                     if sx >= 0 && sx < width as i32 && sy >= 0 && sy < height as i32 {
-                        buffer[sy as usize][sx as usize] = ('░', CColor::Rgb { r: 20, g: 20, b: 30 });
+                        buffer[sy as usize][sx as usize] = (
+                            '░',
+                            CColor::Rgb {
+                                r: 20,
+                                g: 20,
+                                b: 30,
+                            },
+                        );
                     }
                 }
             }
@@ -179,11 +197,31 @@ impl WhiteRabbit {
                     let ry = start_y + dy as i32;
                     if rx >= 0 && rx < width as i32 && ry >= 0 && ry < height as i32 {
                         let color = match self.state {
-                            0 => CColor::Rgb { r: pulse_color, g: pulse_color, b: pulse_color },
-                            1 => CColor::Rgb { r: pulse_color, g: pulse_color / 2, b: pulse_color },
-                            2 => CColor::Rgb { r: pulse_color / 2, g: pulse_color, b: pulse_color },
-                            3 => CColor::Rgb { r: pulse_color, g: pulse_color, b: pulse_color / 2 },
-                            _ => CColor::Rgb { r: pulse_color, g: pulse_color, b: pulse_color },
+                            0 => CColor::Rgb {
+                                r: pulse_color,
+                                g: pulse_color,
+                                b: pulse_color,
+                            },
+                            1 => CColor::Rgb {
+                                r: pulse_color,
+                                g: pulse_color / 2,
+                                b: pulse_color,
+                            },
+                            2 => CColor::Rgb {
+                                r: pulse_color / 2,
+                                g: pulse_color,
+                                b: pulse_color,
+                            },
+                            3 => CColor::Rgb {
+                                r: pulse_color,
+                                g: pulse_color,
+                                b: pulse_color / 2,
+                            },
+                            _ => CColor::Rgb {
+                                r: pulse_color,
+                                g: pulse_color,
+                                b: pulse_color,
+                            },
                         };
                         buffer[ry as usize][rx as usize] = (ch, color);
                     }
@@ -252,10 +290,15 @@ impl Portal {
                     // Only draw the outline
                     if dx.abs() == r || dy.abs() == r {
                         let ch = if dx.abs() == r && dy.abs() == r {
-                            if dx < 0 && dy < 0 { '╔' }
-                            else if dx > 0 && dy < 0 { '╗' }
-                            else if dx < 0 && dy > 0 { '╚' }
-                            else { '╝' }
+                            if dx < 0 && dy < 0 {
+                                '╔'
+                            } else if dx > 0 && dy < 0 {
+                                '╗'
+                            } else if dx < 0 && dy > 0 {
+                                '╚'
+                            } else {
+                                '╝'
+                            }
                         } else if dx.abs() == r {
                             '║'
                         } else {
@@ -304,7 +347,14 @@ impl Message {
         let start_x = (width - self.text.len()) / 2;
         for (i, ch) in self.text.chars().take(self.revealed).enumerate() {
             if start_x + i < width {
-                buffer[y][start_x + i] = (ch, CColor::Rgb { r: 200, g: 200, b: 255 });
+                buffer[y][start_x + i] = (
+                    ch,
+                    CColor::Rgb {
+                        r: 200,
+                        g: 200,
+                        b: 255,
+                    },
+                );
             }
         }
     }
@@ -410,17 +460,73 @@ impl Animation {
 
         // Add decorative borders using box drawing characters
         for x in 0..self.width {
-            buffer[0][x] = ('═', CColor::Rgb { r: 50, g: 50, b: 100 });
-            buffer[self.height - 1][x] = ('═', CColor::Rgb { r: 50, g: 50, b: 100 });
+            buffer[0][x] = (
+                '═',
+                CColor::Rgb {
+                    r: 50,
+                    g: 50,
+                    b: 100,
+                },
+            );
+            buffer[self.height - 1][x] = (
+                '═',
+                CColor::Rgb {
+                    r: 50,
+                    g: 50,
+                    b: 100,
+                },
+            );
         }
         for row in buffer.iter_mut().take(self.height) {
-            row[0] = ('║', CColor::Rgb { r: 50, g: 50, b: 100 });
-            row[self.width - 1] = ('║', CColor::Rgb { r: 50, g: 50, b: 100 });
+            row[0] = (
+                '║',
+                CColor::Rgb {
+                    r: 50,
+                    g: 50,
+                    b: 100,
+                },
+            );
+            row[self.width - 1] = (
+                '║',
+                CColor::Rgb {
+                    r: 50,
+                    g: 50,
+                    b: 100,
+                },
+            );
         }
-        buffer[0][0] = ('╔', CColor::Rgb { r: 50, g: 50, b: 100 });
-        buffer[0][self.width - 1] = ('╗', CColor::Rgb { r: 50, g: 50, b: 100 });
-        buffer[self.height - 1][0] = ('╚', CColor::Rgb { r: 50, g: 50, b: 100 });
-        buffer[self.height - 1][self.width - 1] = ('╝', CColor::Rgb { r: 50, g: 50, b: 100 });
+        buffer[0][0] = (
+            '╔',
+            CColor::Rgb {
+                r: 50,
+                g: 50,
+                b: 100,
+            },
+        );
+        buffer[0][self.width - 1] = (
+            '╗',
+            CColor::Rgb {
+                r: 50,
+                g: 50,
+                b: 100,
+            },
+        );
+        buffer[self.height - 1][0] = (
+            '╚',
+            CColor::Rgb {
+                r: 50,
+                g: 50,
+                b: 100,
+            },
+        );
+        buffer[self.height - 1][self.width - 1] = (
+            '╝',
+            CColor::Rgb {
+                r: 50,
+                g: 50,
+                b: 100,
+            },
+        );
 
         // Add glitch effect occasionally
         let mut rng = rand::thread_rng();
@@ -430,11 +536,14 @@ impl Animation {
                 let gy = rng.gen_range(0..self.height);
                 let glitch_chars = ['▓', '▒', '░', '█', '▄', '▀'];
                 let ch = glitch_chars[rng.gen_range(0..glitch_chars.len())];
-                buffer[gy][gx] = (ch, CColor::Rgb {
-                    r: rng.gen_range(100..255),
-                    g: rng.gen_range(0..100),
-                    b: rng.gen_range(100..255),
-                });
+                buffer[gy][gx] = (
+                    ch,
+                    CColor::Rgb {
+                        r: rng.gen_range(100..255),
+                        g: rng.gen_range(0..100),
+                        b: rng.gen_range(100..255),
+                    },
+                );
             }
         }
 
@@ -446,12 +555,7 @@ fn main() -> io::Result<()> {
     // Setup terminal
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(
-        stdout,
-        EnterAlternateScreen,
-        Clear(ClearType::All),
-        Hide
-    )?;
+    execute!(stdout, EnterAlternateScreen, Clear(ClearType::All), Hide)?;
 
     let (width, height) = terminal::size()?;
     let mut animation = Animation::new(width as usize, height as usize);
@@ -479,11 +583,7 @@ fn main() -> io::Result<()> {
         for (y, row) in buffer.iter().enumerate() {
             execute!(stdout, MoveTo(0, y as u16))?;
             for (ch, color) in row {
-                execute!(
-                    stdout,
-                    SetForegroundColor(*color),
-                    Print(ch)
-                )?;
+                execute!(stdout, SetForegroundColor(*color), Print(ch))?;
             }
         }
 
@@ -499,12 +599,7 @@ fn main() -> io::Result<()> {
     }
 
     // Cleanup
-    execute!(
-        stdout,
-        ResetColor,
-        Show,
-        LeaveAlternateScreen
-    )?;
+    execute!(stdout, ResetColor, Show, LeaveAlternateScreen)?;
     terminal::disable_raw_mode()?;
 
     println!("\n\"There is no spoon.\" 🐇\n");

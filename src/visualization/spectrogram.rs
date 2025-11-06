@@ -5,8 +5,8 @@
 //! and color intensity represents amplitude.
 
 use crate::dsp::AudioParameters;
-use crate::visualization::{GridBuffer, Visualizer};
 use crate::visualization::color_schemes::ColorScheme;
+use crate::visualization::{GridBuffer, Visualizer};
 use std::collections::VecDeque;
 
 /// Scroll direction for spectrogram
@@ -110,21 +110,21 @@ impl Visualizer for SpectrogramVisualizer {
     fn render(&self, grid: &mut GridBuffer) {
         let width = grid.width();
         let height = grid.height();
-        
+
         // Adjust max_history based on grid height (use Braille 4x vertical resolution)
         let effective_height = height * 4;
-        
+
         // Clear grid
         grid.clear();
-        
+
         // If no history, nothing to render
         if self.history_buffer.is_empty() {
             return;
         }
-        
+
         // Determine how many history rows to display
         let num_rows = self.history_buffer.len().min(effective_height);
-        
+
         // Render each row of history
         for row_idx in 0..num_rows {
             // Get spectrum for this row based on scroll direction
@@ -140,6 +140,11 @@ impl Visualizer for SpectrogramVisualizer {
                     &self.history_buffer[history_idx]
                 }
             };
+
+            // Guard: skip rendering if this spectrum row is empty to avoid index errors
+            if spectrum.is_empty() {
+                continue;
+            }
 
             // Calculate y position
             let y = row_idx;
@@ -254,4 +259,3 @@ mod tests {
         assert_eq!(visualizer.color_scheme().scheme_type().name(), "Rainbow");
     }
 }
-

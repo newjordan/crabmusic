@@ -195,7 +195,13 @@ impl IlluminatiAnimation {
             let wobble = (self.time * 0.6 + t * TAU).sin() * 0.8;
             let base_pos = pos.add(normal.mul(wobble));
 
-            let thickness = [(-2.4, 0.28), (-1.3, 0.58), (0.0, 1.0), (1.2, 0.58), (2.3, 0.28)];
+            let thickness = [
+                (-2.4, 0.28),
+                (-1.3, 0.58),
+                (0.0, 1.0),
+                (1.2, 0.58),
+                (2.3, 0.28),
+            ];
             for (offset, weight) in thickness {
                 let offset_pos = base_pos.add(normal.mul(offset));
                 plot_layer(braille, layers, width, offset_pos, layer, weight);
@@ -221,7 +227,14 @@ impl IlluminatiAnimation {
             let t = step as f32 / steps as f32;
             let pos = start.lerp(end, t);
             let pulse = ((self.time * pulse_speed + t * 5.1).sin() * 0.5 + 0.5) * strength;
-            plot_layer(braille, layers, width, pos, Layer::Sigil, 0.24 + pulse * 0.8);
+            plot_layer(
+                braille,
+                layers,
+                width,
+                pos,
+                Layer::Sigil,
+                0.24 + pulse * 0.8,
+            );
         }
     }
 
@@ -271,16 +284,15 @@ impl IlluminatiAnimation {
                 let dx = px - center.x;
                 let dy = py - center.y;
 
-                let frame_metric =
-                    (dx * dx) / (frame_radius_x * frame_radius_x)
-                        + (dy * dy) / (frame_radius_y * frame_radius_y);
+                let frame_metric = (dx * dx) / (frame_radius_x * frame_radius_x)
+                    + (dy * dy) / (frame_radius_y * frame_radius_y);
                 if frame_metric > 1.08 {
                     continue;
                 }
 
                 if frame_metric >= 0.86 {
-                    let rim = (1.12 - frame_metric).max(0.0) * 3.0
-                        + (frame_metric - 0.86).max(0.0) * 2.4;
+                    let rim =
+                        (1.12 - frame_metric).max(0.0) * 3.0 + (frame_metric - 0.86).max(0.0) * 2.4;
                     plot_layer(
                         braille,
                         layers,
@@ -292,9 +304,8 @@ impl IlluminatiAnimation {
                     continue;
                 }
 
-                let shadow_metric =
-                    (dx * dx) / (frame_shadow_radius_x * frame_shadow_radius_x)
-                        + (dy * dy) / (frame_shadow_radius_y * frame_shadow_radius_y);
+                let shadow_metric = (dx * dx) / (frame_shadow_radius_x * frame_shadow_radius_x)
+                    + (dy * dy) / (frame_shadow_radius_y * frame_shadow_radius_y);
                 if shadow_metric >= 0.7 {
                     let depth = (0.86 - shadow_metric).max(0.0);
                     if depth > 0.0 {
@@ -309,17 +320,16 @@ impl IlluminatiAnimation {
                     }
                 }
 
-                let eye_metric =
-                    (dx * dx) / (eye_radius_x * eye_radius_x)
-                        + (dy * dy) / (eye_radius_y * eye_radius_y);
+                let eye_metric = (dx * dx) / (eye_radius_x * eye_radius_x)
+                    + (dy * dy) / (eye_radius_y * eye_radius_y);
                 if eye_metric > 1.05 {
                     continue;
                 }
 
                 if dy.abs() > visible_height {
-                    let eyelid_amount =
-                        ((dy.abs() - visible_height) / (eye_radius_y - visible_height))
-                            .clamp(0.0, 1.0);
+                    let eyelid_amount = ((dy.abs() - visible_height)
+                        / (eye_radius_y - visible_height))
+                        .clamp(0.0, 1.0);
                     let sweep = 0.45 + dy.signum() * 0.08;
                     plot_layer(
                         braille,
@@ -400,8 +410,14 @@ impl IlluminatiAnimation {
             let theta = step as f32 / eyelid_steps as f32 * PI;
             let cos = theta.cos();
             let sin = theta.sin();
-            let top = Vec2::new(center.x + eye_radius_x * cos, center.y - visible_height * sin);
-            let bottom = Vec2::new(center.x + eye_radius_x * cos, center.y + visible_height * sin);
+            let top = Vec2::new(
+                center.x + eye_radius_x * cos,
+                center.y - visible_height * sin,
+            );
+            let bottom = Vec2::new(
+                center.x + eye_radius_x * cos,
+                center.y + visible_height * sin,
+            );
             let weight_top = (1.0 - cos * cos).powf(0.28) * (0.55 + (1.0 - open) * 0.85);
             let weight_bottom = (1.0 - cos * cos).powf(0.3) * (0.4 + (1.0 - open) * 0.6);
 
@@ -632,10 +648,18 @@ impl IlluminatiAnimation {
             color = add_color(color, Color::new(105, 230, 170), (mix.drip * 0.7).min(1.0));
         }
         if mix.frame > 0.0 {
-            color = blend(color, Color::new(245, 215, 150), (mix.frame * 0.85).min(1.0));
+            color = blend(
+                color,
+                Color::new(245, 215, 150),
+                (mix.frame * 0.85).min(1.0),
+            );
         }
         if mix.frame_shadow > 0.0 {
-            color = blend(color, Color::new(80, 55, 35), (mix.frame_shadow * 0.6).min(1.0));
+            color = blend(
+                color,
+                Color::new(80, 55, 35),
+                (mix.frame_shadow * 0.6).min(1.0),
+            );
         }
 
         color
@@ -902,7 +926,11 @@ fn add_color(base: Color, addition: Color, weight: f32) -> Color {
     let r = base.r as f32 + addition.r as f32 * w;
     let g = base.g as f32 + addition.g as f32 * w;
     let b = base.b as f32 + addition.b as f32 * w;
-    Color::new(r.clamp(0.0, 255.0) as u8, g.clamp(0.0, 255.0) as u8, b.clamp(0.0, 255.0) as u8)
+    Color::new(
+        r.clamp(0.0, 255.0) as u8,
+        g.clamp(0.0, 255.0) as u8,
+        b.clamp(0.0, 255.0) as u8,
+    )
 }
 
 fn lerp_channel(a: u8, b: u8, t: f32) -> u8 {

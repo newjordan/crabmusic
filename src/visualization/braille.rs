@@ -100,9 +100,6 @@ impl BrailleGrid {
         }
     }
 
-
-
-
     /// Get width in terminal cells
     pub fn width(&self) -> usize {
         self.width
@@ -188,7 +185,6 @@ impl BrailleGrid {
 
         self.colors[cell_index] = Some(color);
     }
-
 
     /// Helper: Get dot index (0-7) from local coordinates
     #[inline]
@@ -304,10 +300,14 @@ impl BrailleGrid {
 
         while x >= y {
             let pts = [
-                (cx + x, cy + y), (cx + y, cy + x),
-                (cx - y, cy + x), (cx - x, cy + y),
-                (cx - x, cy - y), (cx - y, cy - x),
-                (cx + y, cy - x), (cx + x, cy - y),
+                (cx + x, cy + y),
+                (cx + y, cy + x),
+                (cx - y, cy + x),
+                (cx - x, cy + y),
+                (cx - x, cy - y),
+                (cx - y, cy - x),
+                (cx + y, cy - x),
+                (cx + x, cy - y),
             ];
             for (px, py) in pts {
                 if px >= 0 && py >= 0 && px <= max_x && py <= max_y {
@@ -323,10 +323,6 @@ impl BrailleGrid {
             }
         }
     }
-
-
-
-
 
     /// Get the Braille character at a cell position
     ///
@@ -370,7 +366,6 @@ impl BrailleGrid {
 
         self.patterns[index] == 0
     }
-
 }
 
 #[cfg(test)]
@@ -525,5 +520,4 @@ mod tests {
         assert_eq!(grid.get_char(1000, 1000), '⠀');
         assert!(grid.is_empty(1000, 1000));
     }
-
 }

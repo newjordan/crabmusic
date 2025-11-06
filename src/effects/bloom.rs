@@ -28,18 +28,18 @@ pub fn gaussian_kernel(radius: usize) -> Vec<f32> {
     let size = radius * 2 + 1;
     let mut kernel = vec![0.0; size];
     let mut sum = 0.0;
-    
+
     for i in 0..size {
         let x = i as f32 - radius as f32;
         kernel[i] = (-x * x / (2.0 * sigma * sigma)).exp();
         sum += kernel[i];
     }
-    
+
     // Normalize so weights sum to 1.0
     for i in 0..size {
         kernel[i] /= sum;
     }
-    
+
     kernel
 }
 
@@ -123,7 +123,7 @@ impl BloomEffect {
         let threshold = threshold.clamp(0.0, 1.0);
         let blur_radius = blur_radius.clamp(1, 5);
         let kernel = gaussian_kernel(blur_radius);
-        
+
         Self {
             enabled: true,
             intensity: 0.5,
@@ -174,15 +174,15 @@ impl BloomEffect {
     /// Extract bright pixels above threshold
     fn extract_bright_pixels(&mut self, grid: &GridBuffer) {
         let width = grid.width();
-        
+
         for y in 0..grid.height() {
             for x in 0..width {
                 let cell = grid.get_cell(x, y);
                 let idx = y * width + x;
-                
+
                 if let Some(color) = cell.foreground_color {
                     let brightness = color_brightness(color);
-                    
+
                     if brightness >= self.threshold {
                         self.bright_buffer[idx] = Some(color);
                     } else {
@@ -203,11 +203,11 @@ impl BloomEffect {
                 let mut g_sum = 0.0;
                 let mut b_sum = 0.0;
                 let mut weight_sum = 0.0;
-                
+
                 for (i, &weight) in self.kernel.iter().enumerate() {
                     let offset = i as isize - self.blur_radius as isize;
                     let sample_x = (x as isize + offset).clamp(0, width as isize - 1) as usize;
-                    
+
                     if let Some(color) = self.bright_buffer[y * width + sample_x] {
                         r_sum += color.r as f32 * weight;
                         g_sum += color.g as f32 * weight;
@@ -215,7 +215,7 @@ impl BloomEffect {
                         weight_sum += weight;
                     }
                 }
-                
+
                 if weight_sum > 0.0 {
                     self.blur_buffer[y * width + x] = Some(Color::new(
                         (r_sum / weight_sum) as u8,
@@ -233,18 +233,18 @@ impl BloomEffect {
     fn blur_vertical(&mut self, width: usize, height: usize) {
         // Copy blur_buffer to bright_buffer for vertical pass
         self.bright_buffer.copy_from_slice(&self.blur_buffer);
-        
+
         for y in 0..height {
             for x in 0..width {
                 let mut r_sum = 0.0;
                 let mut g_sum = 0.0;
                 let mut b_sum = 0.0;
                 let mut weight_sum = 0.0;
-                
+
                 for (i, &weight) in self.kernel.iter().enumerate() {
                     let offset = i as isize - self.blur_radius as isize;
                     let sample_y = (y as isize + offset).clamp(0, height as isize - 1) as usize;
-                    
+
                     if let Some(color) = self.bright_buffer[sample_y * width + x] {
                         r_sum += color.r as f32 * weight;
                         g_sum += color.g as f32 * weight;
@@ -252,7 +252,7 @@ impl BloomEffect {
                         weight_sum += weight;
                     }
                 }
-                
+
                 if weight_sum > 0.0 {
                     self.blur_buffer[y * width + x] = Some(Color::new(
                         (r_sum / weight_sum) as u8,
@@ -280,9 +280,12 @@ impl BloomEffect {
                     if let Some(original_color) = cell.foreground_color {
                         // Additive blend with intensity
                         cell.foreground_color = Some(Color::new(
-                            (original_color.r as f32 + bloom_color.r as f32 * self.intensity).min(255.0) as u8,
-                            (original_color.g as f32 + bloom_color.g as f32 * self.intensity).min(255.0) as u8,
-                            (original_color.b as f32 + bloom_color.b as f32 * self.intensity).min(255.0) as u8,
+                            (original_color.r as f32 + bloom_color.r as f32 * self.intensity)
+                                .min(255.0) as u8,
+                            (original_color.g as f32 + bloom_color.g as f32 * self.intensity)
+                                .min(255.0) as u8,
+                            (original_color.b as f32 + bloom_color.b as f32 * self.intensity)
+                                .min(255.0) as u8,
                         ));
                     }
                 }
@@ -355,7 +358,11 @@ mod tests {
 
         // Kernel should sum to approximately 1.0
         let sum: f32 = kernel.iter().sum();
-        assert!((sum - 1.0).abs() < 0.001, "Kernel sum should be 1.0, got {}", sum);
+        assert!(
+            (sum - 1.0).abs() < 0.001,
+            "Kernel sum should be 1.0, got {}",
+            sum
+        );
 
         // Center should have highest weight
         assert!(kernel[2] > kernel[1]);
@@ -375,7 +382,11 @@ mod tests {
         // Gray should be around 0.5
         let gray = Color::new(128, 128, 128);
         let brightness = color_brightness(gray);
-        assert!(brightness > 0.4 && brightness < 0.6, "Gray brightness should be ~0.5, got {}", brightness);
+        assert!(
+            brightness > 0.4 && brightness < 0.6,
+            "Gray brightness should be ~0.5, got {}",
+            brightness
+        );
 
         // Green should be brighter than red (ITU-R BT.709)
         let red = Color::new(255, 0, 0);
@@ -504,4 +515,3 @@ mod tests {
         }
     }
 }
-

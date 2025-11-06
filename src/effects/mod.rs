@@ -26,11 +26,11 @@
 use crate::dsp::AudioParameters;
 use crate::visualization::GridBuffer;
 
-pub mod passthrough;
-pub mod grid_overlay;
-pub mod scanline;
 pub mod bloom;
+pub mod grid_overlay;
+pub mod passthrough;
 pub mod phosphor;
+pub mod scanline;
 
 /// Trait for post-processing visual effects
 ///
@@ -469,8 +469,8 @@ mod tests {
     #[test]
     fn test_pipeline_apply_grid_overlay() {
         use crate::dsp::AudioParameters;
-        use crate::visualization::GridBuffer;
         use crate::effects::grid_overlay::GridOverlayEffect;
+        use crate::visualization::GridBuffer;
 
         let mut pipeline = EffectPipeline::new();
         pipeline.add_effect(Box::new(GridOverlayEffect::new(5)));
@@ -514,7 +514,11 @@ mod tests {
         let avg_micros = elapsed.as_micros() / iterations;
 
         println!("Empty pipeline: {} µs/frame (target: <100 µs)", avg_micros);
-        assert!(avg_micros < 100, "Empty pipeline too slow: {} µs (target: <100 µs)", avg_micros);
+        assert!(
+            avg_micros < 100,
+            "Empty pipeline too slow: {} µs (target: <100 µs)",
+            avg_micros
+        );
     }
 
     #[test]
@@ -542,15 +546,22 @@ mod tests {
         let elapsed = start.elapsed();
         let avg_micros = elapsed.as_micros() / iterations;
 
-        println!("Passthrough effect: {} µs/frame (target: <500 µs)", avg_micros);
-        assert!(avg_micros < 500, "Passthrough too slow: {} µs (target: <500 µs)", avg_micros);
+        println!(
+            "Passthrough effect: {} µs/frame (target: <500 µs)",
+            avg_micros
+        );
+        assert!(
+            avg_micros < 500,
+            "Passthrough too slow: {} µs (target: <500 µs)",
+            avg_micros
+        );
     }
 
     #[test]
     fn test_pipeline_performance_grid_overlay() {
         use crate::dsp::AudioParameters;
-        use crate::visualization::GridBuffer;
         use crate::effects::grid_overlay::GridOverlayEffect;
+        use crate::visualization::GridBuffer;
         use std::time::Instant;
 
         let mut pipeline = EffectPipeline::new();
@@ -572,15 +583,22 @@ mod tests {
         let elapsed = start.elapsed();
         let avg_micros = elapsed.as_micros() / iterations;
 
-        println!("Grid overlay effect: {} µs/frame (target: <2000 µs)", avg_micros);
-        assert!(avg_micros < 2000, "Grid overlay too slow: {} µs (target: <2000 µs)", avg_micros);
+        println!(
+            "Grid overlay effect: {} µs/frame (target: <2000 µs)",
+            avg_micros
+        );
+        assert!(
+            avg_micros < 2000,
+            "Grid overlay too slow: {} µs (target: <2000 µs)",
+            avg_micros
+        );
     }
 
     #[test]
     fn test_pipeline_performance_scanline() {
         use crate::dsp::AudioParameters;
-        use crate::visualization::{GridBuffer, Color};
         use crate::effects::scanline::ScanlineEffect;
+        use crate::visualization::{Color, GridBuffer};
         use std::time::Instant;
 
         let mut pipeline = EffectPipeline::new();
@@ -609,15 +627,22 @@ mod tests {
         let elapsed = start.elapsed();
         let avg_micros = elapsed.as_micros() / iterations;
 
-        println!("Scanline effect: {} µs/frame (target: <1000 µs)", avg_micros);
-        assert!(avg_micros < 1000, "Scanline too slow: {} µs (target: <1000 µs)", avg_micros);
+        println!(
+            "Scanline effect: {} µs/frame (target: <1000 µs)",
+            avg_micros
+        );
+        assert!(
+            avg_micros < 1000,
+            "Scanline too slow: {} µs (target: <1000 µs)",
+            avg_micros
+        );
     }
 
     #[test]
     fn test_pipeline_performance_bloom() {
         use crate::dsp::AudioParameters;
-        use crate::visualization::{GridBuffer, Color};
         use crate::effects::bloom::BloomEffect;
+        use crate::visualization::{Color, GridBuffer};
         use std::time::Instant;
 
         let mut pipeline = EffectPipeline::new();
@@ -650,7 +675,10 @@ mod tests {
         let avg_micros = elapsed.as_micros() / iterations;
 
         println!("Bloom effect: {} µs/frame (target: <6000 µs)", avg_micros);
-        assert!(avg_micros < 6000, "Bloom too slow: {} µs (target: <6000 µs)", avg_micros);
+        assert!(
+            avg_micros < 6000,
+            "Bloom too slow: {} µs (target: <6000 µs)",
+            avg_micros
+        );
     }
 }
-

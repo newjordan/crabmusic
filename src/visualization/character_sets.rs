@@ -191,17 +191,13 @@ fn braille_set() -> CharacterSet {
 fn smooth64_set() -> CharacterSet {
     // Mix of dots, blocks, and Braille patterns ordered by density
     let chars = vec![
-        ' ', '⠀', '⡀', '⢀', '⣀', '⠄', '⡄', '⢄', '⣄', '⠂', '⡂', '⢂', '⣂', '⠆', '⡆', '⢆',
-        '⣆', '⠁', '⡁', '⢁', '⣁', '⠅', '⡅', '⢅', '⣅', '⠃', '⡃', '⢃', '⣃', '⠇', '⡇', '⢇',
-        '⣇', '░', '⠈', '⡈', '⢈', '⣈', '⠌', '⡌', '⢌', '⣌', '⠊', '⡊', '⢊', '⣊', '⠎', '⡎',
-        '⢎', '⣎', '⠉', '⡉', '⢉', '⣉', '⠍', '⡍', '⢍', '⣍', '⠋', '⡋', '⢋', '⣋', '▒', '▓',
+        ' ', '⠀', '⡀', '⢀', '⣀', '⠄', '⡄', '⢄', '⣄', '⠂', '⡂', '⢂', '⣂', '⠆', '⡆', '⢆', '⣆', '⠁',
+        '⡁', '⢁', '⣁', '⠅', '⡅', '⢅', '⣅', '⠃', '⡃', '⢃', '⣃', '⠇', '⡇', '⢇', '⣇', '░', '⠈', '⡈',
+        '⢈', '⣈', '⠌', '⡌', '⢌', '⣌', '⠊', '⡊', '⢊', '⣊', '⠎', '⡎', '⢎', '⣎', '⠉', '⡉', '⢉', '⣉',
+        '⠍', '⡍', '⢍', '⣍', '⠋', '⡋', '⢋', '⣋', '▒', '▓',
     ];
 
-    CharacterSet::new(
-        "Smooth 64".to_string(),
-        chars,
-        CharacterSetType::Smooth64,
-    )
+    CharacterSet::new("Smooth 64".to_string(), chars, CharacterSetType::Smooth64)
 }
 
 /// Ultra-smooth 128-level gradient (128 levels)
@@ -228,11 +224,7 @@ fn smooth128_set() -> CharacterSet {
         chars.push('⣿');
     }
 
-    CharacterSet::new(
-        "Smooth 128".to_string(),
-        chars,
-        CharacterSetType::Smooth128,
-    )
+    CharacterSet::new("Smooth 128".to_string(), chars, CharacterSetType::Smooth128)
 }
 
 /// Maximum smoothness 256-level gradient (256 levels)
@@ -251,11 +243,7 @@ fn smooth256_set() -> CharacterSet {
     // Sort by dot count for proper density ordering
     chars.sort_by_key(|&c| count_braille_dots(c));
 
-    CharacterSet::new(
-        "Smooth 256".to_string(),
-        chars,
-        CharacterSetType::Smooth256,
-    )
+    CharacterSet::new("Smooth 256".to_string(), chars, CharacterSetType::Smooth256)
 }
 
 /// Helper: Generate Braille patterns with exactly N dots
@@ -360,11 +348,11 @@ mod tests {
     #[test]
     fn test_get_char_intensity() {
         let charset = basic_set();
-        
+
         // Test boundary values
         assert_eq!(charset.get_char(0.0), ' ');
         assert_eq!(charset.get_char(1.0), '@');
-        
+
         // Test middle value
         let mid_char = charset.get_char(0.5);
         assert!(mid_char != ' ' && mid_char != '@');
@@ -373,7 +361,7 @@ mod tests {
     #[test]
     fn test_get_char_clamping() {
         let charset = basic_set();
-        
+
         // Values outside range should be clamped
         assert_eq!(charset.get_char(-0.5), ' ');
         assert_eq!(charset.get_char(1.5), '@');
@@ -414,7 +402,7 @@ mod tests {
         let charset = basic_set();
         let mut prev_char = charset.get_char(0.0);
         let mut changes = 0;
-        
+
         for i in 1..=10 {
             let intensity = i as f32 / 10.0;
             let ch = charset.get_char(intensity);
@@ -423,9 +411,8 @@ mod tests {
             }
             prev_char = ch;
         }
-        
+
         // Should have multiple different characters across the range
         assert!(changes >= 5);
     }
 }
-

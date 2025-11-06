@@ -108,7 +108,9 @@ impl SineWaveVisualizer {
             config,
             beat_flash: 0.0,
             charset,
-            color_scheme: super::color_schemes::ColorScheme::new(super::color_schemes::ColorSchemeType::Monochrome),
+            color_scheme: super::color_schemes::ColorScheme::new(
+                super::color_schemes::ColorSchemeType::Monochrome,
+            ),
             bass: 0.0,
             mid: 0.0,
             treble: 0.0,
@@ -224,7 +226,7 @@ impl Visualizer for SineWaveVisualizer {
 
         // Use HIGH-RESOLUTION Braille rendering (same as oscilloscope!)
         let mut braille = super::BrailleGrid::new(width, height);
-        let dot_width = braille.dot_width();   // 2× width in dots
+        let dot_width = braille.dot_width(); // 2× width in dots
         let dot_height = braille.dot_height(); // 4× height in dots
         let dot_center_y = dot_height / 2;
 
@@ -239,7 +241,8 @@ impl Visualizer for SineWaveVisualizer {
             let wave_center_y = 0.5 + self.amplitude * wave_x.sin() * 0.4;
 
             // Convert to dot coordinates
-            let dot_y = (wave_center_y * dot_height as f32).clamp(0.0, (dot_height - 1) as f32) as usize;
+            let dot_y =
+                (wave_center_y * dot_height as f32).clamp(0.0, (dot_height - 1) as f32) as usize;
 
             // Draw line from previous point to current point (smooth anti-aliased!)
             if dot_x > 0 {
@@ -306,7 +309,7 @@ mod tests {
         let viz = SineWaveVisualizer::new(
             SineWaveConfig::default(),
             crate::visualization::character_sets::get_character_set(
-                crate::visualization::character_sets::CharacterSetType::Blocks
+                crate::visualization::character_sets::CharacterSetType::Blocks,
             ),
         );
         assert_eq!(viz.name(), "Sine Wave");
@@ -330,7 +333,7 @@ mod tests {
         let mut viz = SineWaveVisualizer::new(
             SineWaveConfig::default(),
             crate::visualization::character_sets::get_character_set(
-                crate::visualization::character_sets::CharacterSetType::Blocks
+                crate::visualization::character_sets::CharacterSetType::Blocks,
             ),
         );
         let params = AudioParameters {
@@ -364,7 +367,7 @@ mod tests {
         let viz = SineWaveVisualizer::new(
             SineWaveConfig::default(),
             crate::visualization::character_sets::get_character_set(
-                crate::visualization::character_sets::CharacterSetType::Blocks
+                crate::visualization::character_sets::CharacterSetType::Blocks,
             ),
         );
         let mut grid = GridBuffer::new(80, 24);
@@ -383,7 +386,7 @@ mod tests {
         let mut viz = SineWaveVisualizer::new(
             SineWaveConfig::default(),
             crate::visualization::character_sets::get_character_set(
-                crate::visualization::character_sets::CharacterSetType::Blocks
+                crate::visualization::character_sets::CharacterSetType::Blocks,
             ),
         );
         viz.amplitude = 0.5;
@@ -401,7 +404,7 @@ mod tests {
         let mut viz = SineWaveVisualizer::new(
             SineWaveConfig::default(),
             crate::visualization::character_sets::get_character_set(
-                crate::visualization::character_sets::CharacterSetType::Blocks
+                crate::visualization::character_sets::CharacterSetType::Blocks,
             ),
         );
         viz.amplitude = 0.5;
@@ -431,7 +434,7 @@ mod tests {
                 ..Default::default()
             },
             crate::visualization::character_sets::get_character_set(
-                crate::visualization::character_sets::CharacterSetType::Blocks
+                crate::visualization::character_sets::CharacterSetType::Blocks,
             ),
         );
 

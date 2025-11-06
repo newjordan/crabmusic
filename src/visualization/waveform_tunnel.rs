@@ -107,7 +107,12 @@ impl WaveformTunnelVisualizer {
     }
 
     /// Render a single FROZEN waveform line at a specific Y position
-    fn render_layer(&self, braille: &mut BrailleGrid, snapshot: &WaveformSnapshot, grid_height: usize) {
+    fn render_layer(
+        &self,
+        braille: &mut BrailleGrid,
+        snapshot: &WaveformSnapshot,
+        grid_height: usize,
+    ) {
         let dot_width = braille.dot_width();
         let dot_height = braille.dot_height();
 
@@ -202,7 +207,7 @@ impl Visualizer for WaveformTunnelVisualizer {
             let intensity = (0.5 + freq_intensity * 0.5).min(1.0);
 
             let snapshot = WaveformSnapshot {
-                samples, // Frozen waveform samples
+                samples,         // Frozen waveform samples
                 y_position: 100, // Start at bottom (will be adjusted in render based on actual height)
                 intensity,
             };
@@ -321,4 +326,3 @@ mod tests {
         assert!(visualizer.layers.len() > 0);
     }
 }
-

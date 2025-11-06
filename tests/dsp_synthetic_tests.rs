@@ -66,7 +66,7 @@ fn generate_multi_tone(
 ) -> Vec<f32> {
     assert_eq!(frequencies.len(), amplitudes.len());
     let num_samples = (sample_rate as f32 * duration_secs) as usize;
-    
+
     (0..num_samples)
         .map(|i| {
             let t = i as f32 / sample_rate as f32;
@@ -84,19 +84,19 @@ fn test_detect_440hz_sine_wave() {
     let sample_rate = 44100;
     let samples = generate_sine_wave(440.0, sample_rate, 0.1);
     let buffer = AudioBuffer::with_samples(samples, sample_rate, 1);
-    
+
     let mut processor = DspProcessor::new(sample_rate, 2048).unwrap();
     let spectrum = processor.process_buffer(&buffer);
-    
+
     // Find peak frequency
     let (peak_bin, _) = spectrum
         .iter()
         .enumerate()
         .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
         .unwrap();
-    
+
     let detected_freq = processor.bin_to_frequency(peak_bin);
-    
+
     // Should detect 440Hz within 20Hz tolerance
     assert!(
         (detected_freq - 440.0).abs() < 20.0,
@@ -110,18 +110,18 @@ fn test_detect_1000hz_sine_wave() {
     let sample_rate = 44100;
     let samples = generate_sine_wave(1000.0, sample_rate, 0.1);
     let buffer = AudioBuffer::with_samples(samples, sample_rate, 1);
-    
+
     let mut processor = DspProcessor::new(sample_rate, 2048).unwrap();
     let spectrum = processor.process_buffer(&buffer);
-    
+
     let (peak_bin, _) = spectrum
         .iter()
         .enumerate()
         .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
         .unwrap();
-    
+
     let detected_freq = processor.bin_to_frequency(peak_bin);
-    
+
     assert!(
         (detected_freq - 1000.0).abs() < 30.0,
         "Expected ~1000Hz, got {}Hz",
@@ -191,8 +191,18 @@ fn test_treble_frequency_extraction() {
     let params = processor.process(&buffer);
 
     // Treble should be significantly higher than bass and mid (relative comparison)
-    assert!(params.treble > params.bass * 2.0, "treble: {}, bass: {}", params.treble, params.bass);
-    assert!(params.treble > params.mid, "treble: {}, mid: {}", params.treble, params.mid);
+    assert!(
+        params.treble > params.bass * 2.0,
+        "treble: {}, bass: {}",
+        params.treble,
+        params.bass
+    );
+    assert!(
+        params.treble > params.mid,
+        "treble: {}, mid: {}",
+        params.treble,
+        params.mid
+    );
 }
 
 #[test]
@@ -206,8 +216,18 @@ fn test_mid_frequency_extraction() {
     let params = processor.process(&buffer);
 
     // Mid should be significantly higher than bass and treble (relative comparison)
-    assert!(params.mid > params.bass * 2.0, "mid: {}, bass: {}", params.mid, params.bass);
-    assert!(params.mid > params.treble * 2.0, "mid: {}, treble: {}", params.mid, params.treble);
+    assert!(
+        params.mid > params.bass * 2.0,
+        "mid: {}, bass: {}",
+        params.mid,
+        params.bass
+    );
+    assert!(
+        params.mid > params.treble * 2.0,
+        "mid: {}, treble: {}",
+        params.mid,
+        params.treble
+    );
 }
 
 #[test]
@@ -308,4 +328,3 @@ fn test_sawtooth_wave_harmonics() {
     assert!(spectrum[fundamental_bin] > 0.2);
     assert!(spectrum[second_harmonic_bin] > 0.05);
 }
-
