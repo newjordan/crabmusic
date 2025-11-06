@@ -9,7 +9,12 @@ pub struct Light {
 }
 
 impl Light {
-    pub fn new(position: Vector3, intensity: f32) -> Self { Self { position, intensity } }
+    pub fn new(position: Vector3, intensity: f32) -> Self {
+        Self {
+            position,
+            intensity,
+        }
+    }
 }
 
 pub fn calculate_diffuse_shading(point: Vector3, normal: Vector3, light: &Light) -> f32 {
@@ -26,22 +31,33 @@ mod tests {
     #[test]
     fn test_diffuse_front_lit() {
         let light = Light::new(Vector3::new(0.0, 0.0, 1.0), 1.0);
-        let val = calculate_diffuse_shading(Vector3::new(0.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0), &light);
+        let val = calculate_diffuse_shading(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(0.0, 0.0, 1.0),
+            &light,
+        );
         assert!(val > 0.0);
     }
 
     #[test]
     fn test_diffuse_back_lit() {
         let light = Light::new(Vector3::new(0.0, 0.0, -1.0), 1.0);
-        let val = calculate_diffuse_shading(Vector3::new(0.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0), &light);
+        let val = calculate_diffuse_shading(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(0.0, 0.0, 1.0),
+            &light,
+        );
         assert_eq!(val, 0.0);
     }
 
     #[test]
     fn test_diffuse_scaled_intensity() {
         let light = Light::new(Vector3::new(0.0, 0.0, 1.0), 0.5);
-        let val = calculate_diffuse_shading(Vector3::new(0.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0), &light);
+        let val = calculate_diffuse_shading(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(0.0, 0.0, 1.0),
+            &light,
+        );
         assert!(val > 0.0 && val <= 0.5);
     }
 }
-

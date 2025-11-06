@@ -1,8 +1,10 @@
 //! Raycaster 3D visualizer integrating the ray_tracer demo into the app channel
 
-use super::{BrailleGrid, Color, GridBuffer, Visualizer, lerp};
+use super::{lerp, BrailleGrid, Color, GridBuffer, Visualizer};
 use crate::dsp::AudioParameters;
-use crate::visualization::ray_tracer::{render_with_orientation, WireframeRotation, Camera, RenderMode, Scene};
+use crate::visualization::ray_tracer::{
+    render_with_orientation, Camera, RenderMode, Scene, WireframeRotation,
+};
 use std::time::Instant;
 
 pub struct Raycaster3DVisualizer {
@@ -71,7 +73,6 @@ impl Raycaster3DVisualizer {
     }
 }
 
-
 impl Visualizer for Raycaster3DVisualizer {
     fn update(&mut self, params: &AudioParameters) {
         // Map overall amplitude to light intensity in [0.3, 1.0], then apply user boost
@@ -85,7 +86,8 @@ impl Visualizer for Raycaster3DVisualizer {
         let dt = now.duration_since(self.last_time).as_secs_f32();
         self.last_time = now;
         if self.auto_rotate {
-            self.rotation_y = (self.rotation_y + self.rotation_speed_y * dt) % (std::f32::consts::PI * 2.0);
+            self.rotation_y =
+                (self.rotation_y + self.rotation_speed_y * dt) % (std::f32::consts::PI * 2.0);
         }
     }
 
@@ -99,7 +101,11 @@ impl Visualizer for Raycaster3DVisualizer {
             w,
             h,
             self.mode,
-            WireframeRotation { yaw: self.rotation_y, pitch: 0.0, roll: 0.0 },
+            WireframeRotation {
+                yaw: self.rotation_y,
+                pitch: 0.0,
+                roll: 0.0,
+            },
         );
 
         // Convert to BrailleGrid and colorize green by per-cell max intensity
@@ -109,7 +115,9 @@ impl Visualizer for Raycaster3DVisualizer {
         for py in 0..h {
             for px in 0..w {
                 let v = buffer[py][px].clamp(0.0, 1.0);
-                if v <= 0.05 { continue; }
+                if v <= 0.05 {
+                    continue;
+                }
                 let cx = px / 2;
                 let cy = py / 4;
                 let idx = cy * grid.width() + cx;
@@ -138,6 +146,7 @@ impl Visualizer for Raycaster3DVisualizer {
         }
     }
 
-    fn name(&self) -> &str { "Raycaster 3D" }
+    fn name(&self) -> &str {
+        "Raycaster 3D"
+    }
 }
-

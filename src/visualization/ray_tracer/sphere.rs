@@ -11,7 +11,9 @@ pub struct Sphere {
 
 impl Sphere {
     #[inline]
-    pub fn new(center: Vector3, radius: f32) -> Self { Self { center, radius } }
+    pub fn new(center: Vector3, radius: f32) -> Self {
+        Self { center, radius }
+    }
 }
 
 impl Hittable for Sphere {
@@ -46,7 +48,9 @@ impl Hittable for Sphere {
 mod tests {
     use super::*;
 
-    fn approx_equal(a: f32, b: f32) -> bool { (a - b).abs() < 1e-4 }
+    fn approx_equal(a: f32, b: f32) -> bool {
+        (a - b).abs() < 1e-4
+    }
 
     #[test]
     fn test_sphere_hit_from_outside() {
@@ -64,7 +68,9 @@ mod tests {
     fn test_sphere_hit_from_inside() {
         let sphere = Sphere::new(Vector3::new(0.0, 0.0, 0.0), 1.0);
         let ray = Ray::new(Vector3::new(0.0, 0.0, 0.0), Vector3::new(1.0, 0.0, 0.0));
-        let hit = sphere.hit(&ray, 0.001, f32::MAX).expect("should hit from inside");
+        let hit = sphere
+            .hit(&ray, 0.001, f32::MAX)
+            .expect("should hit from inside");
         // From center to surface along +X is exactly radius
         assert!(approx_equal(hit.t, 1.0));
         assert!(!hit.front_face); // Ray exits the surface; outward normal points +X, ray dir +X
@@ -84,7 +90,9 @@ mod tests {
         // Sphere at origin with radius 1. Ray skims at y=1 from left to right
         let sphere = Sphere::new(Vector3::new(0.0, 0.0, 0.0), 1.0);
         let ray = Ray::new(Vector3::new(-2.0, 1.0, 0.0), Vector3::new(1.0, 0.0, 0.0));
-        let hit = sphere.hit(&ray, 0.0, f32::MAX).expect("tangent should count as hit");
+        let hit = sphere
+            .hit(&ray, 0.0, f32::MAX)
+            .expect("tangent should count as hit");
         // Discriminant == 0 => single root. Tangent point is (0,1,0) at t=2.0
         assert!(approx_equal(hit.t, 2.0));
         assert!(approx_equal(hit.point.x, 0.0));
@@ -100,4 +108,3 @@ mod tests {
         assert!(hit.t < 5.0); // nearer than center distance
     }
 }
-

@@ -12,7 +12,12 @@ pub struct Camera {
 
 impl Camera {
     pub fn new(origin: Vector3, viewport_width: f32, viewport_height: f32) -> Self {
-        Self { origin, viewport_width, viewport_height, focal_length: 1.0 }
+        Self {
+            origin,
+            viewport_width,
+            viewport_height,
+            focal_length: 1.0,
+        }
     }
 
     /// Generate ray for pixel coordinates (u, v) in [0.0, 1.0]
@@ -48,4 +53,3 @@ mod tests {
         assert!(r_ur.direction.x > 0.0 && r_ur.direction.y > 0.0);
     }
 }
-

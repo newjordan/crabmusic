@@ -144,4 +144,3 @@ mod tests {
         assert_eq!(grid.get_cell(5, 5).character, '█');
     }
 }
-

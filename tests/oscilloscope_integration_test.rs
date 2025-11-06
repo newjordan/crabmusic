@@ -3,7 +3,9 @@
 
 use crabmusic::audio::AudioBuffer;
 use crabmusic::dsp::DspProcessor;
-use crabmusic::visualization::{GridBuffer, OscilloscopeConfig, OscilloscopeVisualizer, Visualizer};
+use crabmusic::visualization::{
+    GridBuffer, OscilloscopeConfig, OscilloscopeVisualizer, Visualizer,
+};
 
 /// Helper function to generate sine wave for testing
 fn generate_sine_wave(freq: f32, amplitude: f32, sample_rate: u32, num_samples: usize) -> Vec<f32> {
@@ -16,7 +18,12 @@ fn generate_sine_wave(freq: f32, amplitude: f32, sample_rate: u32, num_samples: 
 }
 
 /// Helper function to generate square wave for testing
-fn generate_square_wave(freq: f32, amplitude: f32, sample_rate: u32, num_samples: usize) -> Vec<f32> {
+fn generate_square_wave(
+    freq: f32,
+    amplitude: f32,
+    sample_rate: u32,
+    num_samples: usize,
+) -> Vec<f32> {
     (0..num_samples)
         .map(|i| {
             let t = i as f32 / sample_rate as f32;
@@ -73,10 +80,7 @@ fn test_oscilloscope_with_real_audio() {
             }
         }
     }
-    assert!(
-        has_content,
-        "Oscilloscope should display waveform content"
-    );
+    assert!(has_content, "Oscilloscope should display waveform content");
 }
 
 #[test]
@@ -218,7 +222,10 @@ fn test_oscilloscope_trigger_stabilizes_waveform() {
     // Note: We can't easily test that trigger actually stabilizes the waveform
     // in a unit test, but we can verify that both modes work
     assert!(viz_with_trigger.waveform().iter().any(|&s| s.abs() > 0.1));
-    assert!(viz_without_trigger.waveform().iter().any(|&s| s.abs() > 0.1));
+    assert!(viz_without_trigger
+        .waveform()
+        .iter()
+        .any(|&s| s.abs() > 0.1));
 }
 
 #[test]

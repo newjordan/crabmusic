@@ -21,6 +21,46 @@ Made with love by Frosty40. Build bridges not bombs.
 - ⚡ High‑performance Rust renderer with differential updates
 - 🖥️ Cross‑platform (Windows, macOS, Linux)
 
+## 🎨 Gallery
+
+### Braille Art Output
+
+<p align="center">
+  <img src="public/examples/viper_ascII_art.png" alt="Viper ASCII Art" width="45%">
+  <img src="public/examples/color_tiger.png" alt="Color Tiger" width="45%">
+</p>
+
+<p align="center">
+  <img src="public/examples/small_pixel_tiger.png" alt="Small Pixel Tiger" width="45%">
+  <img src="public/examples/snake_color_closeup.png" alt="Snake Color Closeup" width="45%">
+</p>
+
+### Different Rendering Modes
+
+<p align="center">
+  <img src="public/examples/8px_ascii_tiger.png" alt="8px ASCII Tiger" width="30%">
+  <img src="public/examples/med_tiger.png" alt="Medium Tiger" width="30%">
+  <img src="public/examples/large_pixel_shadingenabled.png" alt="Large Pixel Shading" width="30%">
+</p>
+
+### Audio Visualization & Effects
+
+<p align="center">
+  <img src="public/examples/audio_spetrophasia.png" alt="Audio Spectrophasia" width="45%">
+  <img src="public/examples/grid_formation.png" alt="Grid Formation" width="45%">
+</p>
+
+<p align="center">
+  <img src="public/examples/gottem.png" alt="Gottem" width="45%">
+  <img src="public/examples/small_px_snake.png" alt="Small Pixel Snake" width="45%">
+</p>
+
+### Animation Support
+
+<p align="center">
+  <img src="public/panther_test.gif" alt="Panther Animation Test" width="60%">
+</p>
+
 ## 🚀 Quick Start
 
 ### Installation
@@ -68,6 +108,8 @@ cargo run --release -- --device "Microphone" --output-device "Speakers"
 ```bash
 # Play a video file as Braille
 cargo run --release -- --video ".\media\clip.mp4"
+
+cargo run --release --features video -- --video "media/clip.mp4" 
 ```
 
 ### More

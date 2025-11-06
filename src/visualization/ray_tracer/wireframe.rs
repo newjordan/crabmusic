@@ -10,7 +10,9 @@ pub const DEFAULT_WIREFRAME_TOL_RAD: f32 = 0.03; // ~1.7 degrees
 /// Uses only the normal, so it works regardless of sphere center/radius.
 pub fn is_on_wireframe_normal(normal: Vector3, step_rad: f32, tol_rad: f32) -> bool {
     // Normal should already be unit length, but normalize defensively
-    let len = (normal.x * normal.x + normal.y * normal.y + normal.z * normal.z).sqrt().max(1e-6);
+    let len = (normal.x * normal.x + normal.y * normal.y + normal.z * normal.z)
+        .sqrt()
+        .max(1e-6);
     let x = normal.x / len;
     let y = normal.y / len;
     let z = normal.z / len;
@@ -37,13 +39,13 @@ pub fn rotate_normal_yaw_pitch(normal: Vector3, yaw: f32, pitch: f32) -> Vector3
     let (sy, cy) = yaw.sin_cos();
     let (sp, cp) = pitch.sin_cos();
     // Yaw around Y
-    let x1 =  cy * normal.x + sy * normal.z;
-    let y1 =  normal.y;
+    let x1 = cy * normal.x + sy * normal.z;
+    let y1 = normal.y;
     let z1 = -sy * normal.x + cy * normal.z;
     // Pitch around X
     let x2 = x1;
-    let y2 =  cp * y1 - sp * z1;
-    let z2 =  sp * y1 + cp * z1;
+    let y2 = cp * y1 - sp * z1;
+    let z2 = sp * y1 + cp * z1;
     Vector3::new(x2, y2, z2)
 }
 
@@ -59,13 +61,16 @@ pub fn is_on_wireframe_normal_rotated(
     is_on_wireframe_normal(r, step_rad, tol_rad)
 }
 
-
 /// Backward-compatible helper: check wireframe using point/center/radius with default params.
 pub fn is_on_wireframe(point: Vector3, center: Vector3, radius: f32) -> bool {
     let p = point - center;
     let r = radius.max(1e-6);
     let normal = Vector3::new(p.x / r, p.y / r, p.z / r);
-    is_on_wireframe_normal(normal, DEFAULT_WIREFRAME_STEP_RAD, DEFAULT_WIREFRAME_TOL_RAD)
+    is_on_wireframe_normal(
+        normal,
+        DEFAULT_WIREFRAME_STEP_RAD,
+        DEFAULT_WIREFRAME_TOL_RAD,
+    )
 }
 
 #[cfg(test)]
@@ -83,4 +88,3 @@ mod tests {
         assert!(on_equator || on_meridian);
     }
 }
-

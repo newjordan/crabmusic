@@ -120,10 +120,7 @@ impl CpalAudioDevice {
     }
 
     /// Find a device by name
-    fn find_device_by_name(
-        host: &cpal::Host,
-        name: &str,
-    ) -> Result<cpal::Device, AudioError> {
+    fn find_device_by_name(host: &cpal::Host, name: &str) -> Result<cpal::Device, AudioError> {
         // Try input devices first
         if let Ok(devices) = host.input_devices() {
             for device in devices {

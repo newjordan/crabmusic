@@ -5,15 +5,16 @@
 //! - drop_loop(): waits for terminal paste events (drag-and-drop pastes paths)
 
 use anyhow::{Context, Result};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, EnableBracketedPaste, DisableBracketedPaste};
+use crossterm::event::{
+    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind,
+};
 use crossterm::execute;
 use std::io::stdout;
 
 use crate::rendering::TerminalRenderer;
-use crate::visualization::{GridBuffer, Color};
-use crate::visualization::braille::BrailleGrid;
 use crate::video::blit_luma_to_braille;
-
+use crate::visualization::braille::BrailleGrid;
+use crate::visualization::{Color, GridBuffer};
 
 #[cfg(feature = "image")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,10 +27,14 @@ enum ColorMode {
 #[cfg(feature = "image")]
 fn otsu_threshold(luma: &[u8]) -> u8 {
     let mut hist = [0u32; 256];
-    for &v in luma { hist[v as usize] += 1; }
+    for &v in luma {
+        hist[v as usize] += 1;
+    }
     let total: u32 = luma.len() as u32;
     let mut sum_all: u64 = 0;
-    for i in 0..256 { sum_all += (i as u64) * (hist[i] as u64); }
+    for i in 0..256 {
+        sum_all += (i as u64) * (hist[i] as u64);
+    }
 
     let mut sum_b: u64 = 0;
     let mut w_b: u32 = 0;
@@ -38,14 +43,21 @@ fn otsu_threshold(luma: &[u8]) -> u8 {
 
     for t in 0..256 {
         w_b += hist[t] as u32;
-        if w_b == 0 { continue; }
+        if w_b == 0 {
+            continue;
+        }
         let w_f = total - w_b;
-        if w_f == 0 { break; }
+        if w_f == 0 {
+            break;
+        }
         sum_b += (t as u64) * (hist[t] as u64);
         let m_b = sum_b as f64 / w_b as f64;
         let m_f = (sum_all - sum_b) as f64 / w_f as f64;
         let var_between = (w_b as f64) * (w_f as f64) * (m_b - m_f).powi(2);
-        if var_between > max_var { max_var = var_between; threshold = t as u8; }
+        if var_between > max_var {
+            max_var = var_between;
+            threshold = t as u8;
+        }
     }
     threshold
 }
@@ -59,7 +71,8 @@ fn prepare_luma_dot_sized(
 ) -> image::GrayImage {
     use image::{imageops, DynamicImage, GenericImageView, GrayImage};
     if !letterbox {
-        let resized = imageops::resize(&img.to_rgb8(), dot_w, dot_h, imageops::FilterType::Triangle);
+        let resized =
+            imageops::resize(&img.to_rgb8(), dot_w, dot_h, imageops::FilterType::Triangle);
         return DynamicImage::ImageRgb8(resized).to_luma8();
     }
 
@@ -135,7 +148,6 @@ fn prepare_rgb_dot_sized(
     imageops::overlay(&mut out, &resized, off_x, off_y);
     out
 }
-
 
 #[cfg(feature = "image")]
 fn fill_braille_from_luma(braille: &mut BrailleGrid, luma: &image::GrayImage, threshold: u8) {
@@ -262,15 +274,27 @@ fn render_morph_frame(
     let alpha = t.clamp(0.0, 1.0);
     for y in 0..dot_h {
         for x in 0..dot_w {
-            let a = if x < aw && y < ah { luma_a.get_pixel(x, y)[0] as f32 } else { 0.0 };
-            let b = if x < bw && y < bh { luma_b.get_pixel(x, y)[0] as f32 } else { 0.0 };
+            let a = if x < aw && y < ah {
+                luma_a.get_pixel(x, y)[0] as f32
+            } else {
+                0.0
+            };
+            let b = if x < bw && y < bh {
+                luma_b.get_pixel(x, y)[0] as f32
+            } else {
+                0.0
+            };
             let v = ((1.0 - alpha) * a + alpha * b).round().clamp(0.0, 255.0) as u8;
             luma_blend.put_pixel(x, y, image::Luma([v]));
         }
     }
 
     // Determine threshold for braille dotting
-    let used_threshold = if auto_thresh { otsu_threshold(luma_blend.as_raw()) } else { manual_threshold };
+    let used_threshold = if auto_thresh {
+        otsu_threshold(luma_blend.as_raw())
+    } else {
+        manual_threshold
+    };
 
     // Fill braille from blended luma
     fill_braille_from_luma(braille, &luma_blend, used_threshold);
@@ -282,21 +306,36 @@ fn render_morph_frame(
         let mut rgb_blend = RgbImage::new(dot_w, dot_h);
         for y in 0..dot_h {
             for x in 0..dot_w {
-                let pa = if x < rgb_a.width() && y < rgb_a.height() { rgb_a.get_pixel(x, y) } else { &image::Rgb([0,0,0]) };
-                let pb = if x < rgb_b.width() && y < rgb_b.height() { rgb_b.get_pixel(x, y) } else { &image::Rgb([0,0,0]) };
-                let r = ((1.0 - alpha) * pa[0] as f32 + alpha * pb[0] as f32).round().clamp(0.0, 255.0) as u8;
-                let g = ((1.0 - alpha) * pa[1] as f32 + alpha * pb[1] as f32).round().clamp(0.0, 255.0) as u8;
-                let b = ((1.0 - alpha) * pa[2] as f32 + alpha * pb[2] as f32).round().clamp(0.0, 255.0) as u8;
+                let pa = if x < rgb_a.width() && y < rgb_a.height() {
+                    rgb_a.get_pixel(x, y)
+                } else {
+                    &image::Rgb([0, 0, 0])
+                };
+                let pb = if x < rgb_b.width() && y < rgb_b.height() {
+                    rgb_b.get_pixel(x, y)
+                } else {
+                    &image::Rgb([0, 0, 0])
+                };
+                let r = ((1.0 - alpha) * pa[0] as f32 + alpha * pb[0] as f32)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+                let g = ((1.0 - alpha) * pa[1] as f32 + alpha * pb[1] as f32)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+                let b = ((1.0 - alpha) * pa[2] as f32 + alpha * pb[2] as f32)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
                 rgb_blend.put_pixel(x, y, image::Rgb([r, g, b]));
             }
         }
         Some(rgb_blend)
-    } else { None };
+    } else {
+        None
+    };
 
     copy_braille_to_grid(grid, braille, &luma_blend, color_mode, rgb_opt.as_ref());
     used_threshold
 }
-
 
 #[cfg(feature = "image")]
 fn render_with_state(
@@ -311,7 +350,11 @@ fn render_with_state(
     let dot_w = braille.dot_width() as u32;
     let dot_h = braille.dot_height() as u32;
     let luma = prepare_luma_dot_sized(img, dot_w, dot_h, letterbox);
-    let used_threshold = if auto_threshold { otsu_threshold(luma.as_raw()) } else { threshold };
+    let used_threshold = if auto_threshold {
+        otsu_threshold(luma.as_raw())
+    } else {
+        threshold
+    };
     fill_braille_from_luma(braille, &luma, used_threshold);
     let rgb_opt = if matches!(color_mode, ColorMode::Full) {
         Some(prepare_rgb_dot_sized(img, dot_w, dot_h, letterbox))
@@ -365,7 +408,9 @@ fn draw_centered(grid: &mut GridBuffer, text: &str) {
 
 /// Helper: draw left-aligned text at a specific row
 fn draw_left(grid: &mut GridBuffer, row: usize, text: &str) {
-    if row >= grid.height() { return; }
+    if row >= grid.height() {
+        return;
+    }
     for (i, ch) in text.chars().enumerate() {
         if i < grid.width() {
             grid.set_cell(i, row, ch);
@@ -376,7 +421,11 @@ fn draw_left(grid: &mut GridBuffer, row: usize, text: &str) {
 }
 
 #[cfg(feature = "image")]
-pub fn render_image(path: &str, morph_second: Option<&str>, morph_duration_override: Option<u64>) -> Result<()> {
+pub fn render_image(
+    path: &str,
+    morph_second: Option<&str>,
+    morph_duration_override: Option<u64>,
+) -> Result<()> {
     use image::DynamicImage;
 
     let img = image::open(path).with_context(|| format!("open image {}", path))?;
@@ -429,58 +478,41 @@ pub fn render_image(path: &str, morph_second: Option<&str>, morph_duration_overr
 
     // Morph/transition state (two-image crossfade)
     let mut morph_prompting: bool = false; // waiting for second path
-    let mut morph_mode: bool = false;      // morph animation active
+    let mut morph_mode: bool = false; // morph animation active
     let mut morph_paused: bool = false;
     let mut morph_other_img: Option<DynamicImage> = None;
-    let mut morph_t: f32 = 0.0;            // 0.0..1.0 blend factor
-    let mut morph_dir: i32 = 1;            // 1 forward, -1 backward (ping-pong)
+    let mut morph_t: f32 = 0.0; // 0.0..1.0 blend factor
+    let mut morph_dir: i32 = 1; // 1 forward, -1 backward (ping-pong)
     let mut morph_last_tick = std::time::Instant::now();
     let mut morph_duration_ms: u64 = 2500; // default 2.5s per A->B
 
-        // Auto-start morph if a second image path was provided via CLI
-        if let Some(second_path) = morph_second {
-            match image::open(second_path) {
-                Ok(new_img) => {
-                    morph_other_img = Some(new_img);
-                    morph_mode = true;
-                    morph_paused = false;
-                    morph_t = 0.0;
-                    morph_dir = 1;
-                    if let Some(ms) = morph_duration_override { morph_duration_ms = ms.max(50); }
-                    if let (Some(ref img_a), Some(ref img_b)) = (current_img.as_ref(), morph_other_img.as_ref()) {
-                        grid.clear();
-                        used_threshold = render_morph_frame(
-                            img_a,
-                            img_b,
-                            &mut braille,
-                            &mut grid,
-                            morph_t,
-                            manual_threshold,
-                            auto_thresh,
-                            letterbox,
-                            color_mode,
-                        );
-                        draw_status(
-                            &mut grid,
-                            current_path.as_deref(),
-                            used_threshold,
-                            auto_thresh,
-                            letterbox,
-                            color_mode,
-                            &typed,
-                        );
-                        draw_left(&mut grid, 2, &format!(
-                            "Morph t={:.0}% {} dur={}ms | [Space] pause | m stop | [ faster | ] slower | r reverse",
-                            (morph_t * 100.0).clamp(0.0, 100.0),
-                            if morph_paused { "PAUSED" } else { "PLAY" },
-                            morph_duration_ms,
-                        ));
-                        renderer.render(&grid)?;
-                    }
+    // Auto-start morph if a second image path was provided via CLI
+    if let Some(second_path) = morph_second {
+        match image::open(second_path) {
+            Ok(new_img) => {
+                morph_other_img = Some(new_img);
+                morph_mode = true;
+                morph_paused = false;
+                morph_t = 0.0;
+                morph_dir = 1;
+                if let Some(ms) = morph_duration_override {
+                    morph_duration_ms = ms.max(50);
                 }
-                Err(err) => {
+                if let (Some(ref img_a), Some(ref img_b)) =
+                    (current_img.as_ref(), morph_other_img.as_ref())
+                {
                     grid.clear();
-                    draw_centered(&mut grid, &format!("Failed to open second image (morph): {}", err));
+                    used_threshold = render_morph_frame(
+                        img_a,
+                        img_b,
+                        &mut braille,
+                        &mut grid,
+                        morph_t,
+                        manual_threshold,
+                        auto_thresh,
+                        letterbox,
+                        color_mode,
+                    );
                     draw_status(
                         &mut grid,
                         current_path.as_deref(),
@@ -490,11 +522,34 @@ pub fn render_image(path: &str, morph_second: Option<&str>, morph_duration_overr
                         color_mode,
                         &typed,
                     );
+                    draw_left(&mut grid, 2, &format!(
+                            "Morph t={:.0}% {} dur={}ms | [Space] pause | m stop | [ faster | ] slower | r reverse",
+                            (morph_t * 100.0).clamp(0.0, 100.0),
+                            if morph_paused { "PAUSED" } else { "PLAY" },
+                            morph_duration_ms,
+                        ));
                     renderer.render(&grid)?;
                 }
             }
+            Err(err) => {
+                grid.clear();
+                draw_centered(
+                    &mut grid,
+                    &format!("Failed to open second image (morph): {}", err),
+                );
+                draw_status(
+                    &mut grid,
+                    current_path.as_deref(),
+                    used_threshold,
+                    auto_thresh,
+                    letterbox,
+                    color_mode,
+                    &typed,
+                );
+                renderer.render(&grid)?;
+            }
         }
-
+    }
 
     'outer: loop {
         let poll_ms = if morph_mode && !morph_paused { 16 } else { 100 };
@@ -513,7 +568,9 @@ pub fn render_image(path: &str, morph_second: Option<&str>, morph_duration_overr
                                     morph_t = 0.0;
                                     morph_dir = 1;
                                     typed.clear();
-                                    if let (Some(ref img_a), Some(ref img_b)) = (current_img.as_ref(), morph_other_img.as_ref()) {
+                                    if let (Some(ref img_a), Some(ref img_b)) =
+                                        (current_img.as_ref(), morph_other_img.as_ref())
+                                    {
                                         grid.clear();
                                         used_threshold = render_morph_frame(
                                             img_a,
@@ -530,7 +587,10 @@ pub fn render_image(path: &str, morph_second: Option<&str>, morph_duration_overr
                                 }
                                 Err(err) => {
                                     grid.clear();
-                                    draw_centered(&mut grid, &format!("Failed to open second image: {}", err));
+                                    draw_centered(
+                                        &mut grid,
+                                        &format!("Failed to open second image: {}", err),
+                                    );
                                 }
                             }
                             morph_prompting = false;
@@ -556,7 +616,10 @@ pub fn render_image(path: &str, morph_second: Option<&str>, morph_duration_overr
                                 }
                                 Err(err) => {
                                     grid.clear();
-                                    draw_centered(&mut grid, &format!("Failed to open image: {}", err));
+                                    draw_centered(
+                                        &mut grid,
+                                        &format!("Failed to open image: {}", err),
+                                    );
                                 }
                             }
                         }
@@ -588,7 +651,9 @@ pub fn render_image(path: &str, morph_second: Option<&str>, morph_duration_overr
                     grid = GridBuffer::new(w_cells, h_cells);
                     braille = BrailleGrid::new(w_cells, h_cells);
                     if morph_mode {
-                        if let (Some(ref img_a), Some(ref img_b)) = (current_img.as_ref(), morph_other_img.as_ref()) {
+                        if let (Some(ref img_a), Some(ref img_b)) =
+                            (current_img.as_ref(), morph_other_img.as_ref())
+                        {
                             grid.clear();
                             used_threshold = render_morph_frame(
                                 img_a,
@@ -661,24 +726,26 @@ pub fn render_image(path: &str, morph_second: Option<&str>, morph_duration_overr
                             } else {
                                 break 'outer;
                             }
-                        },
-                            KeyCode::Char('q') | KeyCode::Char('Q') => {
-                                if typed.is_empty() {
-                                    break 'outer;
-                                } else {
-                                    if let KeyCode::Char(c) = k.code { typed.push(c); }
-                                    draw_status(
-                                        &mut grid,
-                                        current_path.as_deref(),
-                                        used_threshold,
-                                        auto_thresh,
-                                        letterbox,
-                                        color_mode,
-                                        &typed,
-                                    );
-                                    renderer.render(&grid)?;
+                        }
+                        KeyCode::Char('q') | KeyCode::Char('Q') => {
+                            if typed.is_empty() {
+                                break 'outer;
+                            } else {
+                                if let KeyCode::Char(c) = k.code {
+                                    typed.push(c);
                                 }
+                                draw_status(
+                                    &mut grid,
+                                    current_path.as_deref(),
+                                    used_threshold,
+                                    auto_thresh,
+                                    letterbox,
+                                    color_mode,
+                                    &typed,
+                                );
+                                renderer.render(&grid)?;
                             }
+                        }
                         KeyCode::Enter => {
                             // Allow typing a new path and pressing Enter to switch
                             let candidate = typed.trim().trim_matches('"').to_string();
@@ -704,7 +771,10 @@ pub fn render_image(path: &str, morph_second: Option<&str>, morph_duration_overr
                                     }
                                     Err(err) => {
                                         grid.clear();
-                                        draw_centered(&mut grid, &format!("Failed to open image: {}", err));
+                                        draw_centered(
+                                            &mut grid,
+                                            &format!("Failed to open image: {}", err),
+                                        );
                                     }
                                 }
                             }
@@ -749,7 +819,9 @@ pub fn render_image(path: &str, morph_second: Option<&str>, morph_duration_overr
                                         color_mode,
                                     );
                                 }
-                            } else if let KeyCode::Char(c) = k.code { typed.push(c); }
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
                             draw_status(
                                 &mut grid,
                                 current_path.as_deref(),
@@ -778,7 +850,9 @@ pub fn render_image(path: &str, morph_second: Option<&str>, morph_duration_overr
                                         color_mode,
                                     );
                                 }
-                            } else if let KeyCode::Char(c) = k.code { typed.push(c); }
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
                             draw_status(
                                 &mut grid,
                                 current_path.as_deref(),
@@ -805,7 +879,9 @@ pub fn render_image(path: &str, morph_second: Option<&str>, morph_duration_overr
                                         color_mode,
                                     );
                                 }
-                            } else if let KeyCode::Char(c) = k.code { typed.push(c); }
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
                             draw_status(
                                 &mut grid,
                                 current_path.as_deref(),
@@ -817,7 +893,6 @@ pub fn render_image(path: &str, morph_second: Option<&str>, morph_duration_overr
                             );
                             renderer.render(&grid)?;
                         }
-
 
                         KeyCode::Char('l') | KeyCode::Char('L') => {
                             if typed.is_empty() && current_img.is_some() {
@@ -834,7 +909,9 @@ pub fn render_image(path: &str, morph_second: Option<&str>, morph_duration_overr
                                         color_mode,
                                     );
                                 }
-                            } else if let KeyCode::Char(c) = k.code { typed.push(c); }
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
                             draw_status(
                                 &mut grid,
                                 current_path.as_deref(),
@@ -865,7 +942,9 @@ pub fn render_image(path: &str, morph_second: Option<&str>, morph_duration_overr
                                         color_mode,
                                     );
                                 }
-                            } else if let KeyCode::Char(c) = k.code { typed.push(c); }
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
                             draw_status(
                                 &mut grid,
                                 current_path.as_deref(),
@@ -919,10 +998,16 @@ pub fn render_image(path: &str, morph_second: Option<&str>, morph_duration_overr
                                         color_mode,
                                         &typed,
                                     );
-                                    draw_left(&mut grid, 2, "Paste second image path to start morph...");
+                                    draw_left(
+                                        &mut grid,
+                                        2,
+                                        "Paste second image path to start morph...",
+                                    );
                                     renderer.render(&grid)?;
                                 }
-                            } else if let KeyCode::Char(c) = k.code { typed.push(c); }
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
                         }
 
                         KeyCode::Char(' ') => {
@@ -944,18 +1029,23 @@ pub fn render_image(path: &str, morph_second: Option<&str>, morph_duration_overr
                                     morph_duration_ms,
                                 ));
                                 renderer.render(&grid)?;
-                            } else if let KeyCode::Char(c) = k.code { typed.push(c); }
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
                         }
 
                         KeyCode::Char('r') | KeyCode::Char('R') => {
                             if typed.is_empty() && morph_mode {
                                 morph_dir *= -1;
-                            } else if let KeyCode::Char(c) = k.code { typed.push(c); }
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
                         }
 
                         KeyCode::Char('[') => {
                             if typed.is_empty() {
-                                morph_duration_ms = (morph_duration_ms.saturating_sub(200)).max(100);
+                                morph_duration_ms =
+                                    (morph_duration_ms.saturating_sub(200)).max(100);
                                 if morph_mode {
                                     draw_status(
                                         &mut grid,
@@ -974,12 +1064,15 @@ pub fn render_image(path: &str, morph_second: Option<&str>, morph_duration_overr
                                     ));
                                     renderer.render(&grid)?;
                                 }
-                            } else if let KeyCode::Char(c) = k.code { typed.push(c); }
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
                         }
 
                         KeyCode::Char(']') => {
                             if typed.is_empty() {
-                                morph_duration_ms = (morph_duration_ms.saturating_add(200)).min(20000);
+                                morph_duration_ms =
+                                    (morph_duration_ms.saturating_add(200)).min(20000);
                                 if morph_mode {
                                     draw_status(
                                         &mut grid,
@@ -998,9 +1091,10 @@ pub fn render_image(path: &str, morph_second: Option<&str>, morph_duration_overr
                                     ));
                                     renderer.render(&grid)?;
                                 }
-                            } else if let KeyCode::Char(c) = k.code { typed.push(c); }
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
                         }
-
 
                         KeyCode::Char('x') | KeyCode::Char('X') => {
                             if typed.is_empty() {
@@ -1040,7 +1134,9 @@ pub fn render_image(path: &str, morph_second: Option<&str>, morph_duration_overr
                                     &typed,
                                 );
                                 renderer.render(&grid)?;
-                            } else if let KeyCode::Char(c) = k.code { typed.push(c); }
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
                         }
 
                         KeyCode::Char('s') | KeyCode::Char('S') => {
@@ -1054,7 +1150,8 @@ pub fn render_image(path: &str, morph_second: Option<&str>, morph_duration_overr
                                         out_str.push('\n');
                                     }
                                     let p = std::path::Path::new(path);
-                                    let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+                                    let stem =
+                                        p.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
                                     let parent = p.parent().unwrap_or(std::path::Path::new("."));
                                     let save_path = parent.join(format!("{}.braille.txt", stem));
                                     let msg = match std::fs::write(&save_path, out_str) {
@@ -1064,7 +1161,9 @@ pub fn render_image(path: &str, morph_second: Option<&str>, morph_duration_overr
                                     draw_left(&mut grid, 2, &msg);
                                     renderer.render(&grid)?;
                                 }
-                            } else if let KeyCode::Char(c) = k.code { typed.push(c); }
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
                         }
                         KeyCode::Char(c) => {
                             typed.push(c);
@@ -1087,15 +1186,23 @@ pub fn render_image(path: &str, morph_second: Option<&str>, morph_duration_overr
         }
         // Morph animation tick (runs even when no events)
         if morph_mode && !morph_paused {
-            if let (Some(ref img_a), Some(ref img_b)) = (current_img.as_ref(), morph_other_img.as_ref()) {
+            if let (Some(ref img_a), Some(ref img_b)) =
+                (current_img.as_ref(), morph_other_img.as_ref())
+            {
                 let now = std::time::Instant::now();
                 let dt = now.duration_since(morph_last_tick);
                 morph_last_tick = now;
                 let dur = std::time::Duration::from_millis(morph_duration_ms.max(1));
                 let step = (dt.as_secs_f32() / dur.as_secs_f32()) * (morph_dir as f32);
                 morph_t += step;
-                if morph_t > 1.0 { morph_t = 2.0 - morph_t; morph_dir = -morph_dir; }
-                if morph_t < 0.0 { morph_t = -morph_t; morph_dir = -morph_dir; }
+                if morph_t > 1.0 {
+                    morph_t = 2.0 - morph_t;
+                    morph_dir = -morph_dir;
+                }
+                if morph_t < 0.0 {
+                    morph_t = -morph_t;
+                    morph_dir = -morph_dir;
+                }
                 grid.clear();
                 used_threshold = render_morph_frame(
                     img_a,
@@ -1126,7 +1233,6 @@ pub fn render_image(path: &str, morph_second: Option<&str>, morph_duration_overr
                 renderer.render(&grid)?;
             }
         }
-
     }
 
     let _ = execute!(stdout(), DisableBracketedPaste);
@@ -1268,7 +1374,7 @@ pub fn drop_loop() -> Result<()> {
                             } else {
                                 break 'outer;
                             }
-                        },
+                        }
                         KeyCode::Enter => {
                             let candidate = typed.trim().trim_matches('"').to_string();
                             if !candidate.is_empty() {
@@ -1293,7 +1399,10 @@ pub fn drop_loop() -> Result<()> {
                                     }
                                     Err(err) => {
                                         grid.clear();
-                                        draw_centered(&mut grid, &format!("Failed to open image: {}", err));
+                                        draw_centered(
+                                            &mut grid,
+                                            &format!("Failed to open image: {}", err),
+                                        );
                                     }
                                 }
                             }
@@ -1339,7 +1448,9 @@ pub fn drop_loop() -> Result<()> {
                                         color_mode,
                                     );
                                 }
-                            } else if let KeyCode::Char(c) = k.code { typed.push(c); }
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
                             draw_status(
                                 &mut grid,
                                 current_path.as_deref(),
@@ -1368,7 +1479,9 @@ pub fn drop_loop() -> Result<()> {
                                         color_mode,
                                     );
                                 }
-                            } else if let KeyCode::Char(c) = k.code { typed.push(c); }
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
                             draw_status(
                                 &mut grid,
                                 current_path.as_deref(),
@@ -1395,7 +1508,9 @@ pub fn drop_loop() -> Result<()> {
                                         color_mode,
                                     );
                                 }
-                            } else if let KeyCode::Char(c) = k.code { typed.push(c); }
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
                             draw_status(
                                 &mut grid,
                                 current_path.as_deref(),
@@ -1422,7 +1537,9 @@ pub fn drop_loop() -> Result<()> {
                                         color_mode,
                                     );
                                 }
-                            } else if let KeyCode::Char(c) = k.code { typed.push(c); }
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
                             draw_status(
                                 &mut grid,
                                 current_path.as_deref(),
@@ -1473,7 +1590,9 @@ pub fn drop_loop() -> Result<()> {
                                     &typed,
                                 );
                                 renderer.render(&grid)?;
-                            } else if let KeyCode::Char(c) = k.code { typed.push(c); }
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
                         }
                         KeyCode::Char('c') | KeyCode::Char('C') => {
                             if typed.is_empty() && current_img.is_some() {
@@ -1494,7 +1613,9 @@ pub fn drop_loop() -> Result<()> {
                                         color_mode,
                                     );
                                 }
-                            } else if let KeyCode::Char(c) = k.code { typed.push(c); }
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
                             draw_status(
                                 &mut grid,
                                 current_path.as_deref(),
@@ -1518,7 +1639,8 @@ pub fn drop_loop() -> Result<()> {
                                         out_str.push('\n');
                                     }
                                     let p = std::path::Path::new(path);
-                                    let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+                                    let stem =
+                                        p.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
                                     let parent = p.parent().unwrap_or(std::path::Path::new("."));
                                     let save_path = parent.join(format!("{}.braille.txt", stem));
                                     let msg = match std::fs::write(&save_path, out_str) {
@@ -1528,7 +1650,9 @@ pub fn drop_loop() -> Result<()> {
                                     draw_left(&mut grid, 2, &msg);
                                     renderer.render(&grid)?;
                                 }
-                            } else if let KeyCode::Char(c) = k.code { typed.push(c); }
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
                         }
                         KeyCode::Char(c) => {
                             typed.push(c);
@@ -1562,4 +1686,3 @@ pub fn drop_loop() -> Result<()> {
 pub fn drop_loop() -> Result<()> {
     anyhow::bail!("Image drag-and-drop requires building with `--features image`")
 }
-

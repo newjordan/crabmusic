@@ -54,7 +54,7 @@ impl PhosphorGlowEffect {
     pub fn new(decay_rate: f32, intensity: f32) -> Self {
         let decay_rate = decay_rate.clamp(0.0, 1.0);
         let intensity = intensity.clamp(0.0, 1.0);
-        
+
         Self {
             enabled: true,
             intensity,
@@ -96,7 +96,7 @@ impl PhosphorGlowEffect {
     fn blend_colors(color1: Color, color2: Color, mix: f32) -> Color {
         let mix = mix.clamp(0.0, 1.0);
         let inv_mix = 1.0 - mix;
-        
+
         Color::new(
             (color1.r as f32 * inv_mix + color2.r as f32 * mix) as u8,
             (color1.g as f32 * inv_mix + color2.g as f32 * mix) as u8,
@@ -114,7 +114,7 @@ impl PhosphorGlowEffect {
     /// Decayed color
     fn decay_color(color: Color, decay_rate: f32) -> Color {
         let fade = 1.0 - decay_rate;
-        
+
         Color::new(
             (color.r as f32 * fade) as u8,
             (color.g as f32 * fade) as u8,
@@ -141,33 +141,33 @@ impl Effect for PhosphorGlowEffect {
 
         let width = grid.width();
         let height = grid.height();
-        
+
         // Resize buffer if needed
         self.resize_buffer(width, height);
-        
+
         // Create temporary buffer for new frame
         let mut new_frame = vec![None; width * height];
-        
+
         // Process each cell
         for y in 0..height {
             for x in 0..width {
                 let idx = y * width + x;
                 let cell = grid.get_cell(x, y);
                 let current_color = cell.foreground_color;
-                
+
                 // Store current color for next frame
                 new_frame[idx] = current_color;
-                
+
                 // Blend with previous frame if we have both colors
                 if let Some(current) = current_color {
                     if let Some(previous) = self.previous_frame[idx] {
                         // Decay the previous frame color
                         let decayed = Self::decay_color(previous, self.decay_rate);
-                        
+
                         // Blend current with decayed previous based on intensity
                         // Higher intensity = more persistence (more of decayed color)
                         let blended = Self::blend_colors(current, decayed, self.intensity);
-                        
+
                         // Update grid with blended color
                         let cell_mut = grid.get_cell_mut(x, y);
                         cell_mut.foreground_color = Some(blended);
@@ -175,7 +175,7 @@ impl Effect for PhosphorGlowEffect {
                 } else if let Some(previous) = self.previous_frame[idx] {
                     // No current color, but we have previous - show decayed previous
                     let decayed = Self::decay_color(previous, self.decay_rate);
-                    
+
                     // Only show if decay hasn't made it too dark
                     if decayed.r > 0 || decayed.g > 0 || decayed.b > 0 {
                         let cell_mut = grid.get_cell_mut(x, y);
@@ -188,7 +188,7 @@ impl Effect for PhosphorGlowEffect {
                 }
             }
         }
-        
+
         // Update previous frame buffer
         self.previous_frame = new_frame;
     }
@@ -234,7 +234,7 @@ mod tests {
     fn test_phosphor_decay_rate_clamping() {
         let effect = PhosphorGlowEffect::new(1.5, 0.5);
         assert_eq!(effect.decay_rate(), 1.0);
-        
+
         let effect = PhosphorGlowEffect::new(-0.5, 0.5);
         assert_eq!(effect.decay_rate(), 0.0);
     }
@@ -250,7 +250,7 @@ mod tests {
     fn test_decay_color() {
         let color = Color::new(100, 150, 200);
         let decayed = PhosphorGlowEffect::decay_color(color, 0.5);
-        
+
         // With 0.5 decay rate, colors should be multiplied by 0.5
         assert_eq!(decayed.r, 50);
         assert_eq!(decayed.g, 75);
@@ -261,15 +261,15 @@ mod tests {
     fn test_blend_colors() {
         let color1 = Color::new(0, 0, 0);
         let color2 = Color::new(100, 100, 100);
-        
+
         // 0.0 mix = all color1
         let blended = PhosphorGlowEffect::blend_colors(color1, color2, 0.0);
         assert_eq!(blended.r, 0);
-        
+
         // 1.0 mix = all color2
         let blended = PhosphorGlowEffect::blend_colors(color1, color2, 1.0);
         assert_eq!(blended.r, 100);
-        
+
         // 0.5 mix = halfway
         let blended = PhosphorGlowEffect::blend_colors(color1, color2, 0.5);
         assert_eq!(blended.r, 50);
@@ -279,9 +279,8 @@ mod tests {
     fn test_phosphor_clear_on_disable() {
         let mut effect = PhosphorGlowEffect::new(0.3, 0.7);
         effect.previous_frame = vec![Some(Color::new(255, 255, 255)); 100];
-        
+
         effect.set_enabled(false);
         assert_eq!(effect.previous_frame.len(), 0);
     }
 }
-

@@ -1,11 +1,11 @@
 // Night Night Animation - A soothing bedtime visualization
 // Features: Twinkling stars, moon phases, sunset-to-night color transitions
 
-use crabmusic::visualization::{Color, GridBuffer};
 use crabmusic::rendering::TerminalRenderer;
+use crabmusic::visualization::{Color, GridBuffer};
 use crossterm::event::{self, Event, KeyCode};
-use std::time::{Duration, Instant};
 use rand::Rng;
+use std::time::{Duration, Instant};
 
 struct Star {
     x: usize,
@@ -41,10 +41,15 @@ impl Star {
 
     fn get_char(&self) -> char {
         let b = self.get_brightness();
-        if b > 0.8 { '✦' }
-        else if b > 0.6 { '*' }
-        else if b > 0.4 { '·' }
-        else { '.' }
+        if b > 0.8 {
+            '✦'
+        } else if b > 0.6 {
+            '*'
+        } else if b > 0.4 {
+            '·'
+        } else {
+            '.'
+        }
     }
 
     fn get_color(&self) -> Color {
@@ -80,23 +85,11 @@ impl Moon {
         // Moon shape (crescent -> full)
         let shapes = [
             // Crescent
-            vec![
-                "  ▄▀ ",
-                " █   ",
-                "  ▀▄ ",
-            ],
+            vec!["  ▄▀ ", " █   ", "  ▀▄ "],
             // Half
-            vec![
-                " ▄▀▀ ",
-                "█▀▀  ",
-                " ▀▀▄ ",
-            ],
+            vec![" ▄▀▀ ", "█▀▀  ", " ▀▀▄ "],
             // Full
-            vec![
-                " ▄▀▀▄ ",
-                "█▀▀▀█",
-                " ▀▀▀▄ ",
-            ],
+            vec![" ▄▀▀▄ ", "█▀▀▀█", " ▀▀▀▄ "],
         ];
 
         let shape_idx = ((self.phase * 2.0).min(2.0) as usize).min(2);
@@ -129,9 +122,11 @@ impl Moon {
                     let x = (self.x as i32 + dx) as usize;
                     let y = (self.y as i32 + dy) as usize;
 
-                    if x < grid.width() && y < grid.height()
+                    if x < grid.width()
+                        && y < grid.height()
                         && grid.get_cell(x, y).character == ' '
-                        && rand::random::<f32>() < 0.15 {
+                        && rand::random::<f32>() < 0.15
+                    {
                         grid.set_cell_with_color(x, y, '·', glow_color);
                     }
                 }
@@ -157,14 +152,14 @@ impl SkyGradient {
         let row_factor = row as f32 / total_rows as f32;
 
         // Sunset colors (orange/pink to purple)
-        let sunset_top = Color::new(20, 10, 40);      // Deep purple-blue
-        let sunset_mid = Color::new(180, 60, 100);    // Purple-pink
+        let sunset_top = Color::new(20, 10, 40); // Deep purple-blue
+        let sunset_mid = Color::new(180, 60, 100); // Purple-pink
         let sunset_bottom = Color::new(255, 140, 60); // Orange
 
         // Night colors (dark blue to black)
-        let night_top = Color::new(5, 5, 15);         // Almost black
-        let night_mid = Color::new(15, 15, 40);       // Deep blue
-        let night_bottom = Color::new(10, 20, 50);    // Dark blue
+        let night_top = Color::new(5, 5, 15); // Almost black
+        let night_mid = Color::new(15, 15, 40); // Deep blue
+        let night_bottom = Color::new(10, 20, 50); // Dark blue
 
         // Interpolate between sunset and night based on progress
         let top = Self::lerp_color(sunset_top, night_top, self.progress);
@@ -296,7 +291,8 @@ impl NightNightAnimation {
                         let x = x_start + dx;
                         if x < width {
                             // Add a subtle pulse effect
-                            let pulse = (self.message_phase * 6.0 + dx as f32 * 0.1).sin() * 0.1 + 0.9;
+                            let pulse =
+                                (self.message_phase * 6.0 + dx as f32 * 0.1).sin() * 0.1 + 0.9;
                             let pulse_color = Color::new(
                                 (text_color.r as f32 * pulse) as u8,
                                 (text_color.g as f32 * pulse) as u8,

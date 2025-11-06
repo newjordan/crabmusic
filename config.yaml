@@ -1,0 +1,38 @@
+audio:
+  sample_rate: 44100
+  channels: 2
+  buffer_capacity: 8192
+  device_name: null
+  output_device_name: null
+  use_loopback: true
+dsp:
+  fft_size: 1024
+  smoothing: 0.05
+  bass_range:
+  - 20.0
+  - 250.0
+  mid_range:
+  - 250.0
+  - 4000.0
+  treble_range:
+  - 4000.0
+  - 20000.0
+  beat_detection:
+    sensitivity: 1.0
+    cooldown_seconds: 0.1
+    min_bpm: 60.0
+    max_bpm: 180.0
+    tempo_history_size: 8
+visualization:
+  visualizer_type: sine_wave
+  character_set: smooth64
+  sine_wave:
+    amplitude: 1.0
+    frequency: 1.0
+    phase: 0.0
+    thickness: 3
+    smoothing: 0.15
+rendering:
+  target_fps: 60
+  min_width: 40
+  min_height: 12

@@ -3,38 +3,39 @@
 
 #![allow(dead_code)]
 
+pub mod braille;
 pub mod character_sets;
 pub mod color_schemes;
-pub mod braille;
-mod sine_wave;
-mod spectrum;
-mod oscilloscope;
-mod xy_oscilloscope;
-pub mod spectrogram;
-pub mod waveform_tunnel;
 mod flower_of_life;
-mod mandala;
-mod night_night;
 mod image_channel;
-mod video_channel;
+mod mandala;
+mod obj_viewer;
+mod night_night;
+mod oscilloscope;
 pub mod ray_tracer;
 mod raycaster3d;
-
+mod sine_wave;
+pub mod spectrogram;
+mod spectrum;
+mod video_channel;
+pub mod waveform_tunnel;
+mod xy_oscilloscope;
 
 // Re-export visualizers for external use
-pub use sine_wave::{SineWaveConfig, SineWaveVisualizer};
-pub use spectrum::{SpectrumConfig, SpectrumVisualizer, SpectrumMapping};
-pub use oscilloscope::{OscilloscopeConfig, OscilloscopeVisualizer, TriggerSlope, WaveformMode};
-pub use xy_oscilloscope::{XYOscilloscopeConfig, XYOscilloscopeVisualizer, XYDisplayMode};
-pub use spectrogram::{SpectrogramVisualizer, ScrollDirection};
-pub use waveform_tunnel::WaveformTunnelVisualizer;
-pub use flower_of_life::{FlowerOfLifeConfig, FlowerOfLifeVisualizer};
-pub use mandala::{MandalaConfig, MandalaVisualizer};
 pub use braille::BrailleGrid;
-pub use night_night::NightNightVisualizer;
+pub use flower_of_life::{FlowerOfLifeConfig, FlowerOfLifeVisualizer};
 pub use image_channel::ImageChannelVisualizer;
-pub use video_channel::VideoChannelVisualizer;
+pub use mandala::{MandalaConfig, MandalaVisualizer};
+pub use obj_viewer::ObjViewerVisualizer;
+pub use night_night::NightNightVisualizer;
+pub use oscilloscope::{OscilloscopeConfig, OscilloscopeVisualizer, TriggerSlope, WaveformMode};
 pub use raycaster3d::Raycaster3DVisualizer;
+pub use sine_wave::{SineWaveConfig, SineWaveVisualizer};
+pub use spectrogram::{ScrollDirection, SpectrogramVisualizer};
+pub use spectrum::{SpectrumConfig, SpectrumMapping, SpectrumVisualizer};
+pub use video_channel::VideoChannelVisualizer;
+pub use waveform_tunnel::WaveformTunnelVisualizer;
+pub use xy_oscilloscope::{XYDisplayMode, XYOscilloscopeConfig, XYOscilloscopeVisualizer};
 
 use crate::dsp::AudioParameters;
 
@@ -656,7 +657,7 @@ mod tests {
         use crate::visualization::character_sets::{get_character_set, CharacterSetType};
         let charset = get_character_set(CharacterSetType::Shading);
         // Shading set: [' ', '░', '▒', '▓', '█', '▀', '▄', '▌', '▐'] (9 chars, indices 0-8)
-        assert_eq!(charset.get_char(0.0), ' ');  // index 0
+        assert_eq!(charset.get_char(0.0), ' '); // index 0
         assert_eq!(charset.get_char(0.05), ' '); // index 0.4 → 0
     }
 
@@ -666,7 +667,7 @@ mod tests {
         let charset = get_character_set(CharacterSetType::Shading);
         // Shading set: [' ', '░', '▒', '▓', '█', '▀', '▄', '▌', '▐']
         assert_eq!(charset.get_char(0.125), '░'); // index 1.0 → 1
-        assert_eq!(charset.get_char(0.15), '░');  // index 1.2 → 1
+        assert_eq!(charset.get_char(0.15), '░'); // index 1.2 → 1
     }
 
     #[test]
@@ -674,8 +675,8 @@ mod tests {
         use crate::visualization::character_sets::{get_character_set, CharacterSetType};
         let charset = get_character_set(CharacterSetType::Shading);
         // Shading set: [' ', '░', '▒', '▓', '█', '▀', '▄', '▌', '▐'] (9 chars, indices 0-8)
-        assert_eq!(charset.get_char(0.50), '█');  // 0.50 * 8 = 4.0 → rounds to 4 → '█'
-        assert_eq!(charset.get_char(0.55), '█');  // 0.55 * 8 = 4.4 → rounds to 4 → '█'
+        assert_eq!(charset.get_char(0.50), '█'); // 0.50 * 8 = 4.0 → rounds to 4 → '█'
+        assert_eq!(charset.get_char(0.55), '█'); // 0.55 * 8 = 4.4 → rounds to 4 → '█'
         assert_eq!(charset.get_char(0.625), '▀'); // 0.625 * 8 = 5.0 → rounds to 5 → '▀'
     }
 
@@ -684,9 +685,9 @@ mod tests {
         use crate::visualization::character_sets::{get_character_set, CharacterSetType};
         let charset = get_character_set(CharacterSetType::Shading);
         // Shading set: [' ', '░', '▒', '▓', '█', '▀', '▄', '▌', '▐']
-        assert_eq!(charset.get_char(0.75), '▄');  // index 6.0 → 6
+        assert_eq!(charset.get_char(0.75), '▄'); // index 6.0 → 6
         assert_eq!(charset.get_char(0.875), '▌'); // index 7.0 → 7
-        assert_eq!(charset.get_char(1.0), '▐');   // index 8.0 → 8
+        assert_eq!(charset.get_char(1.0), '▐'); // index 8.0 → 8
     }
 
     #[test]
@@ -695,11 +696,11 @@ mod tests {
         let charset = get_character_set(CharacterSetType::Shading);
         // Shading set: [' ', '░', '▒', '▓', '█', '▀', '▄', '▌', '▐']
         // Test that intensity values map correctly to character indices
-        assert_eq!(charset.get_char(0.0), ' ');   // index 0
-        assert_eq!(charset.get_char(0.25), '▒');  // index 2.0 → 2
-        assert_eq!(charset.get_char(0.50), '█');  // index 4.0 → 4
-        assert_eq!(charset.get_char(0.75), '▄');  // index 6.0 → 6
-        assert_eq!(charset.get_char(1.0), '▐');   // index 8.0 → 8
+        assert_eq!(charset.get_char(0.0), ' '); // index 0
+        assert_eq!(charset.get_char(0.25), '▒'); // index 2.0 → 2
+        assert_eq!(charset.get_char(0.50), '█'); // index 4.0 → 4
+        assert_eq!(charset.get_char(0.75), '▄'); // index 6.0 → 6
+        assert_eq!(charset.get_char(1.0), '▐'); // index 8.0 → 8
     }
 
     #[test]

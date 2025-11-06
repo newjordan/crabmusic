@@ -1,0 +1,12 @@
+E:\crabmusic\target-test\debug\deps\notify-0f0e1b2fa388c162.d: C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-7.0.0\src\lib.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-7.0.0\src\windows.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-7.0.0\src\null.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-7.0.0\src\poll.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-7.0.0\src\config.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-7.0.0\src\error.rs
+
+E:\crabmusic\target-test\debug\deps\libnotify-0f0e1b2fa388c162.rlib: C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-7.0.0\src\lib.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-7.0.0\src\windows.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-7.0.0\src\null.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-7.0.0\src\poll.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-7.0.0\src\config.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-7.0.0\src\error.rs
+
+E:\crabmusic\target-test\debug\deps\libnotify-0f0e1b2fa388c162.rmeta: C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-7.0.0\src\lib.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-7.0.0\src\windows.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-7.0.0\src\null.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-7.0.0\src\poll.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-7.0.0\src\config.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-7.0.0\src\error.rs
+
+C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-7.0.0\src\lib.rs:
+C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-7.0.0\src\windows.rs:
+C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-7.0.0\src\null.rs:
+C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-7.0.0\src\poll.rs:
+C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-7.0.0\src\config.rs:
+C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-7.0.0\src\error.rs:

@@ -289,4 +289,3 @@ mod tests {
         assert!(result.abs() < 0.1); // Should be close to 0 after reset
     }
 }
-

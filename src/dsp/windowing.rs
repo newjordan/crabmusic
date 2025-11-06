@@ -266,7 +266,7 @@ mod tests {
         let mut signal = vec![1.0; 10];
         let window = generate_hann(10);
         apply_window(&mut signal, &window);
-        
+
         assert!(signal[0] < 0.1); // Edges should be attenuated
         assert!(signal[5] > 0.9); // Center should be near 1
     }
@@ -308,4 +308,3 @@ mod tests {
         }
     }
 }
-

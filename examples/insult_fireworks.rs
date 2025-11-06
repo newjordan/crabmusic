@@ -4,8 +4,8 @@ use crabmusic::rendering::TerminalRenderer;
 use crabmusic::visualization::{BrailleGrid, Color, GridBuffer};
 use crossterm::event::{self, Event, KeyCode};
 use std::f32::consts::{PI, TAU};
-use std::time::{Duration, Instant};
 use std::thread;
+use std::time::{Duration, Instant};
 
 const LOOP_DURATION: f32 = 30.0;
 const FIREWORK_DURATION: f32 = 5.0;
@@ -103,11 +103,31 @@ impl FireworkEvent {
             FireworkStyle::Spiral { arms, swirl_turns } => {
                 self.render_spiral(arms, swirl_turns, explosion_progress, dims, braille, center);
             }
-            FireworkStyle::Ribbon { ribbons, wave_count } => {
-                self.render_ribbon(ribbons, wave_count, explosion_progress, dims, braille, center);
+            FireworkStyle::Ribbon {
+                ribbons,
+                wave_count,
+            } => {
+                self.render_ribbon(
+                    ribbons,
+                    wave_count,
+                    explosion_progress,
+                    dims,
+                    braille,
+                    center,
+                );
             }
-            FireworkStyle::Cascade { strands, arch_height } => {
-                self.render_cascade(strands, arch_height, explosion_progress, dims, braille, center);
+            FireworkStyle::Cascade {
+                strands,
+                arch_height,
+            } => {
+                self.render_cascade(
+                    strands,
+                    arch_height,
+                    explosion_progress,
+                    dims,
+                    braille,
+                    center,
+                );
             }
         }
 
@@ -175,10 +195,8 @@ impl FireworkEvent {
                 let distance = ((dx * dx + dy * dy) as f32).sqrt();
                 if distance <= 3.4 {
                     let falloff = (1.0 - distance / 3.4).max(0.0);
-                    let color = scale_color(
-                        self.accent_color,
-                        1.2 * falloff + 0.6 * (1.0 - progress),
-                    );
+                    let color =
+                        scale_color(self.accent_color, 1.2 * falloff + 0.6 * (1.0 - progress));
                     paint_dot(
                         braille,
                         dims,
@@ -190,8 +208,7 @@ impl FireworkEvent {
             }
         }
 
-        let ring_radius =
-            dims.min_dot() as f32 * self.radius_factor * (0.18 + progress * 0.35);
+        let ring_radius = dims.min_dot() as f32 * self.radius_factor * (0.18 + progress * 0.35);
         let ring_points = 96;
         for i in 0..ring_points {
             let angle = i as f32 / ring_points as f32 * TAU;
@@ -286,8 +303,9 @@ impl FireworkEvent {
                 }
 
                 let eased = ease_in_out_sine(t);
-                let wave = (t * wave_count * TAU + progress * TAU + offset_angle + self.seed_phase())
-                    .sin();
+                let wave =
+                    (t * wave_count * TAU + progress * TAU + offset_angle + self.seed_phase())
+                        .sin();
                 let radius = eased * max_radius + wave * 10.0;
                 let angle = base_angle + offset_angle + progress * 1.3 + wave * 0.35;
                 let x = center.0 + radius * angle.cos();
@@ -418,12 +436,7 @@ impl FireworkEvent {
         }
     }
 
-    fn push_insult(
-        &self,
-        progress: f32,
-        overlays: &mut Vec<TextOverlay>,
-        center: (f32, f32),
-    ) {
+    fn push_insult(&self, progress: f32, overlays: &mut Vec<TextOverlay>, center: (f32, f32)) {
         let strength = (1.0 - progress).powf(0.6);
         if strength < 0.05 {
             return;
@@ -591,10 +604,7 @@ fn draw_overlays(grid: &mut GridBuffer, overlays: &[TextOverlay]) {
         let row = overlay.row.clamp(1, max_row).max(0) as usize;
         let max_start = (width - text_len).max(0);
         let start = (overlay.column - text_len / 2).clamp(0, max_start) as usize;
-        let color = scale_color(
-            overlay.color,
-            0.8 + 0.4 * overlay.intensity.clamp(0.0, 1.0),
-        );
+        let color = scale_color(overlay.color, 0.8 + 0.4 * overlay.intensity.clamp(0.0, 1.0));
 
         for (i, ch) in overlay.text.chars().enumerate() {
             if start + i >= grid.width() {

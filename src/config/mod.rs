@@ -52,6 +52,11 @@ pub struct AudioConfig {
     /// Output device name (None = default output device)
     #[serde(default)]
     pub output_device_name: Option<String>,
+
+    /// Prefer system audio loopback (WASAPI) when available
+    /// Windows: defaults to true; other platforms: false
+    #[serde(default = "default_use_loopback")]
+    pub use_loopback: bool,
 }
 
 /// DSP processing configuration
@@ -163,32 +168,87 @@ pub struct RenderingConfig {
 }
 
 // Default value functions
-fn default_sample_rate() -> u32 { 44100 }
-fn default_channels() -> u16 { 2 }
-fn default_buffer_capacity() -> usize { 8192 }
+fn default_sample_rate() -> u32 {
+    44100
+}
+fn default_channels() -> u16 {
+    2
+}
+fn default_buffer_capacity() -> usize {
+    8192
+}
 // REDUCED from 2048 to 1024 for lower latency (23ms @ 44.1kHz vs 46ms)
 // Still provides good frequency resolution: 44100/1024 = 43 Hz per bin
-fn default_fft_size() -> usize { 1024 }
+fn default_fft_size() -> usize {
+    1024
+}
 // REDUCED from 0.1 to 0.05 for crisper response to transients
 // Lower smoothing = faster visual response to audio changes
-fn default_smoothing() -> f32 { 0.05 }
-fn default_bass_range() -> (f32, f32) { (20.0, 250.0) }
-fn default_mid_range() -> (f32, f32) { (250.0, 4000.0) }
-fn default_treble_range() -> (f32, f32) { (4000.0, 20000.0) }
-fn default_beat_sensitivity() -> f32 { 1.0 }
-fn default_beat_cooldown() -> f32 { 0.1 }
-fn default_min_bpm() -> f32 { 60.0 }
-fn default_max_bpm() -> f32 { 180.0 }
-fn default_tempo_history_size() -> usize { 8 }
-fn default_visualizer_type() -> String { "sine_wave".to_string() }
-fn default_character_set() -> String { "smooth64".to_string() }
-fn default_amplitude() -> f32 { 1.0 }
-fn default_frequency() -> f32 { 1.0 }
-fn default_thickness() -> usize { 3 }
-fn default_wave_smoothing() -> f32 { 0.15 }
-fn default_fps() -> u32 { 60 }
-fn default_min_width() -> u16 { 40 }
-fn default_min_height() -> u16 { 12 }
+fn default_smoothing() -> f32 {
+    0.05
+}
+fn default_bass_range() -> (f32, f32) {
+    (20.0, 250.0)
+}
+fn default_mid_range() -> (f32, f32) {
+    (250.0, 4000.0)
+}
+fn default_treble_range() -> (f32, f32) {
+    (4000.0, 20000.0)
+}
+fn default_beat_sensitivity() -> f32 {
+    1.0
+}
+fn default_beat_cooldown() -> f32 {
+    0.1
+}
+fn default_min_bpm() -> f32 {
+    60.0
+}
+fn default_max_bpm() -> f32 {
+    180.0
+}
+fn default_tempo_history_size() -> usize {
+    8
+}
+fn default_visualizer_type() -> String {
+    "sine_wave".to_string()
+}
+fn default_use_loopback() -> bool {
+    #[cfg(windows)]
+    {
+        true
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+fn default_character_set() -> String {
+    "smooth64".to_string()
+}
+fn default_amplitude() -> f32 {
+    1.0
+}
+fn default_frequency() -> f32 {
+    1.0
+}
+fn default_thickness() -> usize {
+    3
+}
+fn default_wave_smoothing() -> f32 {
+    0.15
+}
+fn default_fps() -> u32 {
+    60
+}
+fn default_min_width() -> u16 {
+    40
+}
+fn default_min_height() -> u16 {
+    12
+}
 
 impl Default for AudioConfig {
     fn default() -> Self {
@@ -198,6 +258,7 @@ impl Default for AudioConfig {
             buffer_capacity: default_buffer_capacity(),
             device_name: None,
             output_device_name: None,
+            use_loopback: default_use_loopback(),
         }
     }
 }
@@ -285,9 +346,8 @@ impl AppConfig {
         })?;
 
         // Parse YAML
-        let config: Self = serde_yaml::from_str(&contents).map_err(|e| {
-            ConfigError::InvalidFormat(format!("Failed to parse YAML: {}", e))
-        })?;
+        let config: Self = serde_yaml::from_str(&contents)
+            .map_err(|e| ConfigError::InvalidFormat(format!("Failed to parse YAML: {}", e)))?;
 
         // Validate configuration
         config.validate()?;
@@ -440,7 +500,9 @@ impl AppConfig {
             });
         }
 
-        if self.dsp.beat_detection.tempo_history_size < 3 || self.dsp.beat_detection.tempo_history_size > 32 {
+        if self.dsp.beat_detection.tempo_history_size < 3
+            || self.dsp.beat_detection.tempo_history_size > 32
+        {
             return Err(ConfigError::InvalidValue {
                 field: "dsp.beat_detection.tempo_history_size".to_string(),
                 reason: "must be between 3 and 32".to_string(),
@@ -457,8 +519,19 @@ impl AppConfig {
         }
 
         let valid_charsets = [
-            "basic", "extended", "blocks", "shading", "dots", "lines", "braille",
-            "smooth64", "smooth_64", "smooth128", "smooth_128", "smooth256", "smooth_256"
+            "basic",
+            "extended",
+            "blocks",
+            "shading",
+            "dots",
+            "lines",
+            "braille",
+            "smooth64",
+            "smooth_64",
+            "smooth128",
+            "smooth_128",
+            "smooth256",
+            "smooth_256",
         ];
         if !valid_charsets.contains(&self.visualization.character_set.as_str()) {
             return Err(ConfigError::InvalidValue {
@@ -474,7 +547,8 @@ impl AppConfig {
             });
         }
 
-        if self.visualization.sine_wave.thickness < 1 || self.visualization.sine_wave.thickness > 10 {
+        if self.visualization.sine_wave.thickness < 1 || self.visualization.sine_wave.thickness > 10
+        {
             return Err(ConfigError::InvalidValue {
                 field: "visualization.sine_wave.thickness".to_string(),
                 reason: "must be between 1 and 10".to_string(),
@@ -593,9 +667,7 @@ impl ConfigManager {
             },
             notify::Config::default().with_poll_interval(Duration::from_secs(1)),
         )
-        .map_err(|e| {
-            ConfigError::InvalidFormat(format!("Failed to create file watcher: {}", e))
-        })?;
+        .map_err(|e| ConfigError::InvalidFormat(format!("Failed to create file watcher: {}", e)))?;
 
         // Watch the config file
         watcher
@@ -640,8 +712,8 @@ mod tests {
     #[test]
     fn test_default_dsp_config() {
         let config = DspConfig::default();
-        assert_eq!(config.fft_size, 1024);  // Updated for low-latency mode
-        assert_eq!(config.smoothing, 0.05);  // Updated for crisper response
+        assert_eq!(config.fft_size, 1024); // Updated for low-latency mode
+        assert_eq!(config.smoothing, 0.05); // Updated for crisper response
         assert_eq!(config.bass_range, (20.0, 250.0));
         assert_eq!(config.mid_range, (250.0, 4000.0));
         assert_eq!(config.treble_range, (4000.0, 20000.0));

@@ -470,8 +470,10 @@ impl DspProcessor {
         self.flux_detector.set_cooldown(config.cooldown_seconds);
 
         // Configure tempo detector
-        self.tempo_detector.set_bpm_range(config.min_bpm, config.max_bpm);
-        self.tempo_detector.set_history_size(config.tempo_history_size);
+        self.tempo_detector
+            .set_bpm_range(config.min_bpm, config.max_bpm);
+        self.tempo_detector
+            .set_history_size(config.tempo_history_size);
     }
 
     /// Generate Hann window coefficients
@@ -754,7 +756,8 @@ impl DspProcessor {
 
             // Normalize to full range for consistent visualization
             let max_abs = result.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
-            if max_abs > 0.001 {  // Avoid division by zero, ignore near-silence
+            if max_abs > 0.001 {
+                // Avoid division by zero, ignore near-silence
                 result.iter_mut().for_each(|x| *x /= max_abs);
             }
 
@@ -778,7 +781,8 @@ impl DspProcessor {
         // Normalize to full -1.0 to 1.0 range for consistent visualization
         // This ensures waveforms display at full height regardless of system volume
         let max_abs = output.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
-        if max_abs > 0.001 {  // Avoid division by zero, ignore near-silence
+        if max_abs > 0.001 {
+            // Avoid division by zero, ignore near-silence
             output.iter_mut().for_each(|x| *x /= max_abs);
         }
 
@@ -798,7 +802,11 @@ impl DspProcessor {
     ///
     /// # Returns
     /// Tuple of (left_channel, right_channel) normalized to -1.0 to 1.0 range
-    fn downsample_stereo_waveforms(&self, buffer: &AudioBuffer, target_length: usize) -> (Vec<f32>, Vec<f32>) {
+    fn downsample_stereo_waveforms(
+        &self,
+        buffer: &AudioBuffer,
+        target_length: usize,
+    ) -> (Vec<f32>, Vec<f32>) {
         // Separate stereo channels or duplicate mono
         let (left_samples, right_samples): (Vec<f32>, Vec<f32>) = if buffer.channels == 2 {
             // Stereo: de-interleave [L, R, L, R, ...] -> ([L, L, ...], [R, R, ...])
@@ -856,7 +864,10 @@ impl DspProcessor {
             output
         };
 
-        (downsample_channel(left_samples), downsample_channel(right_samples))
+        (
+            downsample_channel(left_samples),
+            downsample_channel(right_samples),
+        )
     }
 }
 
@@ -968,7 +979,7 @@ impl Default for AudioParameters {
             amplitude: 0.0,
             beat: false,
             beat_flux: false,
-            bpm: 120.0,           // Default tempo
+            bpm: 120.0,            // Default tempo
             tempo_confidence: 0.0, // No confidence initially
             spectrum: Vec::new(),
             waveform: Vec::new(),
@@ -1309,7 +1320,10 @@ mod tests {
 
         // Spike to 0.05 (below 0.1 threshold) should not trigger
         let is_beat = detector.detect(0.05);
-        assert!(!is_beat, "Should not detect beat below minimum energy threshold");
+        assert!(
+            !is_beat,
+            "Should not detect beat below minimum energy threshold"
+        );
     }
 
     #[test]
@@ -1331,8 +1345,14 @@ mod tests {
         let beat_normal = detector_normal.detect(0.25);
 
         // Sensitive detector should trigger more easily
-        assert!(beat_sensitive, "High sensitivity should detect smaller changes");
-        assert!(!beat_normal, "Normal sensitivity should require larger changes");
+        assert!(
+            beat_sensitive,
+            "High sensitivity should detect smaller changes"
+        );
+        assert!(
+            !beat_normal,
+            "Normal sensitivity should require larger changes"
+        );
     }
 
     #[test]
@@ -1350,7 +1370,10 @@ mod tests {
         }
 
         // Should detect 0 or very few beats (gradual change, not sudden onset)
-        assert!(beats_detected < 2, "Should not detect beats in gradual changes");
+        assert!(
+            beats_detected < 2,
+            "Should not detect beats in gradual changes"
+        );
     }
 
     #[test]
@@ -1656,7 +1679,7 @@ mod tests {
     fn test_tempo_detector_creation() {
         let detector = TempoDetector::new(60.0, 180.0);
         assert_eq!(detector.current_bpm, 120.0); // Default tempo
-        assert_eq!(detector.confidence, 0.0);     // No confidence yet
+        assert_eq!(detector.confidence, 0.0); // No confidence yet
         assert_eq!(detector.beat_times.len(), 0);
         assert_eq!(detector.min_bpm, 60.0);
         assert_eq!(detector.max_bpm, 180.0);
@@ -1693,7 +1716,10 @@ mod tests {
             "Expected ~120 BPM (±20), got {}",
             bpm
         );
-        assert!(detector.confidence() > 0.3, "Should have reasonable confidence");
+        assert!(
+            detector.confidence() > 0.3,
+            "Should have reasonable confidence"
+        );
     }
 
     #[test]

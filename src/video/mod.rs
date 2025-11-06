@@ -6,8 +6,8 @@
 use anyhow::Result;
 
 use crate::rendering::TerminalRenderer;
-use crate::visualization::{GridBuffer};
 use crate::visualization::braille::BrailleGrid;
+use crate::visualization::GridBuffer;
 
 /// Run video playback mode.
 ///
@@ -37,7 +37,9 @@ pub fn run_video_playback(_path: &str) -> Result<()> {
         for y in 0..dots_h {
             for x in 0..dots_w {
                 let v = ((x as f32 * 0.15 + y as f32 * 0.08 + t * 4.0).sin() * 0.5 + 0.5) * 255.0;
-                if v as u8 > 160 { braille.set_dot(x, y); }
+                if v as u8 > 160 {
+                    braille.set_dot(x, y);
+                }
             }
         }
 
@@ -53,7 +55,9 @@ pub fn run_video_playback(_path: &str) -> Result<()> {
         std::thread::sleep(Duration::from_millis(33)); // ~30 FPS
 
         // Run for ~3 seconds then exit
-        if start.elapsed() > Duration::from_secs(3) { break; }
+        if start.elapsed() > Duration::from_secs(3) {
+            break;
+        }
     }
 
     renderer.cleanup()?;
@@ -78,20 +82,21 @@ enum ColorMode {
 pub fn run_video_playback(path: &str) -> Result<()> {
     use anyhow::Context;
     use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-    use ffmpeg_next as ffmpeg;
     use ffmpeg::{
-        codec,
-        format,
+        codec, format,
         media::Type,
         software::scaling::{context::Context as Scaler, flag::Flags},
-        util::{frame::video::Video, format::pixel::Pixel},
+        util::{format::pixel::Pixel, frame::video::Video},
     };
+    use ffmpeg_next as ffmpeg;
     use image::{imageops, ImageBuffer, RgbImage};
     use std::time::{Duration, Instant};
 
     use crate::dsp::AudioParameters;
-    use crate::effects::{EffectPipeline};
-    use crate::effects::{bloom::BloomEffect, scanline::ScanlineEffect, phosphor::PhosphorGlowEffect};
+    use crate::effects::EffectPipeline;
+    use crate::effects::{
+        bloom::BloomEffect, phosphor::PhosphorGlowEffect, scanline::ScanlineEffect,
+    };
     use crate::visualization::Color;
 
     ffmpeg::init().context("ffmpeg init failed")?;
@@ -109,7 +114,7 @@ pub fn run_video_playback(path: &str) -> Result<()> {
 
     // Visual controls state
     let mut color_mode = ColorMode::Off; // Off → Grayscale → Full
-    let mut letterbox = true;            // Preserve aspect ratio by default
+    let mut letterbox = true; // Preserve aspect ratio by default
 
     // Effects pipeline (disabled by default; toggle with 'e')
     let mut effect_pipeline = EffectPipeline::new();
@@ -129,12 +134,14 @@ pub fn run_video_playback(path: &str) -> Result<()> {
     let mut show_hud: bool = true;
     let mut last_used_threshold: u8 = manual_threshold;
 
-
     // Default: loop playback forever until the user quits
     loop {
         // Open input and find the best video stream
         let mut ictx = format::input(&path).with_context(|| format!("open input {}", path))?;
-        let input = ictx.streams().best(Type::Video).context("no video stream")?;
+        let input = ictx
+            .streams()
+            .best(Type::Video)
+            .context("no video stream")?;
         let video_stream_index = input.index();
 
         // Set up decoder
@@ -162,12 +169,15 @@ pub fn run_video_playback(path: &str) -> Result<()> {
         } else {
             24.0
         };
-        let frame_duration = Duration::from_secs_f64(if fps > 0.0 { 1.0 / fps } else { 1.0 / 24.0 });
+        let frame_duration =
+            Duration::from_secs_f64(if fps > 0.0 { 1.0 / fps } else { 1.0 / 24.0 });
         let mut last_frame_time = Instant::now();
 
         // Packet -> frame loop
         for (stream, packet) in ictx.packets() {
-            if stream.index() != video_stream_index { continue; }
+            if stream.index() != video_stream_index {
+                continue;
+            }
             decoder.send_packet(&packet)?;
 
             let mut frame = Video::empty();
@@ -208,12 +218,8 @@ pub fn run_video_playback(path: &str) -> Result<()> {
                     (dst_w as u32, dst_h as u32)
                 };
 
-                let resized_fit = imageops::resize(
-                    &img,
-                    fit_w,
-                    fit_h,
-                    imageops::FilterType::Triangle,
-                );
+                let resized_fit =
+                    imageops::resize(&img, fit_w, fit_h, imageops::FilterType::Triangle);
                 let mut canvas: RgbImage = ImageBuffer::new(dst_w as u32, dst_h as u32);
                 // Center the fitted image in the canvas (black bars around)
                 let off_x = ((dst_w as i32 - fit_w as i32) / 2).max(0) as usize;
@@ -244,13 +250,7 @@ pub fn run_video_playback(path: &str) -> Result<()> {
                 // Remember for HUD display
                 last_used_threshold = used_threshold;
 
-                blit_luma_to_braille(
-                    gray.as_raw(),
-                    dst_w,
-                    dst_h,
-                    used_threshold,
-                    &mut braille,
-                );
+                blit_luma_to_braille(gray.as_raw(), dst_w, dst_h, used_threshold, &mut braille);
 
                 // Write characters and colors according to color mode
                 let gray_bytes = gray.as_raw();
@@ -269,11 +269,15 @@ pub fn run_video_playback(path: &str) -> Result<()> {
                                 let mut count: u32 = 0;
                                 for oy in 0..4 {
                                     let y = y0 + oy;
-                                    if y >= dst_h { break; }
+                                    if y >= dst_h {
+                                        break;
+                                    }
                                     let row_off = y * dst_w;
                                     for ox in 0..2 {
                                         let x = x0 + ox;
-                                        if x >= dst_w { break; }
+                                        if x >= dst_w {
+                                            break;
+                                        }
                                         acc += gray_bytes[row_off + x] as u32;
                                         count += 1;
                                     }
@@ -290,11 +294,15 @@ pub fn run_video_playback(path: &str) -> Result<()> {
                                 let mut count: u32 = 0;
                                 for oy in 0..4 {
                                     let y = y0 + oy;
-                                    if y >= dst_h { break; }
+                                    if y >= dst_h {
+                                        break;
+                                    }
                                     let row_off = y * dst_w;
                                     for ox in 0..2 {
                                         let x = x0 + ox;
-                                        if x >= dst_w { break; }
+                                        if x >= dst_w {
+                                            break;
+                                        }
                                         let idx = (row_off + x) * 3;
                                         r_acc += rgb_bytes[idx] as u32;
                                         g_acc += rgb_bytes[idx + 1] as u32;
@@ -335,13 +343,17 @@ pub fn run_video_playback(path: &str) -> Result<()> {
                         Event::Key(k) => {
                             match k.code {
                                 // Quit: only on initial press
-                                KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc if k.kind == KeyEventKind::Press => {
+                                KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc
+                                    if k.kind == KeyEventKind::Press =>
+                                {
                                     decoder.send_eof()?;
                                     renderer.cleanup()?;
                                     return Ok(());
                                 }
                                 // Color mode cycle: only on press (avoid rapid cycling on repeat)
-                                KeyCode::Char('c') | KeyCode::Char('C') if k.kind == KeyEventKind::Press => {
+                                KeyCode::Char('c') | KeyCode::Char('C')
+                                    if k.kind == KeyEventKind::Press =>
+                                {
                                     color_mode = match color_mode {
                                         ColorMode::Off => ColorMode::Grayscale,
                                         ColorMode::Grayscale => ColorMode::Full,
@@ -349,7 +361,9 @@ pub fn run_video_playback(path: &str) -> Result<()> {
                                     };
                                 }
                                 // Letterbox toggle: only on press
-                                KeyCode::Char('l') | KeyCode::Char('L') if k.kind == KeyEventKind::Press => {
+                                KeyCode::Char('l') | KeyCode::Char('L')
+                                    if k.kind == KeyEventKind::Press =>
+                                {
                                     letterbox = !letterbox;
                                 }
                                 // Toggle HUD (F1): only on press
@@ -358,50 +372,86 @@ pub fn run_video_playback(path: &str) -> Result<()> {
                                 }
 
                                 // Toggle effects pipeline: only on press
-                                KeyCode::Char('e') | KeyCode::Char('E') if k.kind == KeyEventKind::Press => {
+                                KeyCode::Char('e') | KeyCode::Char('E')
+                                    if k.kind == KeyEventKind::Press =>
+                                {
                                     effect_pipeline.set_enabled(!effect_pipeline.is_enabled());
                                 }
                                 // Toggle individual effects and set last_effect: only on press
-                                KeyCode::Char('b') | KeyCode::Char('B') if k.kind == KeyEventKind::Press => {
+                                KeyCode::Char('b') | KeyCode::Char('B')
+                                    if k.kind == KeyEventKind::Press =>
+                                {
                                     if let Some(eff) = effect_pipeline.get_effect_mut("Bloom") {
                                         eff.set_enabled(!eff.is_enabled());
                                         last_effect = "Bloom".to_string();
                                     }
                                 }
-                                KeyCode::Char('s') | KeyCode::Char('S') if k.kind == KeyEventKind::Press => {
+                                KeyCode::Char('s') | KeyCode::Char('S')
+                                    if k.kind == KeyEventKind::Press =>
+                                {
                                     if let Some(eff) = effect_pipeline.get_effect_mut("Scanline") {
                                         eff.set_enabled(!eff.is_enabled());
                                         last_effect = "Scanline".to_string();
                                     }
                                 }
-                                KeyCode::Char('h') | KeyCode::Char('H') if k.kind == KeyEventKind::Press => {
+                                KeyCode::Char('h') | KeyCode::Char('H')
+                                    if k.kind == KeyEventKind::Press =>
+                                {
                                     if let Some(eff) = effect_pipeline.get_effect_mut("Phosphor") {
                                         eff.set_enabled(!eff.is_enabled());
                                         last_effect = "Phosphor".to_string();
                                     }
                                 }
                                 // Intensity adjust for last-toggled effect: respond to press and repeat
-                                KeyCode::Char('[') | KeyCode::Char('{') if matches!(k.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
-                                    if let Some(eff) = effect_pipeline.get_effect_mut(&last_effect) {
+                                KeyCode::Char('[') | KeyCode::Char('{')
+                                    if matches!(
+                                        k.kind,
+                                        KeyEventKind::Press | KeyEventKind::Repeat
+                                    ) =>
+                                {
+                                    if let Some(eff) = effect_pipeline.get_effect_mut(&last_effect)
+                                    {
                                         let new_i = (eff.intensity() - 0.1).max(0.0);
                                         eff.set_intensity(new_i);
                                     }
                                 }
-                                KeyCode::Char(']') | KeyCode::Char('}') if matches!(k.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
-                                    if let Some(eff) = effect_pipeline.get_effect_mut(&last_effect) {
+                                KeyCode::Char(']') | KeyCode::Char('}')
+                                    if matches!(
+                                        k.kind,
+                                        KeyEventKind::Press | KeyEventKind::Repeat
+                                    ) =>
+                                {
+                                    if let Some(eff) = effect_pipeline.get_effect_mut(&last_effect)
+                                    {
                                         let new_i = (eff.intensity() + 0.1).min(1.0);
                                         eff.set_intensity(new_i);
                                     }
                                 }
                                 // Image extraction threshold controls: respond to press and repeat
-                                KeyCode::Char('+') | KeyCode::Char('=') if matches!(k.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
-                                    if manual_threshold < 250 { manual_threshold = manual_threshold.saturating_add(5); }
+                                KeyCode::Char('+') | KeyCode::Char('=')
+                                    if matches!(
+                                        k.kind,
+                                        KeyEventKind::Press | KeyEventKind::Repeat
+                                    ) =>
+                                {
+                                    if manual_threshold < 250 {
+                                        manual_threshold = manual_threshold.saturating_add(5);
+                                    }
                                 }
-                                KeyCode::Char('-') | KeyCode::Char('_') if matches!(k.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
-                                    if manual_threshold > 5 { manual_threshold = manual_threshold.saturating_sub(5); }
+                                KeyCode::Char('-') | KeyCode::Char('_')
+                                    if matches!(
+                                        k.kind,
+                                        KeyEventKind::Press | KeyEventKind::Repeat
+                                    ) =>
+                                {
+                                    if manual_threshold > 5 {
+                                        manual_threshold = manual_threshold.saturating_sub(5);
+                                    }
                                 }
                                 // Auto threshold toggle: only on press
-                                KeyCode::Char('a') | KeyCode::Char('A') if k.kind == KeyEventKind::Press => {
+                                KeyCode::Char('a') | KeyCode::Char('A')
+                                    if k.kind == KeyEventKind::Press =>
+                                {
                                     auto_thresh = !auto_thresh;
                                 }
                                 _ => {}
@@ -414,8 +464,6 @@ pub fn run_video_playback(path: &str) -> Result<()> {
                             grid = GridBuffer::new(w_cells, h_cells);
                             braille = BrailleGrid::new(w_cells, h_cells);
                             target_dot_w = braille.dot_width();
-
-
 
                             target_dot_h = braille.dot_height();
                         }
@@ -507,7 +555,9 @@ pub fn blit_luma_to_braille(
     threshold: u8,
     braille: &mut BrailleGrid,
 ) {
-    if img_w == 0 || img_h == 0 { return; }
+    if img_w == 0 || img_h == 0 {
+        return;
+    }
 
     let dot_w = braille.dot_width();
     let dot_h = braille.dot_height();
@@ -520,8 +570,9 @@ pub fn blit_luma_to_braille(
             let sx = (dx * img_w) / dot_w;
             let v = luma[sy_off + sx];
 
-
-            if v >= threshold { braille.set_dot(dx, dy); }
+            if v >= threshold {
+                braille.set_dot(dx, dy);
+            }
         }
     }
 }
@@ -529,10 +580,14 @@ pub fn blit_luma_to_braille(
 /// Compute an Otsu threshold from an 8-bit luma slice
 fn otsu_threshold(luma: &[u8]) -> u8 {
     let mut hist = [0u32; 256];
-    for &v in luma { hist[v as usize] += 1; }
+    for &v in luma {
+        hist[v as usize] += 1;
+    }
     let total: u32 = luma.len() as u32;
     let mut sum_all: u64 = 0;
-    for i in 0..256 { sum_all += (i as u64) * (hist[i] as u64); }
+    for i in 0..256 {
+        sum_all += (i as u64) * (hist[i] as u64);
+    }
 
     let mut sum_b: u64 = 0;
     let mut w_b: u32 = 0;
@@ -541,18 +596,24 @@ fn otsu_threshold(luma: &[u8]) -> u8 {
 
     for t in 0..256 {
         w_b += hist[t] as u32;
-        if w_b == 0 { continue; }
+        if w_b == 0 {
+            continue;
+        }
         let w_f = total - w_b;
-        if w_f == 0 { break; }
+        if w_f == 0 {
+            break;
+        }
         sum_b += (t as u64) * (hist[t] as u64);
         let m_b = sum_b as f64 / w_b as f64;
         let m_f = (sum_all - sum_b) as f64 / w_f as f64;
         let var_between = (w_b as f64) * (w_f as f64) * (m_b - m_f).powi(2);
-        if var_between > max_var { max_var = var_between; threshold = t as u8; }
+        if var_between > max_var {
+            max_var = var_between;
+            threshold = t as u8;
+        }
     }
     threshold
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -572,12 +633,10 @@ mod tests {
         // Checkerboard on 2x4 should set alternating dots
         let mut braille = BrailleGrid::new(1, 1);
         let luma = vec![
-            255, 0,   // y0: dots (1,4)
-            0, 255,   // y1: (2,5)
-            255, 0,   // y2: (3,6)
-            0, 255,   // y3: (7,8)
-
-
+            255, 0, // y0: dots (1,4)
+            0, 255, // y1: (2,5)
+            255, 0, // y2: (3,6)
+            0, 255, // y3: (7,8)
         ];
         blit_luma_to_braille(&luma, 2, 4, 128, &mut braille);
         // Dots 1,5,3,8 => pattern bits 1,16,4,128 => 0b10010101 = 0x95
@@ -587,4 +646,3 @@ mod tests {
         assert_ne!(ch, '⣿');
     }
 }
-

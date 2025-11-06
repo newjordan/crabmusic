@@ -237,16 +237,23 @@ impl WasapiLoopbackDevice {
                     unsafe {
                         DEBUG_COUNTER += 1;
                         if DEBUG_COUNTER % 100 == 0 {
-                            let rms = (chunk.iter().map(|s| s * s).sum::<f32>() / chunk.len() as f32).sqrt();
+                            let rms = (chunk.iter().map(|s| s * s).sum::<f32>()
+                                / chunk.len() as f32)
+                                .sqrt();
                             let max_amp = chunk.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
-                            debug!("Loopback audio - max: {:.4}, rms: {:.4}, samples: {}, channels: 2", max_amp, rms, chunk.len());
+                            debug!(
+                                "Loopback audio - max: {:.4}, rms: {:.4}, samples: {}, channels: 2",
+                                max_amp,
+                                rms,
+                                chunk.len()
+                            );
                         }
                     }
 
                     // NO NOISE GATE: FFT normalization handles showing patterns regardless of volume
                     // The visualizations will show the frequency patterns even at low system volume
                     // because the spectrum is normalized to the peak frequency in each frame
-                    let buffer = AudioBuffer::with_samples(chunk, sample_rate, 2);  // Always stereo now
+                    let buffer = AudioBuffer::with_samples(chunk, sample_rate, 2); // Always stereo now
                     if !ring_buffer.push(buffer) {
                         debug!("Ring buffer full, dropped {} samples", CHUNK_SIZE * 2);
                     }
@@ -292,7 +299,10 @@ impl WasapiLoopbackDevice {
             samples
         } else {
             // Fallback: treat as 32-bit float
-            warn!("Unsupported audio format: {} bits, assuming 32-bit float", bits_per_sample);
+            warn!(
+                "Unsupported audio format: {} bits, assuming 32-bit float",
+                bits_per_sample
+            );
             let mut samples = Vec::with_capacity(data.len() / 4);
             for chunk in data.chunks_exact(4) {
                 let sample = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
@@ -321,7 +331,13 @@ impl AudioCaptureDevice for WasapiLoopbackDevice {
         let channels = self.config.channels;
 
         let handle = thread::spawn(move || {
-            Self::capture_loop(ring_buffer, is_capturing, should_stop, sample_rate, channels);
+            Self::capture_loop(
+                ring_buffer,
+                is_capturing,
+                should_stop,
+                sample_rate,
+                channels,
+            );
         });
 
         self.capture_thread = Some(handle);
@@ -366,4 +382,3 @@ impl Drop for WasapiLoopbackDevice {
         let _ = self.stop_capture();
     }
 }
-

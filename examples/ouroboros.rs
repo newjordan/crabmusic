@@ -199,7 +199,9 @@ impl Head {
         self.energy_target = mixed.clamp(0.65, 1.35);
 
         let adjustment = (report.swirl * 0.17 + report.deviation * 0.11).clamp(-0.25, 0.25);
-        self.seed = (self.seed + adjustment).rem_euclid(1.0).clamp(0.0001, 0.9999);
+        self.seed = (self.seed + adjustment)
+            .rem_euclid(1.0)
+            .clamp(0.0001, 0.9999);
     }
 }
 
@@ -331,13 +333,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn render_body(
-    braille: &mut BrailleGrid,
-    dims: &SceneDims,
-    truth: &Truth,
-    body: &Body,
-    time: f32,
-) {
+fn render_body(braille: &mut BrailleGrid, dims: &SceneDims, truth: &Truth, body: &Body, time: f32) {
     let scale = dims.scale_for(body.max_radius);
     let len = body.segments.len();
     if len < 3 {
@@ -359,8 +355,7 @@ fn render_body(
         let fade = (1.0 - index as f32 / len as f32).powf(1.35);
         let constrict = ((constrict_band - index as f32).abs() / len as f32).clamp(0.0, 1.0);
         let lattice_wave = (time * 1.1 + index as f32 * GOLDEN_RATIO * 0.35).sin();
-        let flow = (segment.chroma * 0.6 + truth.pulse * 0.25 + fade * 0.25
-            + lattice_wave * 0.15)
+        let flow = (segment.chroma * 0.6 + truth.pulse * 0.25 + fade * 0.25 + lattice_wave * 0.15)
             .clamp(0.0, 1.0);
 
         let base_color = blend_color(shade, highlight, 0.25 + 0.45 * flow);
@@ -372,7 +367,14 @@ fn render_body(
         let core_radius = (segment.thickness
             * (1.2 + 0.25 * truth.wave_amplitude + 0.1 * truth.pulse))
             .clamp(0.16, 0.8);
-        stamp_world_disc(braille, dims, segment.pos, core_radius * 1.35, scale, fill_color);
+        stamp_world_disc(
+            braille,
+            dims,
+            segment.pos,
+            core_radius * 1.35,
+            scale,
+            fill_color,
+        );
 
         let spacing_u = segment.thickness * (0.85 + 0.25 * fade);
         let spacing_v = segment.thickness * (0.78 + 0.18 * fade);
@@ -482,7 +484,14 @@ fn render_head(braille: &mut BrailleGrid, dims: &SceneDims, body: &Body, time: f
     stamp_world_disc(braille, dims, skull, head_radius, scale, head_color);
 
     let snout = head_seg.pos.add(dir.mul(head_seg.thickness * 1.6));
-    stamp_world_disc(braille, dims, snout, head_seg.thickness * 1.05, scale, jaw_color);
+    stamp_world_disc(
+        braille,
+        dims,
+        snout,
+        head_seg.thickness * 1.05,
+        scale,
+        jaw_color,
+    );
 
     let left_jaw = head_seg
         .pos
@@ -493,14 +502,30 @@ fn render_head(braille: &mut BrailleGrid, dims: &SceneDims, body: &Body, time: f
         .sub(side.mul(head_seg.thickness * 0.9))
         .add(dir.mul(head_seg.thickness * 0.3));
 
-    stamp_world_disc(braille, dims, left_jaw, head_seg.thickness * 0.65, scale, jaw_color);
-    stamp_world_disc(braille, dims, right_jaw, head_seg.thickness * 0.65, scale, jaw_color);
+    stamp_world_disc(
+        braille,
+        dims,
+        left_jaw,
+        head_seg.thickness * 0.65,
+        scale,
+        jaw_color,
+    );
+    stamp_world_disc(
+        braille,
+        dims,
+        right_jaw,
+        head_seg.thickness * 0.65,
+        scale,
+        jaw_color,
+    );
 
     let eye_blink = (time * 2.6).sin().powi(2);
     let eye_offset = head_seg.thickness * (0.65 + 0.2 * eye_blink);
     let eye_radius = head_seg.thickness * (0.28 + 0.05 * eye_blink);
 
-    let left_eye = skull.add(side.mul(eye_offset)).add(dir.mul(head_seg.thickness * 0.3));
+    let left_eye = skull
+        .add(side.mul(eye_offset))
+        .add(dir.mul(head_seg.thickness * 0.3));
     let right_eye = skull
         .sub(side.mul(eye_offset))
         .add(dir.mul(head_seg.thickness * 0.3));

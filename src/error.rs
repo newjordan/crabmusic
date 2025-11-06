@@ -34,7 +34,9 @@ pub enum CrabMusicError {
 #[derive(Error, Debug)]
 pub enum AudioError {
     /// Audio device not available
-    #[error("Audio device not available. Please ensure an audio input device is connected and enabled.")]
+    #[error(
+        "Audio device not available. Please ensure an audio input device is connected and enabled."
+    )]
     DeviceNotAvailable,
 
     /// Permission denied accessing audio device

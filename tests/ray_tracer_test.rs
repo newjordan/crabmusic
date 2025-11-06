@@ -15,13 +15,12 @@ fn test_ray_tracer_renders_sphere_center_and_corners() {
     assert_eq!(buffer[0].len(), w);
 
     // Center should be non-zero (lit)
-    let center = buffer[h/2][w/2];
+    let center = buffer[h / 2][w / 2];
     assert!(center > 0.1, "Center should be lit in Solid mode");
 
     // Corners should miss / be near background
     assert!(buffer[0][0] < 0.1);
-    assert!(buffer[0][w-1] < 0.1);
-    assert!(buffer[h-1][0] < 0.1);
-    assert!(buffer[h-1][w-1] < 0.1);
+    assert!(buffer[0][w - 1] < 0.1);
+    assert!(buffer[h - 1][0] < 0.1);
+    assert!(buffer[h - 1][w - 1] < 0.1);
 }
-

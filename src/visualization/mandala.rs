@@ -259,7 +259,6 @@ impl Visualizer for MandalaVisualizer {
         let height = grid.height();
         let mut braille = BrailleGrid::new(width, height);
 
-
         let center_x = braille.dot_width() as f32 / 2.0;
         let center_y = braille.dot_height() as f32 / 2.0;
         let scale = (self.amplitude * 0.5 + 0.5) * self.pulse_scale;
@@ -413,4 +412,3 @@ mod tests {
         assert_eq!(viz.beat_flash, 1.0);
     }
 }
-

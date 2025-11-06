@@ -72,10 +72,7 @@ impl AudioOutputDevice {
         let sample_rate = supported_config.sample_rate().0;
         let channels = supported_config.channels();
 
-        info!(
-            "Output config: {} Hz, {} channels",
-            sample_rate, channels
-        );
+        info!("Output config: {} Hz, {} channels", sample_rate, channels);
 
         let config = AudioConfig {
             sample_rate,
@@ -93,10 +90,7 @@ impl AudioOutputDevice {
     }
 
     /// Find an output device by name
-    fn find_device_by_name(
-        host: &cpal::Host,
-        name: &str,
-    ) -> Result<cpal::Device, AudioError> {
+    fn find_device_by_name(host: &cpal::Host, name: &str) -> Result<cpal::Device, AudioError> {
         if let Ok(devices) = host.output_devices() {
             for device in devices {
                 if let Ok(device_name) = device.name() {
@@ -145,7 +139,7 @@ impl AudioOutputDevice {
                 &config,
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                     let buffer = playback_buffer.lock().unwrap();
-                    
+
                     // Fill output buffer with samples from playback buffer
                     for (i, sample) in data.iter_mut().enumerate() {
                         *sample = if i < buffer.len() {
@@ -227,4 +221,3 @@ impl Drop for AudioOutputDevice {
         let _ = self.stop_playback();
     }
 }
-

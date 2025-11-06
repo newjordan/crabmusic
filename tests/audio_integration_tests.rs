@@ -1,7 +1,9 @@
 // Integration tests for audio capture system
 // Tests the full audio capture pipeline with synthetic audio
 
-use crabmusic::audio::{AudioBuffer, AudioCaptureDevice, AudioConfig, AudioRingBuffer, CpalAudioDevice};
+use crabmusic::audio::{
+    AudioBuffer, AudioCaptureDevice, AudioConfig, AudioRingBuffer, CpalAudioDevice,
+};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -71,7 +73,10 @@ fn test_audio_buffer_with_synthetic_data() {
     assert_eq!(buffer.samples[1023], samples[1023]);
 
     // Verify amplitude is reasonable
-    let max_amplitude = buffer.samples.iter().fold(0.0f32, |max, &s| max.max(s.abs()));
+    let max_amplitude = buffer
+        .samples
+        .iter()
+        .fold(0.0f32, |max, &s| max.max(s.abs()));
     assert!(max_amplitude > 0.9 && max_amplitude <= 1.0);
 }
 
@@ -82,7 +87,7 @@ fn test_audio_config_validation() {
         channels: 2,
         buffer_size: 1024,
     };
-    
+
     assert_eq!(config.sample_rate, 44100);
     assert_eq!(config.channels, 2);
     assert_eq!(config.buffer_size, 1024);
@@ -143,7 +148,7 @@ fn test_stereo_to_mono_conversion() {
         .chunks_exact(2)
         .map(|chunk| (chunk[0] + chunk[1]) / 2.0)
         .collect();
-    
+
     assert_eq!(mono_samples.len(), 3);
     assert!((mono_samples[0] - 0.4).abs() < 0.001); // (0.5 + 0.3) / 2
     assert!((mono_samples[1] - 0.4).abs() < 0.001); // (0.7 + 0.1) / 2
@@ -247,7 +252,7 @@ fn test_ring_buffer_concurrent_access() {
 fn test_cpal_device_initialization() {
     let ring_buffer = Arc::new(AudioRingBuffer::new(10));
     let result = CpalAudioDevice::new(ring_buffer);
-    
+
     // This test will fail if no audio device is available
     // but that's expected in CI environments
     match result {
@@ -256,7 +261,10 @@ fn test_cpal_device_initialization() {
             assert!(!device.is_capturing());
         }
         Err(e) => {
-            println!("Audio device initialization failed (expected in CI): {:?}", e);
+            println!(
+                "Audio device initialization failed (expected in CI): {:?}",
+                e
+            );
         }
     }
 }
@@ -268,4 +276,3 @@ fn test_audio_buffer_zero_initialization() {
     // New buffers should be empty
     assert!(buffer.is_empty());
 }
-

@@ -6,7 +6,12 @@ use crabmusic::dsp::DspProcessor;
 use std::f32::consts::PI;
 
 /// Generate a sine wave with given frequency and amplitude
-fn generate_sine_wave(frequency: f32, amplitude: f32, sample_rate: u32, num_samples: usize) -> AudioBuffer {
+fn generate_sine_wave(
+    frequency: f32,
+    amplitude: f32,
+    sample_rate: u32,
+    num_samples: usize,
+) -> AudioBuffer {
     let samples: Vec<f32> = (0..num_samples)
         .map(|i| {
             let t = i as f32 / sample_rate as f32;
@@ -29,23 +34,38 @@ fn test_beat_detection_with_kick_drum_pattern() {
     let mut beat_count = 0;
 
     // First kick
-    let params = processor.process(&AudioBuffer::with_samples(loud_samples.clone(), sample_rate, 1));
+    let params = processor.process(&AudioBuffer::with_samples(
+        loud_samples.clone(),
+        sample_rate,
+        1,
+    ));
     if params.beat {
         beat_count += 1;
     }
 
     // Quiet sections
     for _ in 0..3 {
-        processor.process(&AudioBuffer::with_samples(quiet_samples.clone(), sample_rate, 1));
+        processor.process(&AudioBuffer::with_samples(
+            quiet_samples.clone(),
+            sample_rate,
+            1,
+        ));
     }
 
     // Second kick
-    let params = processor.process(&AudioBuffer::with_samples(loud_samples.clone(), sample_rate, 1));
+    let params = processor.process(&AudioBuffer::with_samples(
+        loud_samples.clone(),
+        sample_rate,
+        1,
+    ));
     if params.beat {
         beat_count += 1;
     }
 
-    assert!(beat_count >= 1, "Should detect at least one beat in kick pattern");
+    assert!(
+        beat_count >= 1,
+        "Should detect at least one beat in kick pattern"
+    );
 }
 
 #[test]
@@ -102,7 +122,10 @@ fn test_beat_detection_no_false_positives_in_sustained_tone() {
     }
 
     // Should detect at most 1 beat (initial onset), not continuous beats
-    assert!(beats_detected <= 1, "Should not continuously detect beats in sustained tone");
+    assert!(
+        beats_detected <= 1,
+        "Should not continuously detect beats in sustained tone"
+    );
 }
 
 #[test]
@@ -141,7 +164,10 @@ fn test_beat_detection_with_dynamic_range() {
 
     // Should detect beat even though absolute amplitude is moderate
     // (dynamic threshold adapts to quiet baseline)
-    assert!(params.beat, "Should detect beat with moderate amplitude after quiet baseline");
+    assert!(
+        params.beat,
+        "Should detect beat with moderate amplitude after quiet baseline"
+    );
 }
 
 #[test]
@@ -161,7 +187,10 @@ fn test_beat_detection_with_gradual_volume_increase() {
     }
 
     // Should detect very few beats in gradual increase (not sudden onsets)
-    assert!(beats_detected < 3, "Should not detect many beats in gradual volume increase");
+    assert!(
+        beats_detected < 3,
+        "Should not detect many beats in gradual volume increase"
+    );
 }
 
 #[test]
@@ -243,7 +272,10 @@ fn test_beat_detection_fast_tempo() {
         }
     }
 
-    assert!(total_beats >= 2, "Should detect beats at fast tempo (150 BPM)");
+    assert!(
+        total_beats >= 2,
+        "Should detect beats at fast tempo (150 BPM)"
+    );
 }
 
 #[test]
@@ -275,5 +307,8 @@ fn test_beat_detection_slow_tempo() {
     // Second beat
     let params2 = processor.process(&AudioBuffer::with_samples(loud.clone(), sample_rate, 1));
 
-    assert!(params1.beat || params2.beat, "Should detect beats at slow tempo (60 BPM)");
+    assert!(
+        params1.beat || params2.beat,
+        "Should detect beats at slow tempo (60 BPM)"
+    );
 }

@@ -57,13 +57,13 @@ impl Default for OscilloscopeConfig {
             sample_count: 512,
             amplitude_sensitivity: 1.5,
             smoothing_factor: 0.1, // Less smoothing for accurate waveform
-            line_thickness: 3.0, // Thicker for better visibility
+            line_thickness: 3.0,   // Thicker for better visibility
             trigger_enabled: true,
             trigger_level: 0.0, // Zero-crossing trigger
             trigger_slope: TriggerSlope::Positive,
             show_grid: true,
             waveform_mode: WaveformMode::LineAndFill, // Best visibility
-            use_color: true, // Enable color by default
+            use_color: true,                          // Enable color by default
         }
     }
 }
@@ -145,7 +145,9 @@ impl OscilloscopeVisualizer {
             waveform,
             config,
             beat_flash: 0.0,
-            color_scheme: super::color_schemes::ColorScheme::new(super::color_schemes::ColorSchemeType::Monochrome),
+            color_scheme: super::color_schemes::ColorScheme::new(
+                super::color_schemes::ColorSchemeType::Monochrome,
+            ),
         }
     }
 
@@ -314,7 +316,8 @@ impl OscilloscopeVisualizer {
             let waveform_value = self.waveform[sample_idx];
 
             // Convert to dot coordinates (with better scaling)
-            let y_offset = waveform_value * self.config.amplitude_sensitivity * (dot_height as f32 / 2.2);
+            let y_offset =
+                waveform_value * self.config.amplitude_sensitivity * (dot_height as f32 / 2.2);
             let y = (dot_center_y as f32 - y_offset).clamp(0.0, (dot_height - 1) as f32) as usize;
 
             // Draw line from previous point to current point (smooth!)
@@ -367,14 +370,17 @@ impl OscilloscopeVisualizer {
         let dot_center_y = dot_height / 2;
 
         for dot_x in 0..dot_width {
-            let sample_idx = (dot_x as f32 / dot_width as f32 * self.waveform.len() as f32) as usize;
+            let sample_idx =
+                (dot_x as f32 / dot_width as f32 * self.waveform.len() as f32) as usize;
             if sample_idx >= self.waveform.len() {
                 break;
             }
 
             let waveform_value = self.waveform[sample_idx];
-            let y_offset = waveform_value * self.config.amplitude_sensitivity * (dot_height as f32 / 2.2);
-            let waveform_dot_y = (dot_center_y as f32 - y_offset).clamp(0.0, (dot_height - 1) as f32) as usize;
+            let y_offset =
+                waveform_value * self.config.amplitude_sensitivity * (dot_height as f32 / 2.2);
+            let waveform_dot_y =
+                (dot_center_y as f32 - y_offset).clamp(0.0, (dot_height - 1) as f32) as usize;
 
             // Fill from center to waveform
             let (start_y, end_y) = if waveform_dot_y < dot_center_y {
@@ -386,7 +392,8 @@ impl OscilloscopeVisualizer {
             // Fill every other dot for gradient effect
             for dot_y in start_y..=end_y {
                 // Distance-based gradient
-                let distance = ((dot_y as i32 - dot_center_y as i32).abs() as f32) / (dot_height as f32 / 2.0);
+                let distance =
+                    ((dot_y as i32 - dot_center_y as i32).abs() as f32) / (dot_height as f32 / 2.0);
 
                 // Probabilistic fill for gradient
                 if (dot_y + dot_x) % 3 != 0 || distance < 0.3 {
@@ -731,4 +738,3 @@ mod tests {
         assert!(viz.beat_flash < 1.0 && viz.beat_flash > 0.0);
     }
 }
-

@@ -1,0 +1,12 @@
+E:\crabmusic\target-test\debug\deps\wasapi-f6189df7835ea8c6.d: C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wasapi-0.21.0\src\lib.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wasapi-0.21.0\src\api.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wasapi-0.21.0\src\errors.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wasapi-0.21.0\src\events.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wasapi-0.21.0\src\waveformat.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wasapi-0.21.0\src\../README.md
+
+E:\crabmusic\target-test\debug\deps\libwasapi-f6189df7835ea8c6.rlib: C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wasapi-0.21.0\src\lib.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wasapi-0.21.0\src\api.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wasapi-0.21.0\src\errors.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wasapi-0.21.0\src\events.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wasapi-0.21.0\src\waveformat.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wasapi-0.21.0\src\../README.md
+
+E:\crabmusic\target-test\debug\deps\libwasapi-f6189df7835ea8c6.rmeta: C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wasapi-0.21.0\src\lib.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wasapi-0.21.0\src\api.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wasapi-0.21.0\src\errors.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wasapi-0.21.0\src\events.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wasapi-0.21.0\src\waveformat.rs C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wasapi-0.21.0\src\../README.md
+
+C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wasapi-0.21.0\src\lib.rs:
+C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wasapi-0.21.0\src\api.rs:
+C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wasapi-0.21.0\src\errors.rs:
+C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wasapi-0.21.0\src\events.rs:
+C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wasapi-0.21.0\src\waveformat.rs:
+C:\Users\newjo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wasapi-0.21.0\src\../README.md:
