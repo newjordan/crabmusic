@@ -15,6 +15,10 @@ pub mod waveform_tunnel;
 mod flower_of_life;
 mod mandala;
 mod night_night;
+mod image_channel;
+mod video_channel;
+pub mod ray_tracer;
+
 
 // Re-export visualizers for external use
 pub use sine_wave::{SineWaveConfig, SineWaveVisualizer};
@@ -27,6 +31,8 @@ pub use flower_of_life::{FlowerOfLifeConfig, FlowerOfLifeVisualizer};
 pub use mandala::{MandalaConfig, MandalaVisualizer};
 pub use braille::BrailleGrid;
 pub use night_night::NightNightVisualizer;
+pub use image_channel::ImageChannelVisualizer;
+pub use video_channel::VideoChannelVisualizer;
 
 use crate::dsp::AudioParameters;
 
@@ -65,7 +71,7 @@ use crate::dsp::AudioParameters;
 ///     }
 /// }
 /// ```
-pub trait Visualizer {
+pub trait Visualizer: std::any::Any {
     /// Update visualizer state from audio parameters
     ///
     /// Called once per audio frame to update internal state (e.g., smoothed values,
