@@ -3,6 +3,7 @@
 use super::{lerp, BrailleGrid, Color, GridBuffer, Visualizer};
 use crate::dsp::AudioParameters;
 use crate::visualization::ray_tracer::{render_with_orientation, render_edges_with_orientation, Camera, RenderMode, Scene, WireframeRotation};
+use crate::visualization::controls::Transform3DControls;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -19,15 +20,12 @@ pub struct ObjViewerVisualizer {
     // Audio-reactive and rotation state
     light_intensity: f32,
     smoothing: f32,
-    rotation_y: f32,
-    rotation_speed_y: f32, // rad/s
-    auto_rotate: bool,
     last_time: Instant,
     // Edge/vertex render params (OBJ-only wireframe)
     edge_line_px: i32,
     vertex_dot_px: i32,
-    // Model scale (zoom)
-    model_scale: f32,
+    // 3D transform controls (DRY)
+    transform: Transform3DControls,
 }
 
 impl ObjViewerVisualizer {
@@ -43,19 +41,16 @@ impl ObjViewerVisualizer {
             scene: None,
             camera,
             mode: RenderMode::Wireframe { step_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_STEP_RAD, tol_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_TOL_RAD },
-            render_scale: 0.8,
+            render_scale: 1.0,
             files: Vec::new(),
             current_index: 0,
             display_name: String::from("No OBJ found"),
             light_intensity: 0.8,
             smoothing: 0.15,
-            rotation_y: 0.0,
-            rotation_speed_y: 0.6,
-            auto_rotate: true,
             last_time: Instant::now(),
             edge_line_px: 1,
             vertex_dot_px: 2,
-            model_scale: 1.0,
+            transform: Transform3DControls { yaw_speed: 0.6, ..Default::default() },
         };
         viz.refresh_file_list();
         viz.load_model(index);
@@ -103,7 +98,7 @@ impl ObjViewerVisualizer {
 
     pub fn model_name(&self) -> &str { &self.display_name }
 
-    pub fn set_auto_rotate(&mut self, enable: bool) { self.auto_rotate = enable; }
+    pub fn set_auto_rotate(&mut self, enable: bool) { self.transform.set_auto_rotate(enable); }
 
     pub fn toggle_render_mode(&mut self) {
         self.mode = match self.mode {
@@ -145,21 +140,22 @@ impl ObjViewerVisualizer {
         match self.mode { RenderMode::Wireframe { .. } => Some((self.edge_line_px, self.vertex_dot_px)), _ => None }
     }
 
-    pub fn zoom_in(&mut self) { self.model_scale = (self.model_scale * 1.2).min(20.0); }
-    pub fn zoom_out(&mut self) { self.model_scale = (self.model_scale / 1.2).max(0.05); }
+    pub fn zoom_in(&mut self) { self.transform.zoom_in(); }
+    pub fn zoom_out(&mut self) { self.transform.zoom_out(); }
 
     pub fn focus_fit(&mut self) {
+
         let Some(scene) = &self.scene else { return; };
         let Some(verts) = scene.mesh_vertices() else { return; };
         // compute extents at scale=1 with current yaw/pitch=0 for stability
         use crate::visualization::ray_tracer::math::Vector3;
-        use crate::visualization::ray_tracer::wireframe::rotate_normal_yaw_pitch as rot;
+        use crate::visualization::ray_tracer::wireframe::rotate_vec_yaw_pitch_roll as rot;
         let half_w = self.camera.viewport_width * 0.5;
         let half_h = self.camera.viewport_height * 0.5;
         let mut max_x = 1e-6f32;
         let mut max_y = 1e-6f32;
         for &p in verts.iter() {
-            let pr = rot(p, self.rotation_y, 0.0);
+            let pr = rot(p, self.transform.yaw, self.transform.pitch, self.transform.roll);
             let q = Vector3::new(pr.x - self.camera.origin.x, pr.y - self.camera.origin.y, pr.z - self.camera.origin.z);
             if q.z >= -1e-3 { continue; }
             let t = -self.camera.focal_length / q.z;
@@ -172,9 +168,17 @@ impl ObjViewerVisualizer {
             let sx = (half_w * 0.9) / max_x;
             let sy = (half_h * 0.9) / max_y;
             let target = sx.min(sy);
-            self.model_scale = target.clamp(0.05, 20.0);
+            self.transform.set_scale(target);
         }
     }
+    // Rotation helpers for keys (step in radians)
+    pub fn yaw_left(&mut self, step: f32)  { self.transform.yaw_left(step); }
+    pub fn yaw_right(&mut self, step: f32) { self.transform.yaw_right(step); }
+    pub fn pitch_up(&mut self, step: f32)  { self.transform.pitch_up(step); }
+    pub fn pitch_down(&mut self, step: f32){ self.transform.pitch_down(step); }
+    pub fn roll_ccw(&mut self, step: f32)  { self.transform.roll_ccw(step); }
+    pub fn roll_cw(&mut self, step: f32)   { self.transform.roll_cw(step); }
+
 
 }
 
@@ -194,7 +198,7 @@ impl Visualizer for ObjViewerVisualizer {
         let now = Instant::now();
         let dt = now.duration_since(self.last_time).as_secs_f32();
         self.last_time = now;
-        if self.auto_rotate { self.rotation_y = (self.rotation_y + self.rotation_speed_y * dt) % (std::f32::consts::PI * 2.0); }
+        self.transform.update(dt);
     }
 
     fn render(&self, grid: &mut GridBuffer) {
@@ -216,9 +220,10 @@ impl Visualizer for ObjViewerVisualizer {
                     &self.camera,
                     w,
                     h,
-                    self.rotation_y,
-                    0.0,
-                    self.model_scale,
+                    self.transform.yaw,
+                    self.transform.pitch,
+                    self.transform.roll,
+                    self.transform.scale,
                     self.vertex_dot_px,
                     self.edge_line_px,
                 )
@@ -230,7 +235,7 @@ impl Visualizer for ObjViewerVisualizer {
                     w,
                     h,
                     self.mode,
-                    WireframeRotation { yaw: self.rotation_y, pitch: 0.0, roll: 0.0 },
+                    WireframeRotation { yaw: self.transform.yaw, pitch: self.transform.pitch, roll: self.transform.roll },
                 )
             }
         };

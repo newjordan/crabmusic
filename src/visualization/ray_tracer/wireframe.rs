@@ -34,19 +34,29 @@ pub fn is_on_wireframe_normal(normal: Vector3, step_rad: f32, tol_rad: f32) -> b
     d_theta < tol_rad || d_phi < tol_rad
 }
 
-/// Rotate a normal by yaw (Y axis) then pitch (X axis)
-pub fn rotate_normal_yaw_pitch(normal: Vector3, yaw: f32, pitch: f32) -> Vector3 {
+/// Rotate a vector by yaw (Y), pitch (X), then roll (Z)
+pub fn rotate_vec_yaw_pitch_roll(v: Vector3, yaw: f32, pitch: f32, roll: f32) -> Vector3 {
     let (sy, cy) = yaw.sin_cos();
     let (sp, cp) = pitch.sin_cos();
+    let (sr, cr) = roll.sin_cos();
     // Yaw around Y
-    let x1 = cy * normal.x + sy * normal.z;
-    let y1 = normal.y;
-    let z1 = -sy * normal.x + cy * normal.z;
+    let x1 = cy * v.x + sy * v.z;
+    let y1 = v.y;
+    let z1 = -sy * v.x + cy * v.z;
     // Pitch around X
     let x2 = x1;
     let y2 = cp * y1 - sp * z1;
     let z2 = sp * y1 + cp * z1;
-    Vector3::new(x2, y2, z2)
+    // Roll around Z
+    let x3 = cr * x2 - sr * y2;
+    let y3 = sr * x2 + cr * y2;
+    let z3 = z2;
+    Vector3::new(x3, y3, z3)
+}
+
+/// Backward-compat: rotate a normal by yaw (Y axis) then pitch (X axis)
+pub fn rotate_normal_yaw_pitch(normal: Vector3, yaw: f32, pitch: f32) -> Vector3 {
+    rotate_vec_yaw_pitch_roll(normal, yaw, pitch, 0.0)
 }
 
 /// Wireframe test with an additional orientation (rotation) applied before grid check

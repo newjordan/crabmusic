@@ -4,7 +4,7 @@ use super::camera::Camera;
 use super::lighting::calculate_diffuse_shading;
 use super::scene::Scene;
 use super::wireframe::{
-    is_on_wireframe_normal_rotated, DEFAULT_WIREFRAME_STEP_RAD, DEFAULT_WIREFRAME_TOL_RAD,
+    is_on_wireframe_normal_rotated, rotate_vec_yaw_pitch_roll, DEFAULT_WIREFRAME_STEP_RAD, DEFAULT_WIREFRAME_TOL_RAD,
 };
 use super::RenderMode;
 
@@ -91,12 +91,15 @@ pub fn render_edges_with_orientation(
     height: usize,
     yaw: f32,
     pitch: f32,
+    roll: f32,
     model_scale: f32,
     vertex_px: i32,
     line_px: i32,
 ) -> Vec<Vec<f32>> {
     use super::math::Vector3;
-    use super::wireframe::rotate_normal_yaw_pitch as rotate_vec;
+    // rotate vector with yaw/pitch/roll
+    // use direct import rotate_vec_yaw_pitch_roll
+
 
     let mut buffer = vec![vec![0.0_f32; width]; height];
     let mut depth = vec![vec![f32::INFINITY; width]; height];
@@ -112,7 +115,7 @@ pub fn render_edges_with_orientation(
     let project = |p: Vector3| -> Option<(i32, i32, f32)> {
         // Apply scale and rotation around origin
         let ps = Vector3::new(p.x * model_scale, p.y * model_scale, p.z * model_scale);
-        let pr = rotate_vec(ps, yaw, pitch);
+        let pr = rotate_vec_yaw_pitch_roll(ps, yaw, pitch, roll);
         // Transform to camera space (camera looks down -Z)
         let q = Vector3::new(pr.x - camera.origin.x, pr.y - camera.origin.y, pr.z - camera.origin.z);
         if q.z >= -1e-4 { return None; }

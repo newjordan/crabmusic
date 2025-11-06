@@ -1146,7 +1146,7 @@ impl Application {
             };
             let auto_label = if self.model_viewer_auto_rotate { "ON" } else { "OFF" };
             format!(
-                " {}{} | {} | {} | {} | Model: {} | W:mode G/H:line({}px) T/Y:dot({}px) Z/X:zoom F:focus R:auto({}) Up/Down:switch ←/→ V:chan I:num O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
+                " {}{} | {} | {} | {} | Model: {} | W:mode A/D:yaw J/K:pitch ,/.:roll G/H:line({}px) T/Y:dot({}px) Z/X:zoom F:focus R:auto({}) Up/Down:switch ←/→ V:chan I:num O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
                 channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status, model_name, line_px, dot_px, auto_label
             )
         } else {
@@ -1626,6 +1626,14 @@ impl Application {
                                                     viz.set_rotation_speed_y(self.ray3d_rotation_speed_y);
                                                 }
                                                 tracing::info!("Raycaster 3D rotation speed: {:.2} rad/s (was {:.2})", self.ray3d_rotation_speed_y, prev);
+                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
+                                                {
+                                                    let step = 5.0_f32.to_radians();
+                                                    viz.pitch_up(step);
+                                                    tracing::info!("OBJ Viewer: pitch up ({:.1}°)", 5.0);
+                                                }
                                             }
                                         }
                                         KeyCode::Char('k') | KeyCode::Char('K') => {
@@ -1639,6 +1647,14 @@ impl Application {
                                                     viz.set_rotation_speed_y(self.ray3d_rotation_speed_y);
                                                 }
                                                 tracing::info!("Raycaster 3D rotation speed: {:.2} rad/s (was {:.2})", self.ray3d_rotation_speed_y, prev);
+                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
+                                                {
+                                                    let step = 5.0_f32.to_radians();
+                                                    viz.pitch_down(step);
+                                                    tracing::info!("OBJ Viewer: pitch down ({:.1}°)", 5.0);
+                                                }
                                             }
                                         }
 
@@ -1691,6 +1707,51 @@ impl Application {
                                                 );
                                             }
                                         }
+                                        KeyCode::Char('a') | KeyCode::Char('A') => {
+                                            if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
+                                                {
+                                                    let step = 5.0_f32.to_radians();
+                                                    viz.yaw_left(step);
+                                                    tracing::info!("OBJ Viewer: yaw left ({:.1}°)", 5.0);
+                                                }
+                                            }
+                                        }
+                                        KeyCode::Char('d') | KeyCode::Char('D') => {
+                                            if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
+                                                {
+                                                    let step = 5.0_f32.to_radians();
+                                                    viz.yaw_right(step);
+                                                    tracing::info!("OBJ Viewer: yaw right ({:.1}°)", 5.0);
+                                                }
+                                            }
+                                        }
+                                        KeyCode::Char(',') => {
+                                            if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
+                                                {
+                                                    let step = 5.0_f32.to_radians();
+                                                    viz.roll_ccw(step);
+                                                    tracing::info!("OBJ Viewer: roll CCW ({:.1}°)", 5.0);
+                                                }
+                                            }
+                                        }
+                                        KeyCode::Char('.') => {
+                                            if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
+                                                {
+                                                    let step = 5.0_f32.to_radians();
+                                                    viz.roll_cw(step);
+                                                    tracing::info!("OBJ Viewer: roll CW ({:.1}°)", 5.0);
+                                                }
+                                            }
+                                        }
+
                                         KeyCode::Char('z') | KeyCode::Char('Z') => {
                                             if self.visualizer_mode == VisualizerMode::XYOscilloscope {
                                                 tracing::info!("XY Oscilloscope zoom control (use +/- for sensitivity)");

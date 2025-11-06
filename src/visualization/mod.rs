@@ -20,6 +20,7 @@ mod spectrum;
 mod video_channel;
 pub mod waveform_tunnel;
 mod xy_oscilloscope;
+pub mod controls;
 
 // Re-export visualizers for external use
 pub use braille::BrailleGrid;
@@ -36,6 +37,7 @@ pub use spectrum::{SpectrumConfig, SpectrumMapping, SpectrumVisualizer};
 pub use video_channel::VideoChannelVisualizer;
 pub use waveform_tunnel::WaveformTunnelVisualizer;
 pub use xy_oscilloscope::{XYDisplayMode, XYOscilloscopeConfig, XYOscilloscopeVisualizer};
+pub use controls::Transform3DControls;
 
 use crate::dsp::AudioParameters;
 
