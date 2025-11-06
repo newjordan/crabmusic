@@ -1,0 +1,42 @@
+[package]
+name = "crabcrust"
+version = "0.1.0"
+edition = "2021"
+authors = ["CrabCrust Contributors"]
+description = "Add arcade-style animations to your CLI tools 🦀✨"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yourusername/crabcrust"
+keywords = ["cli", "terminal", "animation", "braille", "arcade"]
+categories = ["command-line-utilities", "visualization"]
+
+[[bin]]
+name = "crabcrust"
+path = "src/main.rs"
+
+[dependencies]
+# Terminal rendering
+ratatui = "0.29"
+crossterm = "0.28"
+
+# CLI argument parsing
+clap = { version = "4.5", features = ["derive", "cargo"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Async runtime (for non-blocking command execution)
+tokio = { version = "1.41", features = ["full"] }
+
+# Serialization (for config files)
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+
+[dev-dependencies]
+pretty_assertions = "1.4"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

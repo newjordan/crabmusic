@@ -1,0 +1,28 @@
+{
+  "version": "0.1.0",
+  "description": "Add arcade-style animations to your CLI tools",
+  "homepage": "https://github.com/USER/crabcrust",
+  "license": "MIT OR Apache-2.0",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/USER/crabcrust/releases/download/v0.1.0/crabcrust-windows-x64.exe",
+      "bin": "crabcrust-windows-x64.exe",
+      "shortcuts": [
+        [
+          "crabcrust-windows-x64.exe",
+          "CrabCrust"
+        ]
+      ]
+    }
+  },
+  "checkver": {
+    "github": "https://github.com/USER/crabcrust"
+  },
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/USER/crabcrust/releases/download/v$version/crabcrust-windows-x64.exe"
+      }
+    }
+  }
+}

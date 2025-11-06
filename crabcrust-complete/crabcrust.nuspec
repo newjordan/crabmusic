@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- For Chocolatey package -->
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>crabcrust</id>
+    <version>0.1.0</version>
+    <title>CrabCrust</title>
+    <authors>CrabCrust Contributors</authors>
+    <projectUrl>https://github.com/USER/crabcrust</projectUrl>
+    <licenseUrl>https://github.com/USER/crabcrust/blob/main/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <description>Add arcade-style animations to your CLI tools! Transform boring git commands into exciting visual experiences with Braille terminal graphics.</description>
+    <summary>Arcade-style CLI animations using Braille graphics</summary>
+    <tags>cli terminal git animation braille arcade rust</tags>
+    <packageSourceUrl>https://github.com/USER/crabcrust</packageSourceUrl>
+    <docsUrl>https://github.com/USER/crabcrust/blob/main/README.md</docsUrl>
+    <bugTrackerUrl>https://github.com/USER/crabcrust/issues</bugTrackerUrl>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>
