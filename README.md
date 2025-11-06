@@ -20,6 +20,8 @@ Made with love by Frosty40. Build bridges not bombs.
 - ⚙️ Configurable via YAML with hot‑reload
 - ⚡ High‑performance Rust renderer with differential updates
 - 🖥️ Cross‑platform (Windows, macOS, Linux)
+- 🧊 3D OBJ Viewer: true edge/vertex wireframe with hidden-line removal, simple solid shading, zoom/focus, and multi‑axis rotation controls
+
 
 ## 🎨 Gallery
 
@@ -109,8 +111,30 @@ cargo run --release -- --device "Microphone" --output-device "Speakers"
 # Play a video file as Braille
 cargo run --release -- --video ".\media\clip.mp4"
 
-cargo run --release --features video -- --video "media/clip.mp4" 
-```
+cargo run --release --features video -- --video "media/clip.mp4"
+
+### Quick Start: 3D OBJ Viewer
+
+- Put your `.obj` files in the `models/` folder (we ignore `.mtl`).
+- Run the app (`cargo run`) and switch to the “OBJ Viewer” channel (use ←/→ to change channels; the status bar lists keys).
+- Use Up/Down to switch between OBJ files.
+
+Controls (OBJ Viewer):
+- W: toggle Wireframe/Solid
+- A/D: yaw left/right
+- J/K: pitch down/up
+- ,/.: roll CCW/CW
+- Z/X: zoom in/out
+- F: focus (fit to view)
+- G/H: line thickness (wireframe)
+- T/Y: vertex dot size (wireframe)
+- R: auto‑rotate ON/OFF
+
+Notes:
+- Wireframe rendering shows real mesh edges and vertices with hidden‑line removal (depth‑tested) so back/occluded edges don’t clutter.
+- Solid mode uses simple diffuse lighting; if normals are missing in the OBJ, we fall back to flat shading safely.
+- OBJ loader supports 1‑based and negative indices and triangulates n‑gons by fan. Texture/MTL are ignored for now.
+
 
 ### More
 
@@ -274,6 +298,8 @@ Built with these excellent Rust crates:
 - ✅ Audio capture (mic + Windows WASAPI loopback) and audio output
 - ✅ Differential terminal updates + YAML config with hot‑reload
 - ✅ Video playback entrypoint (`--video`, feature‑gated)
+- ✅ 3D OBJ Viewer channel: real mesh wireframe (hidden‑line removal), simple solid shading, zoom/focus, multi‑axis rotation; place .obj files in `models/` and use Up/Down to switch. Keys: W mode, A/D yaw, J/K pitch, ,/. roll, Z/X zoom, F focus, G/H line, T/Y dot, R auto‑rotate.
+
 
 **Next up (roadmap):**
 - 🔁 Image playlists (3+ images) with selectable transitions
