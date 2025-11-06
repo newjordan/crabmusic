@@ -18,6 +18,7 @@ mod night_night;
 mod image_channel;
 mod video_channel;
 pub mod ray_tracer;
+mod raycaster3d;
 
 
 // Re-export visualizers for external use
@@ -33,6 +34,7 @@ pub use braille::BrailleGrid;
 pub use night_night::NightNightVisualizer;
 pub use image_channel::ImageChannelVisualizer;
 pub use video_channel::VideoChannelVisualizer;
+pub use raycaster3d::Raycaster3DVisualizer;
 
 use crate::dsp::AudioParameters;
 

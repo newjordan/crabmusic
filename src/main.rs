@@ -33,6 +33,7 @@ use visualization::{
     SineWaveVisualizer, SpectrogramVisualizer, SpectrumConfig, SpectrumVisualizer, SpectrumMapping,
     TriggerSlope, Visualizer, WaveformMode, WaveformTunnelVisualizer,
     FlowerOfLifeConfig, FlowerOfLifeVisualizer, MandalaConfig, MandalaVisualizer, NightNightVisualizer,
+    Raycaster3DVisualizer, ImageChannelVisualizer, VideoChannelVisualizer,
 };
 
 /// Global shutdown flag
@@ -197,7 +198,7 @@ fn main() -> Result<()> {
         tracing::info!("Overriding sensitivity from CLI: {}", sensitivity);
     }
 
-    if let Some(device) = args.device {
+    if let Some(ref device) = args.device {
         config.audio.device_name = Some(device.clone());
         tracing::info!("Overriding input audio device from CLI: {}", device);
     }
@@ -228,14 +229,46 @@ fn main() -> Result<()> {
     // Setup Ctrl+C handler
     setup_shutdown_handler()?;
 
-    // Determine if we should use loopback
+    // Determine if we should use loopback (persisted via config; CLI overrides)
     #[cfg(windows)]
-    let use_loopback = args.loopback;
+    let use_loopback = if args.loopback {
+        true
+    } else if args.device.is_some() {
+        false
+    } else {
+        config.audio.use_loopback
+    };
     #[cfg(not(windows))]
     let use_loopback = false;
 
+    // Persist the resolved loopback preference for next runs
+    // If config file doesn't exist yet, save current preference to create it
+    if !std::path::Path::new(config_path).exists() {
+        let mut cfg_to_save = config.clone();
+        cfg_to_save.audio.use_loopback = use_loopback;
+        if let Err(e) = cfg_to_save.save(config_path) {
+            tracing::warn!("Failed to save initial config (creating file): {}", e);
+        } else {
+            tracing::info!("Created {} with loopback preference", config_path);
+        }
+    }
+
+    if config.audio.use_loopback != use_loopback {
+        config.audio.use_loopback = use_loopback;
+        if let Err(e) = config.save(config_path) {
+            tracing::warn!("Failed to save config (loopback preference): {}", e);
+        } else {
+            tracing::info!("Saved loopback preference to {}", config_path);
+        }
+    }
+
     // Create and run application
     let app = Application::new_with_config(config, args.no_audio_output, use_loopback, args.show_labels)?;
+
+    // Friendly tip: if loopback is off, mic starts OFF too until you press 'M'
+    if !use_loopback {
+        tracing::warn!("No system loopback. MIC starts OFF. Press 'M' to enable mic input, or run with --loopback to capture system audio.");
+    }
 
     if args.test {
         app.run_test_mode()?;
@@ -258,7 +291,10 @@ enum VisualizerMode {
     WaveformTunnel,
     FlowerOfLife,
     Mandala,
+    Raycaster3D,
     NightNight,
+    Image,
+    Video,
 }
 
 impl VisualizerMode {
@@ -272,8 +308,29 @@ impl VisualizerMode {
             VisualizerMode::Spectrogram => VisualizerMode::WaveformTunnel,
             VisualizerMode::WaveformTunnel => VisualizerMode::FlowerOfLife,
             VisualizerMode::FlowerOfLife => VisualizerMode::Mandala,
-            VisualizerMode::Mandala => VisualizerMode::NightNight,
-            VisualizerMode::NightNight => VisualizerMode::SineWave,
+            VisualizerMode::Mandala => VisualizerMode::Raycaster3D,
+            VisualizerMode::Raycaster3D => VisualizerMode::NightNight,
+            VisualizerMode::NightNight => VisualizerMode::Image,
+            VisualizerMode::Image => VisualizerMode::Video,
+            VisualizerMode::Video => VisualizerMode::SineWave,
+        }
+    }
+
+    /// Get the previous visualizer mode in the cycle
+    fn prev(&self) -> Self {
+        match self {
+            VisualizerMode::SineWave => VisualizerMode::Video,
+            VisualizerMode::Spectrum => VisualizerMode::SineWave,
+            VisualizerMode::Oscilloscope => VisualizerMode::Spectrum,
+            VisualizerMode::XYOscilloscope => VisualizerMode::Oscilloscope,
+            VisualizerMode::Spectrogram => VisualizerMode::XYOscilloscope,
+            VisualizerMode::WaveformTunnel => VisualizerMode::Spectrogram,
+            VisualizerMode::FlowerOfLife => VisualizerMode::WaveformTunnel,
+            VisualizerMode::Mandala => VisualizerMode::FlowerOfLife,
+            VisualizerMode::Raycaster3D => VisualizerMode::Mandala,
+            VisualizerMode::NightNight => VisualizerMode::Raycaster3D,
+            VisualizerMode::Image => VisualizerMode::NightNight,
+            VisualizerMode::Video => VisualizerMode::Image,
         }
     }
 
@@ -288,9 +345,33 @@ impl VisualizerMode {
             VisualizerMode::WaveformTunnel => "Waveform Tunnel",
             VisualizerMode::FlowerOfLife => "Flower of Life",
             VisualizerMode::Mandala => "Mandala",
+            VisualizerMode::Raycaster3D => "Raycaster 3D",
             VisualizerMode::NightNight => "Night Night",
+            VisualizerMode::Image => "Image Viewer",
+            VisualizerMode::Video => "Video Player",
         }
     }
+
+    /// Get zero-based index of the mode (for channel number)
+    fn index(&self) -> usize {
+        match self {
+            VisualizerMode::SineWave => 0,
+            VisualizerMode::Spectrum => 1,
+            VisualizerMode::Oscilloscope => 2,
+            VisualizerMode::XYOscilloscope => 3,
+            VisualizerMode::Spectrogram => 4,
+            VisualizerMode::WaveformTunnel => 5,
+            VisualizerMode::FlowerOfLife => 6,
+            VisualizerMode::Mandala => 7,
+            VisualizerMode::Raycaster3D => 8,
+            VisualizerMode::NightNight => 9,
+            VisualizerMode::Image => 10,
+            VisualizerMode::Video => 11,
+        }
+    }
+
+    /// Total number of channels
+    fn count() -> usize { 12 }
 }
 
 /// Application state
@@ -329,6 +410,14 @@ struct Application {
     spectrum_range_preset_index: usize,
     // Effect control state
     selected_effect_for_intensity: Option<String>, // Track which effect to adjust intensity for
+    // UI overlays
+    show_channel_number: bool,
+    // File input prompt state (Image/Video channels)
+    file_prompt_active: bool,
+    file_prompt_buffer: String,
+    file_prompt_error: Option<String>,
+    // Suppress char-by-char events immediately after a paste to avoid duplication
+    paste_suppress_deadline: Option<Instant>,
 }
 
 impl Application {
@@ -488,6 +577,13 @@ impl Application {
             spectrum_range_preset_index: 1, // Default to A1–A5
             // Effect control defaults
             selected_effect_for_intensity: None, // No effect selected initially
+            // UI overlays defaults
+            show_channel_number: true,
+            // File prompt defaults
+            file_prompt_active: false,
+            file_prompt_buffer: String::new(),
+            file_prompt_error: None,
+            paste_suppress_deadline: None,
         })
     }
 
@@ -523,13 +619,8 @@ impl Application {
                 }
                 Err(e) => {
                     tracing::error!("Failed to initialize WASAPI loopback: {}", e);
-                    return Err(e).context(
-                        "Failed to initialize WASAPI loopback. \
-                         Please ensure:\n\
-                         - You are running on Windows\n\
-                         - An audio output device is active\n\
-                         - Audio is playing or will play soon"
-                    );
+                    tracing::info!("Falling back to standard input device (microphone) via CPAL");
+                    // Continue to CPAL fallback below
                 }
             }
         }
@@ -706,6 +797,13 @@ impl Application {
         tracing::info!("Switched to visualizer: {}", self.visualizer_mode.name());
     }
 
+    /// Switch to the previous visualizer mode
+    fn prev_visualizer_mode(&mut self) {
+        self.visualizer_mode = self.visualizer_mode.prev();
+        self.recreate_visualizer();
+        tracing::info!("Switched to visualizer: {}", self.visualizer_mode.name());
+    }
+
     /// Recreate visualizer with current mode and sensitivity
     fn recreate_visualizer(&mut self) {
         self.visualizer = match self.visualizer_mode {
@@ -776,8 +874,22 @@ impl Application {
                 viz.set_color_scheme(self.color_scheme.clone());
                 Box::new(viz)
             }
+            VisualizerMode::Raycaster3D => {
+                let viz = Raycaster3DVisualizer::new();
+                Box::new(viz)
+            }
             VisualizerMode::NightNight => {
                 let viz = NightNightVisualizer::new(self.color_scheme.clone());
+                Box::new(viz)
+            }
+            VisualizerMode::Image => {
+                let mut viz = ImageChannelVisualizer::new(self.color_scheme.clone());
+                viz.set_color_scheme(self.color_scheme.clone());
+                Box::new(viz)
+            }
+            VisualizerMode::Video => {
+                let mut viz = VideoChannelVisualizer::new(self.color_scheme.clone());
+                viz.set_color_scheme(self.color_scheme.clone());
                 Box::new(viz)
             }
         };
@@ -819,6 +931,31 @@ impl Application {
         }
     }
 
+    /// Try to load a file into the current channel (Image/Video)
+    fn try_load_current_channel_path(&mut self, path: &str) -> Result<(), String> {
+        match self.visualizer_mode {
+            VisualizerMode::Image => {
+                if let Some(v) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                    .downcast_mut::<crate::visualization::ImageChannelVisualizer>()
+                {
+                    v.try_load(path)
+                } else {
+                    Err("internal visualizer type mismatch (Image)".into())
+                }
+            }
+            VisualizerMode::Video => {
+                if let Some(v) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                    .downcast_mut::<crate::visualization::VideoChannelVisualizer>()
+                {
+                    v.try_load(path)
+                } else {
+                    Err("internal visualizer type mismatch (Video)".into())
+                }
+            }
+            _ => Err("File input is only available in Image/Video channels".into()),
+        }
+    }
+
     /// Add UI overlay with renderer info and controls
     fn add_ui_overlay(&self, grid: &mut GridBuffer) {
         let visualizer_name = self.visualizer.name();
@@ -853,9 +990,18 @@ impl Application {
         }
         let fx_status = fx_parts.join(" ");
 
+        // Optional channel prefix (e.g., "CH 3/11: ")
+        let channel_prefix = if self.show_channel_number {
+            format!("CH {}/{}: ", self.visualizer_mode.index() + 1, VisualizerMode::count())
+        } else {
+            String::new()
+        };
+
         let info_text = if self.visualizer_mode == VisualizerMode::Oscilloscope {
-            format!(" {} | {} | {} | {} | V:mode O:color E:fx B:bloom S:scan H:phosphor []:intensity G:grid F:fill T:trigger M:mic Q:quit ",
-                visualizer_name, color_scheme_name, mic_status, fx_status)
+            format!(
+                " {}{} | {} | {} | {} | ←/→ V:chan I:num O:color E:fx B:bloom S:scan H:phosphor []:intensity G:grid F:fill T:trigger M:mic Q:quit ",
+                channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status
+            )
         } else if self.visualizer_mode == VisualizerMode::Spectrum {
             let map_name = match self.spectrum_mapping { SpectrumMapping::NoteBars => "NOTES", SpectrumMapping::LogBars => "LOG" };
             if matches!(self.spectrum_mapping, SpectrumMapping::NoteBars) {
@@ -864,18 +1010,22 @@ impl Application {
                     1 => ("A1-A5", 55.0, 880.0),
                     _ => ("A1-A6", 55.0, 1760.0),
                 };
-                format!(" {} | {} | {} | {} | V:mode O:color E:fx B:bloom S:scan H:phosphor []:intensity P:peaks L:labels N:map({}) R:range({}) M:mic +/-:sens Q:quit ",
-                    visualizer_name, color_scheme_name, mic_status, fx_status, map_name, range_label)
+                format!(
+                    " {}{} | {} | {} | {} | ←/→ V:chan I:num O:color E:fx B:bloom S:scan H:phosphor []:intensity P:peaks L:labels N:map({}) R:range({}) M:mic +/-:sens Q:quit ",
+                    channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status, map_name, range_label
+                )
             } else {
-                format!(" {} | {} | {} | {} | V:mode O:color E:fx B:bloom S:scan H:phosphor []:intensity P:peaks L:labels N:map({}) M:mic +/-:sens Q:quit ",
-                    visualizer_name, color_scheme_name, mic_status, fx_status, map_name)
+                format!(
+                    " {}{} | {} | {} | {} | ←/→ V:chan I:num O:color E:fx B:bloom S:scan H:phosphor []:intensity P:peaks L:labels N:map({}) M:mic +/-:sens Q:quit ",
+                    channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status, map_name
+                )
             }
         } else {
-            format!(" {} | {} | {} | {} | V:mode O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
-                visualizer_name, color_scheme_name, mic_status, fx_status)
+            format!(
+                " {}{} | {} | {} | {} | ←/→ V:chan I:num O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
+                channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status
+            )
         };
-
-
 
         // Draw info bar at the top
         let start_x = (grid.width().saturating_sub(info_text.len())) / 2;
@@ -883,6 +1033,15 @@ impl Application {
             let x = start_x + i;
             if x < grid.width() {
                 grid.set_cell(x, 0, ch);
+            }
+        }
+
+        // Secondary hint: Image/Video temporarily disabled
+        if matches!(self.visualizer_mode, VisualizerMode::Image | VisualizerMode::Video) {
+            let y = 1usize;
+            let hint = "White noise mode: image/video temporarily disabled";
+            for (i, ch) in hint.chars().enumerate() {
+                if i < grid.width() { grid.set_cell(i, y, ch); } else { break; }
             }
         }
     }
@@ -924,157 +1083,169 @@ impl Application {
                 break;
             }
 
-            // Check for keyboard input with debouncing
+            // Check for keyboard/paste input
             if event::poll(Duration::from_millis(0)).unwrap_or(false) {
-                if let Ok(Event::Key(KeyEvent { code, .. })) = event::read() {
-                    // Check if enough time has passed since last key press (debouncing)
-                    let now = Instant::now();
-                    let time_since_last_press = now.duration_since(self.last_key_press);
-
-                    // Always allow quit key without debouncing
-                    let is_quit_key = matches!(code, KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc);
-
-                    if is_quit_key || time_since_last_press.as_millis() >= self.key_debounce_ms as u128 {
-                        // Update last key press time for non-quit keys
-                        if !is_quit_key {
-                            self.last_key_press = now;
+                if let Ok(ev) = event::read() {
+                    match ev {
+                        Event::Paste(_s) => {
+                            // Image/Video inline path input temporarily disabled; ignore paste
                         }
-
-                        match code {
-                            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
-                                tracing::info!("Quit key pressed");
-                                break;
-                            }
-                            // Charset cycling disabled - all visualizers now use Braille rendering
-                            // KeyCode::Char('c') | KeyCode::Char('C') => {
-                            //     self.next_charset();
-                            // }
-                            KeyCode::Char('o') | KeyCode::Char('O') => {
-                                self.next_color_scheme();
-                            }
-                            KeyCode::Char('e') | KeyCode::Char('E') => {
-                                self.toggle_effects();
-                            }
-                            KeyCode::Char('b') | KeyCode::Char('B') => {
-                                self.toggle_effect("Bloom");
-                            }
-                            KeyCode::Char('s') | KeyCode::Char('S') => {
-                                self.toggle_effect("Scanline");
-                            }
-                            KeyCode::Char('h') | KeyCode::Char('H') => {
-                                self.toggle_effect("Phosphor");
-                            }
-                            KeyCode::Char('[') | KeyCode::Char('{') => {
-                                self.decrease_effect_intensity();
-                            }
-                            KeyCode::Char(']') | KeyCode::Char('}') => {
-                                self.increase_effect_intensity();
-                            }
-                            KeyCode::Char('m') | KeyCode::Char('M') => {
-                                self.toggle_microphone();
-                            }
-                            KeyCode::Char('v') | KeyCode::Char('V') => {
-                                self.next_visualizer_mode();
-                            }
-                            KeyCode::Char('+') | KeyCode::Char('=') => {
-                                self.increase_sensitivity();
-                            }
-                            KeyCode::Char('-') | KeyCode::Char('_') => {
-                                self.decrease_sensitivity();
-                            }
-                            KeyCode::Char('1') => self.set_sensitivity_preset(1),
-                            KeyCode::Char('2') => self.set_sensitivity_preset(2),
-                            KeyCode::Char('3') => self.set_sensitivity_preset(3),
-                            KeyCode::Char('4') => self.set_sensitivity_preset(4),
-                            KeyCode::Char('5') => self.set_sensitivity_preset(5),
-                            KeyCode::Char('6') => self.set_sensitivity_preset(6),
-                            KeyCode::Char('7') => self.set_sensitivity_preset(7),
-                            KeyCode::Char('8') => self.set_sensitivity_preset(8),
-                            KeyCode::Char('9') => self.set_sensitivity_preset(9),
-                            KeyCode::Char('g') | KeyCode::Char('G') => {
-                                // Toggle grid (Oscilloscope only for now)
-                                if self.visualizer_mode == VisualizerMode::Oscilloscope {
-                                    self.osc_show_grid = !self.osc_show_grid;
-                                    self.recreate_visualizer();
-                                    tracing::info!("Toggled oscilloscope grid: {}", self.osc_show_grid);
+                        Event::Key(KeyEvent { code, .. }) => {
+                            // When file prompt is active, handle editing without debounce
+                            if self.file_prompt_active {
+                                match code {
+                                    KeyCode::Esc => {
+                                        self.file_prompt_active = false;
+                                        self.file_prompt_buffer.clear();
+                                        self.file_prompt_error = None;
+                                        self.paste_suppress_deadline = None;
+                                    }
+                                    KeyCode::Enter => {
+                                        let candidate_owned = self.file_prompt_buffer.clone();
+                                        let path = candidate_owned.trim().trim_matches('"').to_string();
+                                        if path.is_empty() {
+                                            self.file_prompt_error = Some("Empty path".to_string());
+                                        } else {
+                                            match self.try_load_current_channel_path(&path) {
+                                                Ok(_) => {
+                                                    self.file_prompt_active = false;
+                                                    self.file_prompt_error = None;
+                                                    self.paste_suppress_deadline = None;
+                                                }
+                                                Err(err) => {
+                                                    self.file_prompt_error = Some(err);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    KeyCode::Backspace => {
+                                        self.file_prompt_buffer.pop();
+                                    }
+                                    KeyCode::Char(c) => {
+                                        // Avoid duplicating paste content from terminals that also emit Char events
+                                        if let Some(deadline) = self.paste_suppress_deadline {
+                                            if Instant::now() <= deadline { /* skip */ } else { self.file_prompt_buffer.push(c); }
+                                        } else {
+                                            self.file_prompt_buffer.push(c);
+                                        }
+                                    }
+                                    _ => {}
                                 }
-                                // XY Oscilloscope: Grid is always on by default, can be toggled via config
-                            }
-                            KeyCode::Char('f') | KeyCode::Char('F') => {
-                                // Toggle fill mode (Oscilloscope only)
-                                if self.visualizer_mode == VisualizerMode::Oscilloscope {
-                                    self.osc_waveform_mode = match self.osc_waveform_mode {
-                                        WaveformMode::Line => WaveformMode::Filled,
-                                        WaveformMode::Filled => WaveformMode::LineAndFill,
-                                        WaveformMode::LineAndFill => WaveformMode::Line,
-                                    };
-                                    self.recreate_visualizer();
-                                    tracing::info!("Toggled oscilloscope fill mode");
+                                // Skip normal key handling when in prompt
+                            } else {
+                                // Normal key handling with debounce
+                                let now = Instant::now();
+                                let time_since_last_press = now.duration_since(self.last_key_press);
+                                let is_quit_key = matches!(code, KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc);
+                                if is_quit_key || time_since_last_press.as_millis() >= self.key_debounce_ms as u128 {
+                                    if !is_quit_key { self.last_key_press = now; }
+                                    match code {
+                                        KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
+                                            tracing::info!("Quit key pressed");
+                                            break;
+                                        }
+                                        // Enter: no-op (image/video inline path input disabled temporarily)
+                                        KeyCode::Enter => { }
+                                        KeyCode::Char('o') | KeyCode::Char('O') => { self.next_color_scheme(); }
+                                        KeyCode::Char('e') | KeyCode::Char('E') => { self.toggle_effects(); }
+                                        KeyCode::Char('b') | KeyCode::Char('B') => { self.toggle_effect("Bloom"); }
+                                        KeyCode::Char('s') | KeyCode::Char('S') => { self.toggle_effect("Scanline"); }
+                                        KeyCode::Char('h') | KeyCode::Char('H') => { self.toggle_effect("Phosphor"); }
+                                        KeyCode::Char('[') | KeyCode::Char('{') => { self.decrease_effect_intensity(); }
+                                        KeyCode::Char(']') | KeyCode::Char('}') => { self.increase_effect_intensity(); }
+                                        KeyCode::Char('m') | KeyCode::Char('M') => { self.toggle_microphone(); }
+                                        KeyCode::Right => { self.next_visualizer_mode(); }
+                                        KeyCode::Left => { self.prev_visualizer_mode(); }
+                                        KeyCode::Char('v') | KeyCode::Char('V') => { self.next_visualizer_mode(); }
+                                        KeyCode::Char('i') | KeyCode::Char('I') => { self.show_channel_number = !self.show_channel_number; }
+                                        KeyCode::Char('+') | KeyCode::Char('=') => { self.increase_sensitivity(); }
+                                        KeyCode::Char('-') | KeyCode::Char('_') => { self.decrease_sensitivity(); }
+                                        KeyCode::Char('1') => self.set_sensitivity_preset(1),
+                                        KeyCode::Char('2') => self.set_sensitivity_preset(2),
+                                        KeyCode::Char('3') => self.set_sensitivity_preset(3),
+                                        KeyCode::Char('4') => self.set_sensitivity_preset(4),
+                                        KeyCode::Char('5') => self.set_sensitivity_preset(5),
+                                        KeyCode::Char('6') => self.set_sensitivity_preset(6),
+                                        KeyCode::Char('7') => self.set_sensitivity_preset(7),
+                                        KeyCode::Char('8') => self.set_sensitivity_preset(8),
+                                        KeyCode::Char('9') => self.set_sensitivity_preset(9),
+                                        KeyCode::Char('g') | KeyCode::Char('G') => {
+                                            if self.visualizer_mode == VisualizerMode::Oscilloscope {
+                                                self.osc_show_grid = !self.osc_show_grid;
+                                                self.recreate_visualizer();
+                                                tracing::info!("Toggled oscilloscope grid: {}", self.osc_show_grid);
+                                            }
+                                        }
+                                        KeyCode::Char('f') | KeyCode::Char('F') => {
+                                            if self.visualizer_mode == VisualizerMode::Oscilloscope {
+                                                self.osc_waveform_mode = match self.osc_waveform_mode {
+                                                    WaveformMode::Line => WaveformMode::Filled,
+                                                    WaveformMode::Filled => WaveformMode::LineAndFill,
+                                                    WaveformMode::LineAndFill => WaveformMode::Line,
+                                                };
+                                                self.recreate_visualizer();
+                                                tracing::info!("Toggled oscilloscope fill mode");
+                                            }
+                                        }
+                                        KeyCode::Char('l') | KeyCode::Char('L') => {
+                                            if self.visualizer_mode == VisualizerMode::Spectrum {
+                                                self.show_labels = !self.show_labels;
+                                                self.recreate_visualizer();
+                                                tracing::info!("Labels toggled: {}", if self.show_labels { "ON" } else { "OFF" });
+                                            }
+                                        }
+                                        KeyCode::Char('p') | KeyCode::Char('P') => {
+                                            if self.visualizer_mode == VisualizerMode::Spectrum {
+                                                self.spectrum_peak_hold = !self.spectrum_peak_hold;
+                                                self.recreate_visualizer();
+                                                tracing::info!("Peak hold toggled: {}", if self.spectrum_peak_hold { "ON" } else { "OFF" });
+                                            }
+                                        }
+                                        KeyCode::Char('n') | KeyCode::Char('N') => {
+                                            if self.visualizer_mode == VisualizerMode::Spectrum {
+                                                self.spectrum_mapping = match self.spectrum_mapping {
+                                                    SpectrumMapping::NoteBars => SpectrumMapping::LogBars,
+                                                    SpectrumMapping::LogBars => SpectrumMapping::NoteBars,
+                                                };
+                                                self.recreate_visualizer();
+                                                let name = match self.spectrum_mapping { SpectrumMapping::NoteBars => "NOTES", SpectrumMapping::LogBars => "LOG" };
+                                                tracing::info!("Spectrum mapping toggled: {}", name);
+                                            }
+                                        }
+                                        KeyCode::Char('t') | KeyCode::Char('T') => {
+                                            if self.visualizer_mode == VisualizerMode::Oscilloscope {
+                                                self.osc_trigger_slope = match self.osc_trigger_slope {
+                                                    TriggerSlope::Positive => TriggerSlope::Negative,
+                                                    TriggerSlope::Negative => TriggerSlope::Both,
+                                                    TriggerSlope::Both => TriggerSlope::Positive,
+                                                };
+                                                self.recreate_visualizer();
+                                                tracing::info!("Toggled oscilloscope trigger mode");
+                                            }
+                                        }
+                                        KeyCode::Char('r') | KeyCode::Char('R') => {
+                                            if self.visualizer_mode == VisualizerMode::Spectrum && matches!(self.spectrum_mapping, SpectrumMapping::NoteBars) {
+                                                self.spectrum_range_preset_index = (self.spectrum_range_preset_index + 1) % 3;
+                                                self.recreate_visualizer();
+                                                let (label, _min, _max) = match self.spectrum_range_preset_index % 3 {
+                                                    0 => ("A2-A5", 110.0, 880.0),
+                                                    1 => ("A1-A5", 55.0, 880.0),
+                                                    _ => ("A1-A6", 55.0, 1760.0),
+                                                };
+                                                tracing::info!("Spectrum note range preset: {}", label);
+                                            }
+                                        }
+                                        KeyCode::Char('z') | KeyCode::Char('Z') => {
+                                            if self.visualizer_mode == VisualizerMode::XYOscilloscope {
+                                                tracing::info!("XY Oscilloscope zoom control (use +/- for sensitivity)");
+                                            }
+                                        }
+                                        _ => {}
+                                    }
                                 }
                             }
-                            KeyCode::Char('l') | KeyCode::Char('L') => {
-                                // Toggle labels (Spectrum only)
-                                if self.visualizer_mode == VisualizerMode::Spectrum {
-                                    self.show_labels = !self.show_labels;
-                                    self.recreate_visualizer();
-                                    tracing::info!("Labels toggled: {}", if self.show_labels { "ON" } else { "OFF" });
-                                }
-                            }
-                            KeyCode::Char('p') | KeyCode::Char('P') => {
-                                // Toggle peak hold (Spectrum only)
-                                if self.visualizer_mode == VisualizerMode::Spectrum {
-                                    self.spectrum_peak_hold = !self.spectrum_peak_hold;
-                                    self.recreate_visualizer();
-                                    tracing::info!("Peak hold toggled: {}", if self.spectrum_peak_hold { "ON" } else { "OFF" });
-                                }
-                                // Note: XY Oscilloscope persistence is always enabled by default
-                            }
-                            KeyCode::Char('n') | KeyCode::Char('N') => {
-                                // Toggle spectrum mapping mode (Spectrum only)
-                                if self.visualizer_mode == VisualizerMode::Spectrum {
-                                    self.spectrum_mapping = match self.spectrum_mapping {
-                                        SpectrumMapping::NoteBars => SpectrumMapping::LogBars,
-                                        SpectrumMapping::LogBars => SpectrumMapping::NoteBars,
-                                    };
-                                    self.recreate_visualizer();
-                                    let name = match self.spectrum_mapping { SpectrumMapping::NoteBars => "NOTES", SpectrumMapping::LogBars => "LOG" };
-                                    tracing::info!("Spectrum mapping toggled: {}", name);
-                                }
-                            }
-                            KeyCode::Char('t') | KeyCode::Char('T') => {
-                                // Toggle trigger mode (Oscilloscope only)
-                                if self.visualizer_mode == VisualizerMode::Oscilloscope {
-                                    self.osc_trigger_slope = match self.osc_trigger_slope {
-                                        TriggerSlope::Positive => TriggerSlope::Negative,
-                                        TriggerSlope::Negative => TriggerSlope::Both,
-                                        TriggerSlope::Both => TriggerSlope::Positive,
-                                    };
-                                    self.recreate_visualizer();
-                                    tracing::info!("Toggled oscilloscope trigger mode");
-                                }
-                            }
-                            KeyCode::Char('r') | KeyCode::Char('R') => {
-                                // Cycle Spectrum note range presets (Spectrum+NoteBars only)
-                                if self.visualizer_mode == VisualizerMode::Spectrum && matches!(self.spectrum_mapping, SpectrumMapping::NoteBars) {
-                                    self.spectrum_range_preset_index = (self.spectrum_range_preset_index + 1) % 3;
-                                    self.recreate_visualizer();
-                                    let (label, _min, _max) = match self.spectrum_range_preset_index % 3 {
-                                        0 => ("A2-A5", 110.0, 880.0),
-                                        1 => ("A1-A5", 55.0, 880.0),
-                                        _ => ("A1-A6", 55.0, 1760.0),
-                                    };
-                                    tracing::info!("Spectrum note range preset: {}", label);
-                                }
-                                // Note: XY Oscilloscope rotation can be configured via XYOscilloscopeConfig
-                            }
-                            KeyCode::Char('z') | KeyCode::Char('Z') => {
-                                // XY Oscilloscope zoom control (future enhancement)
-                                if self.visualizer_mode == VisualizerMode::XYOscilloscope {
-                                    tracing::info!("XY Oscilloscope zoom control (use +/- for sensitivity)");
-                                }
-                            }
-                            _ => {}
                         }
+                        _ => {}
                     }
                 }
             }
