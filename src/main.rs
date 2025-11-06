@@ -408,6 +408,9 @@ struct Application {
     spectrum_peak_hold: bool,
     spectrum_mapping: SpectrumMapping,
     spectrum_range_preset_index: usize,
+    // Raycaster 3D configuration state
+    ray3d_mode: crate::visualization::ray_tracer::RenderMode,
+    ray3d_brightness_boost: f32,
     // Effect control state
     selected_effect_for_intensity: Option<String>, // Track which effect to adjust intensity for
     // UI overlays
@@ -575,6 +578,9 @@ impl Application {
             spectrum_peak_hold: true,  // Start with peaks enabled
             spectrum_mapping: SpectrumMapping::NoteBars,
             spectrum_range_preset_index: 1, // Default to A1–A5
+            // Raycaster 3D defaults
+            ray3d_mode: crate::visualization::ray_tracer::RenderMode::Wireframe,
+            ray3d_brightness_boost: 0.0,
             // Effect control defaults
             selected_effect_for_intensity: None, // No effect selected initially
             // UI overlays defaults
@@ -875,7 +881,10 @@ impl Application {
                 Box::new(viz)
             }
             VisualizerMode::Raycaster3D => {
-                let viz = Raycaster3DVisualizer::new();
+                let viz = Raycaster3DVisualizer::new_with(
+                    self.ray3d_mode,
+                    self.ray3d_brightness_boost,
+                );
                 Box::new(viz)
             }
             VisualizerMode::NightNight => {
@@ -1169,6 +1178,32 @@ impl Application {
                                         KeyCode::Char('7') => self.set_sensitivity_preset(7),
                                         KeyCode::Char('8') => self.set_sensitivity_preset(8),
                                         KeyCode::Char('9') => self.set_sensitivity_preset(9),
+                                        // Raycaster 3D specific controls
+                                        KeyCode::Char('w') | KeyCode::Char('W') => {
+                                            if self.visualizer_mode == VisualizerMode::Raycaster3D {
+                                                self.ray3d_mode = match self.ray3d_mode {
+                                                    crate::visualization::ray_tracer::RenderMode::Wireframe => crate::visualization::ray_tracer::RenderMode::Solid,
+                                                    crate::visualization::ray_tracer::RenderMode::Solid => crate::visualization::ray_tracer::RenderMode::Wireframe,
+                                                };
+                                                self.recreate_visualizer();
+                                                let mode_name = match self.ray3d_mode { crate::visualization::ray_tracer::RenderMode::Wireframe => "WIREFRAME", crate::visualization::ray_tracer::RenderMode::Solid => "SOLID" };
+                                                tracing::info!("Raycaster 3D mode toggled: {}", mode_name);
+                                            }
+                                        }
+                                        KeyCode::Up => {
+                                            if self.visualizer_mode == VisualizerMode::Raycaster3D {
+                                                self.ray3d_brightness_boost = (self.ray3d_brightness_boost + 0.05).min(0.7);
+                                                self.recreate_visualizer();
+                                                tracing::info!("Raycaster 3D brightness boost: +{:.2}", self.ray3d_brightness_boost);
+                                            }
+                                        }
+                                        KeyCode::Down => {
+                                            if self.visualizer_mode == VisualizerMode::Raycaster3D {
+                                                self.ray3d_brightness_boost = (self.ray3d_brightness_boost - 0.05).max(-0.3);
+                                                self.recreate_visualizer();
+                                                tracing::info!("Raycaster 3D brightness boost: +{:.2}", self.ray3d_brightness_boost);
+                                            }
+                                        }
                                         KeyCode::Char('g') | KeyCode::Char('G') => {
                                             if self.visualizer_mode == VisualizerMode::Oscilloscope {
                                                 self.osc_show_grid = !self.osc_show_grid;

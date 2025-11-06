@@ -8,13 +8,17 @@ pub struct Raycaster3DVisualizer {
     scene: Scene,
     camera: Camera,
     mode: RenderMode,
+    // User-controlled brightness boost (added to audio-reactive mapping)
+    brightness_boost: f32,
     // Audio-reactive light intensity (smoothed)
     light_intensity: f32,
     smoothing: f32,
 }
 
 impl Raycaster3DVisualizer {
-    pub fn new() -> Self {
+    pub fn new() -> Self { Self::new_with(RenderMode::Wireframe, 0.0) }
+
+    pub fn new_with(mode: RenderMode, brightness_boost: f32) -> Self {
         let scene = Scene::new_with_sphere_and_light();
         let camera = Camera::new(
             crate::visualization::ray_tracer::math::Vector3::new(0.0, 0.0, 0.0),
@@ -24,7 +28,8 @@ impl Raycaster3DVisualizer {
         Self {
             scene,
             camera,
-            mode: RenderMode::Wireframe, // default per VIZ-011
+            mode,
+            brightness_boost,
             light_intensity: 0.6,
             smoothing: 0.15,
         }
@@ -41,8 +46,9 @@ impl Raycaster3DVisualizer {
 
 impl Visualizer for Raycaster3DVisualizer {
     fn update(&mut self, params: &AudioParameters) {
-        // Map overall amplitude to light intensity in [0.3, 1.0]
-        let target = (0.3 + params.amplitude.clamp(0.0, 1.0) * 0.7).clamp(0.0, 1.0);
+        // Map overall amplitude to light intensity in [0.3, 1.0], then apply user boost
+        let base = 0.3 + params.amplitude.clamp(0.0, 1.0) * 0.7;
+        let target = (base + self.brightness_boost).clamp(0.0, 1.0);
         self.light_intensity = lerp(self.light_intensity, target, self.smoothing);
         self.update_lights(self.light_intensity);
     }
