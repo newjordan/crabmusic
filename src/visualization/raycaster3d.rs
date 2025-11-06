@@ -17,6 +17,7 @@ pub struct Raycaster3DVisualizer {
     // Rotation state
     rotation_y: f32,
     rotation_speed_y: f32, // radians per second
+    auto_rotate: bool,
     last_time: Instant,
 }
 
@@ -47,6 +48,7 @@ impl Raycaster3DVisualizer {
             smoothing: 0.15,
             rotation_y: 0.0,
             rotation_speed_y: 0.6,
+            auto_rotate: true,
             last_time: Instant::now(),
         }
     }
@@ -60,6 +62,16 @@ impl Raycaster3DVisualizer {
     }
 }
 
+impl Raycaster3DVisualizer {
+    pub fn set_rotation_speed_y(&mut self, speed: f32) {
+        self.rotation_speed_y = speed.max(0.0);
+    }
+    pub fn set_auto_rotate(&mut self, enable: bool) {
+        self.auto_rotate = enable;
+    }
+}
+
+
 impl Visualizer for Raycaster3DVisualizer {
     fn update(&mut self, params: &AudioParameters) {
         // Map overall amplitude to light intensity in [0.3, 1.0], then apply user boost
@@ -68,11 +80,13 @@ impl Visualizer for Raycaster3DVisualizer {
         self.light_intensity = lerp(self.light_intensity, target, self.smoothing);
         self.update_lights(self.light_intensity);
 
-        // Advance rotation using wall-clock time
+        // Advance rotation using wall-clock time (if auto-rotate)
         let now = Instant::now();
         let dt = now.duration_since(self.last_time).as_secs_f32();
         self.last_time = now;
-        self.rotation_y = (self.rotation_y + self.rotation_speed_y * dt) % (std::f32::consts::PI * 2.0);
+        if self.auto_rotate {
+            self.rotation_y = (self.rotation_y + self.rotation_speed_y * dt) % (std::f32::consts::PI * 2.0);
+        }
     }
 
     fn render(&self, grid: &mut GridBuffer) {

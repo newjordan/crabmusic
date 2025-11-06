@@ -413,6 +413,9 @@ struct Application {
     ray3d_brightness_boost: f32,
     ray3d_wire_step_rad: f32,
     ray3d_wire_tol_rad: f32,
+    ray3d_rotation_speed_y: f32,
+    ray3d_auto_rotate: bool,
+
 
     // Effect control state
     selected_effect_for_intensity: Option<String>, // Track which effect to adjust intensity for
@@ -586,6 +589,9 @@ impl Application {
                 step_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_STEP_RAD,
                 tol_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_TOL_RAD,
             },
+            ray3d_rotation_speed_y: 0.6,
+            ray3d_auto_rotate: true,
+
             ray3d_brightness_boost: 0.0,
             ray3d_wire_step_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_STEP_RAD,
             ray3d_wire_tol_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_TOL_RAD,
@@ -898,10 +904,12 @@ impl Application {
                     }
                     crate::visualization::ray_tracer::RenderMode::Solid => crate::visualization::ray_tracer::RenderMode::Solid,
                 };
-                let viz = Raycaster3DVisualizer::new_with(
+                let mut viz = Raycaster3DVisualizer::new_with(
                     mode,
                     self.ray3d_brightness_boost,
                 );
+                viz.set_rotation_speed_y(self.ray3d_rotation_speed_y);
+                viz.set_auto_rotate(self.ray3d_auto_rotate);
                 Box::new(viz)
             }
             VisualizerMode::NightNight => {
@@ -1050,9 +1058,11 @@ impl Application {
             let step_deg = self.ray3d_wire_step_rad.to_degrees();
             let tol = self.ray3d_wire_tol_rad;
             let mode_name = match self.ray3d_mode { crate::visualization::ray_tracer::RenderMode::Wireframe { .. } => "WF", crate::visualization::ray_tracer::RenderMode::Solid => "SOL" };
+            let auto_label = if self.ray3d_auto_rotate { "ON" } else { "OFF" };
+            let rot_speed = self.ray3d_rotation_speed_y;
             format!(
-                " {}{}({}) | {} | {} | {} | W:mode G/H:step({:.0}°) T/Y:thick({:.3}) Up/Down:bright ←/→ V:chan I:num O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
-                channel_prefix, visualizer_name, mode_name, color_scheme_name, mic_status, fx_status, step_deg, tol
+                " {}{}({}) | {} | {} | {} | W:mode G/H:step({:.0}°) T/Y:thick({:.3}) J/K:rot({:.1}) R:auto({}) Up/Down:bright ←/→ V:chan I:num O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
+                channel_prefix, visualizer_name, mode_name, color_scheme_name, mic_status, fx_status, step_deg, tol, rot_speed, auto_label
             )
         } else {
             format!(
@@ -1357,8 +1367,44 @@ impl Application {
                                                 );
                                             }
                                         }
+                                        KeyCode::Char('j') | KeyCode::Char('J') => {
+                                            if self.visualizer_mode == VisualizerMode::Raycaster3D {
+                                                let prev = self.ray3d_rotation_speed_y;
+                                                self.ray3d_rotation_speed_y = (self.ray3d_rotation_speed_y - 0.1).max(0.0);
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::Raycaster3DVisualizer>()
+                                                {
+                                                    viz.set_rotation_speed_y(self.ray3d_rotation_speed_y);
+                                                }
+                                                tracing::info!("Raycaster 3D rotation speed: {:.2} rad/s (was {:.2})", self.ray3d_rotation_speed_y, prev);
+                                            }
+                                        }
+                                        KeyCode::Char('k') | KeyCode::Char('K') => {
+                                            if self.visualizer_mode == VisualizerMode::Raycaster3D {
+                                                let prev = self.ray3d_rotation_speed_y;
+                                                self.ray3d_rotation_speed_y = (self.ray3d_rotation_speed_y + 0.1).min(5.0);
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::Raycaster3DVisualizer>()
+                                                {
+                                                    viz.set_rotation_speed_y(self.ray3d_rotation_speed_y);
+                                                }
+                                                tracing::info!("Raycaster 3D rotation speed: {:.2} rad/s (was {:.2})", self.ray3d_rotation_speed_y, prev);
+                                            }
+                                        }
+
                                         KeyCode::Char('r') | KeyCode::Char('R') => {
-                                            if self.visualizer_mode == VisualizerMode::Spectrum && matches!(self.spectrum_mapping, SpectrumMapping::NoteBars) {
+                                            if self.visualizer_mode == VisualizerMode::Raycaster3D {
+                                                self.ray3d_auto_rotate = !self.ray3d_auto_rotate;
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::Raycaster3DVisualizer>()
+                                                {
+                                                    viz.set_auto_rotate(self.ray3d_auto_rotate);
+                                                }
+                                                tracing::info!(
+                                                    "Raycaster 3D auto-rotate: {}",
+                                                    if self.ray3d_auto_rotate { "ON" } else { "OFF" }
+                                                );
+                                            } else if self.visualizer_mode == VisualizerMode::Spectrum && matches!(self.spectrum_mapping, SpectrumMapping::NoteBars) {
                                                 self.spectrum_range_preset_index = (self.spectrum_range_preset_index + 1) % 3;
                                                 self.recreate_visualizer();
                                                 let (label, _min, _max) = match self.spectrum_range_preset_index % 3 {
