@@ -63,6 +63,14 @@ Made with love by Frosty40. Build bridges not bombs.
   <img src="public/panther_test.gif" alt="Panther Animation Test" width="60%">
 </p>
 
+### 3D OBJ Viewer (Wireframe & Solid)
+
+<p align="center">
+  <img src="public/examples/sphere_io.png" alt="Wireframe Sphere (hidden-line removal)" width="30%">
+  <img src="public/examples/snake_head_obj.png" alt="Snake Head OBJ (wireframe)" width="30%">
+  <img src="public/examples/sphere.png" alt="Solid Sphere (simple shading)" width="30%">
+</p>
+
 ## 🚀 Quick Start
 
 ### Installation
