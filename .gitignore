@@ -15,3 +15,9 @@ Cargo.lock
 .DS_Store
 Thumbs.db
 \n# Local test target\n/target-test/
+
+
+# Private docs (local-only)
+docs/stories/
+.bmad-core/
+.claude/
