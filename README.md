@@ -57,11 +57,6 @@ Made with love by Frosty40. Build bridges not bombs.
   <img src="public/examples/small_px_snake.png" alt="Small Pixel Snake" width="45%">
 </p>
 
-### Animation Support
-
-<p align="center">
-  <img src="public/panther_test.gif" alt="Panther Animation Test" width="60%">
-</p>
 
 ### 3D OBJ Viewer (Wireframe & Solid)
 
