@@ -28,11 +28,12 @@ use rendering::TerminalRenderer;
 use visualization::{
     character_sets::{get_all_character_sets, get_character_set, CharacterSet, CharacterSetType},
     color_schemes::{ColorScheme, ColorSchemeType},
-    FlowerOfLifeConfig, FlowerOfLifeVisualizer, GridBuffer, ImageChannelVisualizer, MandalaConfig,
-    MandalaVisualizer, ObjViewerVisualizer, NightNightVisualizer, OscilloscopeConfig,
-    OscilloscopeVisualizer, Raycaster3DVisualizer, ScrollDirection, SineWaveConfig,
-    SineWaveVisualizer, SpectrogramVisualizer, SpectrumConfig, SpectrumMapping, SpectrumVisualizer,
-    TriggerSlope, VideoChannelVisualizer, Visualizer, WaveformMode, WaveformTunnelVisualizer,
+    FlowerOfLifeConfig, FlowerOfLifeVisualizer, GridBuffer, HistoryTVChannelVisualizer,
+    ImageChannelVisualizer, MandalaConfig, MandalaVisualizer, ObjViewerVisualizer,
+    NightNightVisualizer, OscilloscopeConfig, OscilloscopeVisualizer, Raycaster3DVisualizer,
+    ScrollDirection, SineWaveConfig, SineWaveVisualizer, SpectrogramVisualizer, SpectrumConfig,
+    SpectrumMapping, SpectrumVisualizer, TriggerSlope, VideoChannelVisualizer, Visualizer,
+    WaveformMode, WaveformTunnelVisualizer,
 };
 
 /// Global shutdown flag
@@ -292,6 +293,7 @@ enum VisualizerMode {
     NightNight,
     Image,
     Video,
+    HistoryTV,
 }
 
 impl VisualizerMode {
@@ -310,14 +312,15 @@ impl VisualizerMode {
             VisualizerMode::ObjViewer => VisualizerMode::NightNight,
             VisualizerMode::NightNight => VisualizerMode::Image,
             VisualizerMode::Image => VisualizerMode::Video,
-            VisualizerMode::Video => VisualizerMode::SineWave,
+            VisualizerMode::Video => VisualizerMode::HistoryTV,
+            VisualizerMode::HistoryTV => VisualizerMode::SineWave,
         }
     }
 
     /// Get the previous visualizer mode in the cycle
     fn prev(&self) -> Self {
         match self {
-            VisualizerMode::SineWave => VisualizerMode::Video,
+            VisualizerMode::SineWave => VisualizerMode::HistoryTV,
             VisualizerMode::Spectrum => VisualizerMode::SineWave,
             VisualizerMode::Oscilloscope => VisualizerMode::Spectrum,
             VisualizerMode::XYOscilloscope => VisualizerMode::Oscilloscope,
@@ -330,6 +333,7 @@ impl VisualizerMode {
             VisualizerMode::NightNight => VisualizerMode::ObjViewer,
             VisualizerMode::Image => VisualizerMode::NightNight,
             VisualizerMode::Video => VisualizerMode::Image,
+            VisualizerMode::HistoryTV => VisualizerMode::Video,
         }
     }
 
@@ -349,6 +353,7 @@ impl VisualizerMode {
             VisualizerMode::NightNight => "Night Night",
             VisualizerMode::Image => "Image Viewer",
             VisualizerMode::Video => "Video Player",
+            VisualizerMode::HistoryTV => "History TV Channel",
         }
     }
 
@@ -368,12 +373,13 @@ impl VisualizerMode {
             VisualizerMode::NightNight => 10,
             VisualizerMode::Image => 11,
             VisualizerMode::Video => 12,
+            VisualizerMode::HistoryTV => 13,
         }
     }
 
     /// Total number of channels
     fn count() -> usize {
-        13
+        14
     }
 }
 
@@ -983,6 +989,11 @@ impl Application {
                 viz.set_color_scheme(self.color_scheme.clone());
                 Box::new(viz)
             }
+            VisualizerMode::HistoryTV => {
+                let mut viz = HistoryTVChannelVisualizer::new(self.color_scheme.clone());
+                viz.set_color_scheme(self.color_scheme.clone());
+                Box::new(viz)
+            }
         };
     }
 
@@ -1349,10 +1360,30 @@ impl Application {
                                             self.toggle_microphone();
                                         }
                                         KeyCode::Right => {
-                                            self.next_visualizer_mode();
+                                            if self.visualizer_mode == VisualizerMode::HistoryTV {
+                                                // Next era in History TV mode
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::HistoryTVChannelVisualizer>()
+                                                {
+                                                    viz.next_era();
+                                                    tracing::info!("History TV: Next era");
+                                                }
+                                            } else {
+                                                self.next_visualizer_mode();
+                                            }
                                         }
                                         KeyCode::Left => {
-                                            self.prev_visualizer_mode();
+                                            if self.visualizer_mode == VisualizerMode::HistoryTV {
+                                                // Previous era in History TV mode
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::HistoryTVChannelVisualizer>()
+                                                {
+                                                    viz.previous_era();
+                                                    tracing::info!("History TV: Previous era");
+                                                }
+                                            } else {
+                                                self.prev_visualizer_mode();
+                                            }
                                         }
                                         KeyCode::Char('v') | KeyCode::Char('V') => {
                                             self.next_visualizer_mode();
@@ -1401,7 +1432,15 @@ impl Application {
                                             }
                                         }
                                         KeyCode::Up => {
-                                            if self.visualizer_mode == VisualizerMode::Raycaster3D {
+                                            if self.visualizer_mode == VisualizerMode::HistoryTV {
+                                                // Next video in current era
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::HistoryTVChannelVisualizer>()
+                                                {
+                                                    viz.next_video();
+                                                    tracing::info!("History TV: Next video");
+                                                }
+                                            } else if self.visualizer_mode == VisualizerMode::Raycaster3D {
                                                 self.ray3d_brightness_boost =
                                                     (self.ray3d_brightness_boost + 0.05).min(0.7);
                                                 self.recreate_visualizer();
@@ -1420,7 +1459,15 @@ impl Application {
                                             }
                                         }
                                         KeyCode::Down => {
-                                            if self.visualizer_mode == VisualizerMode::Raycaster3D {
+                                            if self.visualizer_mode == VisualizerMode::HistoryTV {
+                                                // Previous video in current era
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::HistoryTVChannelVisualizer>()
+                                                {
+                                                    viz.previous_video();
+                                                    tracing::info!("History TV: Previous video");
+                                                }
+                                            } else if self.visualizer_mode == VisualizerMode::Raycaster3D {
                                                 self.ray3d_brightness_boost =
                                                     (self.ray3d_brightness_boost - 0.05).max(-0.3);
                                                 self.recreate_visualizer();

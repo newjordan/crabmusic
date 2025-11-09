@@ -7,6 +7,7 @@ pub mod braille;
 pub mod character_sets;
 pub mod color_schemes;
 mod flower_of_life;
+mod history_tv_channel;
 mod image_channel;
 mod mandala;
 mod obj_viewer;
@@ -25,6 +26,7 @@ pub mod controls;
 // Re-export visualizers for external use
 pub use braille::BrailleGrid;
 pub use flower_of_life::{FlowerOfLifeConfig, FlowerOfLifeVisualizer};
+pub use history_tv_channel::HistoryTVChannelVisualizer;
 pub use image_channel::ImageChannelVisualizer;
 pub use mandala::{MandalaConfig, MandalaVisualizer};
 pub use obj_viewer::ObjViewerVisualizer;
