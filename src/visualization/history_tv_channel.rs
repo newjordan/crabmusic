@@ -624,6 +624,9 @@ pub struct HistoryTVChannelVisualizer {
     animation_phase: f32,
     last_change: Instant,
     message: String,
+    auto_play: bool,  // Auto-play mode: automatically play random videos
+    auto_play_cross_era: bool,  // Allow jumping to different eras
+    auto_play_cross_universe: bool,  // Allow jumping to different universes
 }
 
 impl HistoryTVChannelVisualizer {
@@ -639,6 +642,9 @@ impl HistoryTVChannelVisualizer {
             animation_phase: 0.0,
             last_change: Instant::now(),
             message: String::from("Multi-verse TV - Use PgUp/PgDn to switch universes"),
+            auto_play: false,
+            auto_play_cross_era: true,  // Default: can jump between eras
+            auto_play_cross_universe: false,  // Default: stay in same universe
         }
     }
 
@@ -783,6 +789,120 @@ impl HistoryTVChannelVisualizer {
         }
     }
 
+    /// Toggle auto-play mode
+    pub fn toggle_auto_play(&mut self) {
+        self.auto_play = !self.auto_play;
+        tracing::info!(
+            "History TV: Auto-play {}",
+            if self.auto_play { "ENABLED" } else { "DISABLED" }
+        );
+    }
+
+    /// Check if auto-play is enabled
+    pub fn is_auto_play(&self) -> bool {
+        self.auto_play
+    }
+
+    /// Toggle cross-era mode for auto-play
+    pub fn toggle_cross_era(&mut self) {
+        self.auto_play_cross_era = !self.auto_play_cross_era;
+        tracing::info!(
+            "History TV: Cross-era {}",
+            if self.auto_play_cross_era { "ENABLED" } else { "DISABLED" }
+        );
+    }
+
+    /// Toggle cross-universe mode for auto-play
+    pub fn toggle_cross_universe(&mut self) {
+        self.auto_play_cross_universe = !self.auto_play_cross_universe;
+        tracing::info!(
+            "History TV: Cross-universe {}",
+            if self.auto_play_cross_universe { "ENABLED" } else { "DISABLED" }
+        );
+    }
+
+    /// Select a random video for auto-play
+    /// Returns the file path of the selected video
+    pub fn select_random_video(&mut self) -> Option<String> {
+        use std::collections::hash_map::RandomState;
+        use std::hash::{BuildHasher, Hash, Hasher};
+
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let mut hasher = RandomState::new().build_hasher();
+
+        // Randomly decide if we should change universe (if allowed)
+        if self.auto_play_cross_universe {
+            seed.hash(&mut hasher);
+            let should_change_universe = (hasher.finish() % 3) == 0; // 33% chance
+            if should_change_universe {
+                // Pick random universe
+                let universe_choices = [
+                    Universe::RetroTV,
+                    Universe::SciFi,
+                    Universe::MusicVideos,
+                    Universe::NewsDocumentary,
+                    Universe::Commercials,
+                    Universe::EsotericWeird,
+                ];
+                seed.wrapping_add(1).hash(&mut hasher);
+                let universe_idx = (hasher.finish() as usize) % universe_choices.len();
+                self.current_universe = universe_choices[universe_idx];
+                self.catalog = VideoCatalog::new_for_universe(self.current_universe);
+                tracing::info!(
+                    "Auto-play: Jumped to {}",
+                    self.current_universe.display_name()
+                );
+            }
+        }
+
+        // Randomly decide if we should change era (if allowed)
+        if self.auto_play_cross_era {
+            seed.wrapping_add(2).hash(&mut hasher);
+            let should_change_era = (hasher.finish() % 2) == 0; // 50% chance
+            if should_change_era {
+                let era_choices = [
+                    Era::Fifties,
+                    Era::Sixties,
+                    Era::Seventies,
+                    Era::Eighties,
+                    Era::Nineties,
+                    Era::TwoThousands,
+                ];
+                seed.wrapping_add(3).hash(&mut hasher);
+                let era_idx = (hasher.finish() as usize) % era_choices.len();
+                self.current_era = era_choices[era_idx];
+                tracing::info!("Auto-play: Jumped to era {}", self.current_era.display_name());
+            }
+        }
+
+        // Select random video from current era
+        let videos = self.catalog.get_videos(self.current_era);
+        if videos.is_empty() {
+            return None;
+        }
+
+        seed.wrapping_add(4).hash(&mut hasher);
+        self.current_video_index = (hasher.finish() as usize) % videos.len();
+
+        self.update_message();
+        self.last_change = Instant::now();
+
+        if let Some(video) = self.get_current_video() {
+            tracing::info!(
+                "Auto-play: Selected '{}' ({}) from {} - {}",
+                video.title,
+                video.year,
+                self.current_universe.display_name(),
+                self.current_era.display_name()
+            );
+        }
+
+        self.get_current_video_path()
+    }
+
     fn draw_centered(grid: &mut GridBuffer, row: usize, text: &str) {
         if row >= grid.height() {
             return;
@@ -915,8 +1035,23 @@ impl Visualizer for HistoryTVChannelVisualizer {
         }
 
         // Draw controls at bottom
-        Self::draw_centered(grid, grid.height().saturating_sub(5), "Controls:");
-        Self::draw_centered(grid, grid.height().saturating_sub(4), "↑↓ Video | ←→ Era | PgUp/PgDn Universe");
+        Self::draw_centered(grid, grid.height().saturating_sub(6), "Controls:");
+        Self::draw_centered(grid, grid.height().saturating_sub(5), "↑↓ Video | ←→ Era | PgUp/PgDn Universe | SPACE Auto-Play");
+
+        // Show auto-play status
+        let auto_play_status = if self.auto_play {
+            let mode = if self.auto_play_cross_universe {
+                "ALL UNIVERSES"
+            } else if self.auto_play_cross_era {
+                "ALL ERAS"
+            } else {
+                "SAME ERA"
+            };
+            format!("🎲 AUTO-PLAY ON ({}) 🎲", mode)
+        } else {
+            String::from("AUTO-PLAY OFF (Press SPACE to enable)")
+        };
+        Self::draw_centered(grid, grid.height().saturating_sub(4), &auto_play_status);
 
         // Show play status
         let play_status = if self.current_video_exists() {

@@ -35,13 +35,25 @@ This feature transforms CrabMusic into a nostalgic time-traveling, dimension-hop
 
 When in the History TV Channel:
 
+**Video Playback:**
 - **ENTER**: **Play the selected video in ASCII Braille!**
-- **Page Up**: Jump to the next universe (dimension hop!)
-- **Page Down**: Jump to the previous universe
+  - With auto-play ON: Videos play continuously in a loop!
+  - With auto-play OFF: Returns to browser after video ends
+
+**Auto-Play Mode:**
+- **SPACE**: Toggle auto-play ON/OFF
+- **A**: Toggle cross-era mode (jump between 50s, 60s, 70s, etc.)
+- **U**: Toggle cross-universe mode (jump between universes)
+
+**Manual Navigation:**
 - **↑ (Up Arrow)**: Switch to the next video in the current era
 - **↓ (Down Arrow)**: Switch to the previous video in the current era
 - **→ (Right Arrow)**: Jump to the next era (e.g., 1950s → 1960s)
 - **← (Left Arrow)**: Jump to the previous era (e.g., 1960s → 1950s)
+- **Page Up**: Jump to the next universe (dimension hop!)
+- **Page Down**: Jump to the previous universe
+
+**Other:**
 - **Q**: Quit (from browser or during video playback)
 
 ### Switching to Other Channels
@@ -217,12 +229,35 @@ Potential improvements for the Multi-verse History TV:
 
 ## Video Playback
 
-### How It Works
+### Manual Mode (Default)
 
 1. **Browse** videos in the channel interface (see metadata, year, description)
 2. **Press ENTER** to play the selected video
 3. **Watch** the video render in real-time as ASCII Braille art!
-4. **Exit** video returns you to the channel browser
+4. Video ends → Returns to channel browser
+
+### Auto-Play Mode (Like a Real TV Channel!)
+
+**The magic feature that makes this feel like real TV:**
+
+1. **Press SPACE** to enable auto-play mode
+2. **Press ENTER** to start playing
+3. **Sit back and watch!** Videos play automatically one after another
+4. The system randomly selects the next video based on your settings:
+   - **SAME ERA mode** (default): Stays in current universe and era
+   - **ALL ERAS mode** (press A): Jumps randomly between eras in the same universe
+   - **ALL UNIVERSES mode** (press U): Jumps randomly across all universes and eras!
+
+**Example Auto-Play Session:**
+```
+1. Navigate to Retro TV Universe, 1950s era
+2. Press SPACE (enable auto-play)
+3. Press A (enable cross-era)
+4. Press ENTER (start playing)
+5. Watch: 1950s commercial → random jump to 1980s sitcom → 1960s newsreel → ...
+```
+
+**Press Q during playback to stop and return to browser.**
 
 ### Requirements
 

@@ -1409,24 +1409,77 @@ impl Application {
                                         }
                                         KeyCode::Enter => {
                                             if self.visualizer_mode == VisualizerMode::HistoryTV {
-                                                // Play the selected video in ASCII Braille mode
-                                                if let Some(viz) = (&*self.visualizer as &dyn std::any::Any)
-                                                    .downcast_ref::<crate::visualization::HistoryTVChannelVisualizer>()
-                                                {
-                                                    if let Some(video_path) = viz.get_current_video_path() {
-                                                        if std::path::Path::new(&video_path).exists() {
-                                                            tracing::info!("History TV: Playing video {}", video_path);
-                                                            // Exit the main loop and play video
-                                                            drop(renderer);
-                                                            if let Err(e) = crate::video::run_video_playback(&video_path) {
-                                                                tracing::error!("Video playback error: {}", e);
+                                                // Play videos in a loop if auto-play is enabled
+                                                loop {
+                                                    let should_continue = if let Some(viz) = (&*self.visualizer as &dyn std::any::Any)
+                                                        .downcast_ref::<crate::visualization::HistoryTVChannelVisualizer>()
+                                                    {
+                                                        let auto_play = viz.is_auto_play();
+                                                        if let Some(video_path) = viz.get_current_video_path() {
+                                                            if std::path::Path::new(&video_path).exists() {
+                                                                tracing::info!("History TV: Playing video {}", video_path);
+                                                                drop(renderer);
+                                                                if let Err(e) = crate::video::run_video_playback(&video_path) {
+                                                                    tracing::error!("Video playback error: {}", e);
+                                                                }
+                                                                renderer = TerminalRenderer::new()?;
+                                                                auto_play
+                                                            } else {
+                                                                tracing::warn!("History TV: Video file not found: {}", video_path);
+                                                                false
                                                             }
-                                                            // Restart renderer after video
-                                                            renderer = TerminalRenderer::new()?;
                                                         } else {
-                                                            tracing::warn!("History TV: Video file not found: {}", video_path);
+                                                            false
                                                         }
+                                                    } else {
+                                                        false
+                                                    };
+
+                                                    // If auto-play is on, select next random video and continue
+                                                    if should_continue {
+                                                        if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                            .downcast_mut::<crate::visualization::HistoryTVChannelVisualizer>()
+                                                        {
+                                                            if viz.select_random_video().is_none() {
+                                                                break; // No more videos
+                                                            }
+                                                            // Continue loop to play next video
+                                                        } else {
+                                                            break;
+                                                        }
+                                                    } else {
+                                                        break; // Auto-play off or error, exit loop
                                                     }
+                                                }
+                                            }
+                                        }
+                                        KeyCode::Char(' ') => {
+                                            if self.visualizer_mode == VisualizerMode::HistoryTV {
+                                                // Toggle auto-play mode
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::HistoryTVChannelVisualizer>()
+                                                {
+                                                    viz.toggle_auto_play();
+                                                }
+                                            }
+                                        }
+                                        KeyCode::Char('a') | KeyCode::Char('A') => {
+                                            if self.visualizer_mode == VisualizerMode::HistoryTV {
+                                                // Toggle cross-era mode
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::HistoryTVChannelVisualizer>()
+                                                {
+                                                    viz.toggle_cross_era();
+                                                }
+                                            }
+                                        }
+                                        KeyCode::Char('u') | KeyCode::Char('U') => {
+                                            if self.visualizer_mode == VisualizerMode::HistoryTV {
+                                                // Toggle cross-universe mode
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::HistoryTVChannelVisualizer>()
+                                                {
+                                                    viz.toggle_cross_universe();
                                                 }
                                             }
                                         }
