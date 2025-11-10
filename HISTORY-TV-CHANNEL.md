@@ -1,17 +1,24 @@
-# History TV Channel Feature
+# History TV Channel Feature with Multi-verse Switcher
 
 ## Overview
 
-The **History TV Channel** is a new visualizer mode in CrabMusic that provides an interactive TV channel-like experience, allowing you to browse and "watch" videos from different historical eras (1950s through 2000s).
+The **History TV Channel** is a revolutionary visualizer mode in CrabMusic that provides an interactive TV channel-like experience with a **multi-verse dimension**! Browse and "watch" videos from different historical eras (1950s through 2000s) across **6 parallel content universes**.
 
-This feature transforms CrabMusic into a nostalgic time-traveling TV remote, where you can flip through commercials, TV shows, and iconic moments from the past 50+ years.
+This feature transforms CrabMusic into a nostalgic time-traveling, dimension-hopping TV remote, where you can flip through commercials, TV shows, sci-fi classics, music videos, news clips, and experimental content from the past 50+ years.
 
 ## Features
 
+- **6 Parallel Universes**: Jump between themed content dimensions
+  - 🎬 Retro TV Universe
+  - 🚀 Sci-Fi Universe
+  - 🎵 Music Videos Universe
+  - 📰 News & Documentary Universe
+  - 📺 Commercials Universe
+  - 👁️ Esoteric & Weird TV Universe
 - **6 Historical Eras**: Browse content from the 1950s, 1960s, 1970s, 1980s, 1990s, and 2000s
-- **Video Catalog**: Pre-configured collection of historical videos, commercials, and TV content organized by decade
-- **Intuitive Navigation**: Simple keyboard controls to switch between videos and eras
-- **Retro TV Interface**: ASCII art TV frame with era and video information displayed
+- **Multi-dimensional Catalog**: Each universe has its own curated video collection for all eras
+- **Intuitive Navigation**: Simple keyboard controls to switch between universes, videos, and eras
+- **Retro TV Interface**: ASCII art TV frame with universe, era, and video information displayed
 - **Audio-Reactive**: Visualizer responds to audio with pulsing animations
 
 ## How to Use
@@ -26,6 +33,8 @@ This feature transforms CrabMusic into a nostalgic time-traveling TV remote, whe
 
 When in the History TV Channel:
 
+- **Page Up**: Jump to the next universe (dimension hop!)
+- **Page Down**: Jump to the previous universe
 - **↑ (Up Arrow)**: Switch to the next video in the current era
 - **↓ (Down Arrow)**: Switch to the previous video in the current era
 - **→ (Right Arrow)**: Jump to the next era (e.g., 1950s → 1960s)
@@ -38,9 +47,59 @@ To switch from the History TV Channel to other visualizers:
 - Use **number keys** to jump directly to a specific channel
 - Or use the **'V' key** to cycle forward through channels
 
-## Video Catalog Structure
+## Multi-verse Content Universes
 
-The History TV Channel comes with a pre-configured catalog of videos organized by era:
+### 🎬 Retro TV Universe (Original)
+Classic television content and historical moments through the decades.
+
+### 🚀 Sci-Fi Universe
+Science fiction films, TV shows, and trailers from 1950s to 2000s.
+- 1950s: The Day the Earth Stood Still
+- 1960s: Star Trek, 2001: A Space Odyssey
+- 1970s: Star Wars, Alien
+- 1980s: Blade Runner, The Terminator
+- 1990s: The Matrix
+- 2000s: District 9
+
+### 🎵 Music Videos Universe
+Iconic music videos and performances through history.
+- 1950s: Elvis Presley - Jailhouse Rock
+- 1960s: The Beatles - A Hard Day's Night
+- 1970s: Queen - Bohemian Rhapsody
+- 1980s: Michael Jackson - Thriller, MTV Launch
+- 1990s: Nirvana - Smells Like Teen Spirit
+- 2000s: OK Go - Here It Goes Again
+
+### 📰 News & Documentary Universe
+Historical news coverage and documentary footage.
+- 1950s: Korean War newsreels
+- 1960s: Moon Landing broadcast
+- 1970s: Watergate scandal
+- 1980s: Berlin Wall falls
+- 1990s: Gulf War CNN coverage
+- 2000s: Obama victory speech
+
+### 📺 Commercials Universe
+Pure commercial content from all eras.
+- 1950s: Colgate toothpaste ads
+- 1960s: Coca-Cola commercials
+- 1970s: McDonald's Big Mac jingle
+- 1980s: Apple 1984 Super Bowl ad
+- 1990s: Budweiser "Whassup?!"
+- 2000s: Old Spice "The Man Your Man Could Smell Like"
+
+### 👁️ Esoteric & Weird TV Universe
+Experimental, avant-garde, and bizarre television content.
+- 1950s: TV test patterns and color bars
+- 1960s: The Outer Limits opening
+- 1970s: H.R. Pufnstuf psychedelic kids show
+- 1980s: Max Headroom broadcast signal intrusion
+- 1990s: Twin Peaks red room scene
+- 2000s: Adult Swim - Off the Air
+
+## Video Catalog Structure (Retro TV Universe)
+
+The original Retro TV Universe includes:
 
 ### 1950s
 - Classic TV commercials (soap advertisements)
@@ -76,11 +135,13 @@ The History TV Channel comes with a pre-configured catalog of videos organized b
 
 ### Adding Your Own Videos
 
-You can customize the video catalog by modifying the `VideoCatalog` in `src/visualization/history_tv_channel.rs`:
+You can customize the video catalog for any universe by modifying the appropriate catalog creation method in `src/visualization/history_tv_channel.rs`:
+
+#### For Retro TV Universe:
 
 ```rust
 impl VideoCatalog {
-    pub fn new() -> Self {
+    fn new_retro_tv() -> Self {
         Self {
             fifties: vec![
                 VideoEntry::new(
@@ -96,6 +157,9 @@ impl VideoCatalog {
     }
 }
 ```
+
+#### For Other Universes:
+Modify `new_sci_fi()`, `new_music_videos()`, `new_news_documentary()`, `new_commercials()`, or `new_esoteric_weird()` methods to add content to those universes.
 
 ### Video Entry Fields
 
@@ -127,23 +191,26 @@ src/
 
 ### Key Components
 
-1. **Era Enum**: Represents the 6 historical decades
-2. **VideoEntry**: Struct containing video metadata
-3. **VideoCatalog**: Organizes videos by era
-4. **HistoryTVChannelVisualizer**: Main visualizer implementation
+1. **Universe Enum**: Represents the 6 themed content universes
+2. **Era Enum**: Represents the 6 historical decades
+3. **VideoEntry**: Struct containing video metadata
+4. **VideoCatalog**: Organizes videos by era (universe-specific)
+5. **HistoryTVChannelVisualizer**: Main visualizer with multi-verse support
 
 ## Future Enhancements
 
-Potential improvements for the History TV Channel:
+Potential improvements for the Multi-verse History TV:
 
 - **Actual Video Playback**: Integration with the existing video playback system to play the videos
-- **Random Shuffle Mode**: Randomly select videos across all eras
-- **Favorites System**: Mark and quickly access favorite videos
-- **Search Functionality**: Search videos by title, year, or keywords
-- **Custom Playlists**: Create and save custom video playlists
-- **External Catalog Loading**: Load video catalogs from JSON/YAML files
+- **Cross-Universe Random Mode**: Randomly select videos across all universes and eras
+- **Universe Bookmarks**: Save favorite universe/era/video combinations
+- **Search Across Universes**: Search videos across all dimensions
+- **Custom Universe Creation**: Add your own themed universes
+- **Universe Mixing**: Combine content from multiple universes
+- **External Catalog Loading**: Load universe catalogs from JSON/YAML files
 - **YouTube Integration**: Direct YouTube API integration for streaming
 - **Thumbnail Display**: Show video thumbnails using ASCII art
+- **Time Portal Animation**: Special effects when switching universes
 
 ## Notes
 
@@ -153,7 +220,7 @@ Potential improvements for the History TV Channel:
 
 ## Credits
 
-The History TV Channel feature was designed to bring a nostalgic, TV-channel-surfing experience to CrabMusic, celebrating the rich history of television, commercials, and pop culture from the 1950s through the 2000s.
+The Multi-verse History TV Channel feature was designed to bring a nostalgic, dimension-hopping, TV-channel-surfing experience to CrabMusic, celebrating the rich history of television, sci-fi, music, news, commercials, and experimental media from the 1950s through the 2000s across parallel content universes.
 
 ## Troubleshooting
 
