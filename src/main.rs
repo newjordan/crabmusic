@@ -1385,6 +1385,28 @@ impl Application {
                                                 self.prev_visualizer_mode();
                                             }
                                         }
+                                        KeyCode::PageUp => {
+                                            if self.visualizer_mode == VisualizerMode::HistoryTV {
+                                                // Switch to next universe in History TV mode
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::HistoryTVChannelVisualizer>()
+                                                {
+                                                    viz.next_universe();
+                                                    tracing::info!("Multi-verse TV: Next universe");
+                                                }
+                                            }
+                                        }
+                                        KeyCode::PageDown => {
+                                            if self.visualizer_mode == VisualizerMode::HistoryTV {
+                                                // Switch to previous universe in History TV mode
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::HistoryTVChannelVisualizer>()
+                                                {
+                                                    viz.previous_universe();
+                                                    tracing::info!("Multi-verse TV: Previous universe");
+                                                }
+                                            }
+                                        }
                                         KeyCode::Char('v') | KeyCode::Char('V') => {
                                             self.next_visualizer_mode();
                                         }

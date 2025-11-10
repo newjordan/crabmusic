@@ -1,10 +1,72 @@
 // History TV Channel - Play videos from different historical eras (50s-2000s)
 // Navigate with Up/Down to switch between random videos from different decades
+// Multi-verse Channel Switcher - Switch between different themed content universes
 
 use crate::dsp::AudioParameters;
 use crate::visualization::color_schemes::ColorScheme;
 use crate::visualization::{GridBuffer, Visualizer};
 use std::time::{Duration, Instant};
+
+/// Represents a content universe/dimension with different themes
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Universe {
+    RetroTV,        // Classic TV shows and historical content
+    SciFi,          // Science fiction shows and movies
+    MusicVideos,    // Music videos from different eras
+    NewsDocumentary, // News clips and documentaries
+    Commercials,    // Just commercials from all eras
+    EsotericWeird,  // Strange, avant-garde, experimental content
+}
+
+impl Universe {
+    /// Get the display name for this universe
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Universe::RetroTV => "Retro TV Universe",
+            Universe::SciFi => "Sci-Fi Universe",
+            Universe::MusicVideos => "Music Video Universe",
+            Universe::NewsDocumentary => "News & Documentary Universe",
+            Universe::Commercials => "Commercials Universe",
+            Universe::EsotericWeird => "Esoteric & Weird TV Universe",
+        }
+    }
+
+    /// Get a short name for display in compact spaces
+    pub fn short_name(&self) -> &'static str {
+        match self {
+            Universe::RetroTV => "RETRO TV",
+            Universe::SciFi => "SCI-FI",
+            Universe::MusicVideos => "MUSIC VIDEOS",
+            Universe::NewsDocumentary => "NEWS & DOCS",
+            Universe::Commercials => "COMMERCIALS",
+            Universe::EsotericWeird => "ESOTERIC",
+        }
+    }
+
+    /// Get the next universe (cycle forward)
+    pub fn next(&self) -> Self {
+        match self {
+            Universe::RetroTV => Universe::SciFi,
+            Universe::SciFi => Universe::MusicVideos,
+            Universe::MusicVideos => Universe::NewsDocumentary,
+            Universe::NewsDocumentary => Universe::Commercials,
+            Universe::Commercials => Universe::EsotericWeird,
+            Universe::EsotericWeird => Universe::RetroTV,
+        }
+    }
+
+    /// Get the previous universe (cycle backward)
+    pub fn previous(&self) -> Self {
+        match self {
+            Universe::RetroTV => Universe::EsotericWeird,
+            Universe::SciFi => Universe::RetroTV,
+            Universe::MusicVideos => Universe::SciFi,
+            Universe::NewsDocumentary => Universe::MusicVideos,
+            Universe::Commercials => Universe::NewsDocumentary,
+            Universe::EsotericWeird => Universe::Commercials,
+        }
+    }
+}
 
 /// Represents a historical era/decade
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,8 +148,20 @@ pub struct VideoCatalog {
 }
 
 impl VideoCatalog {
-    /// Create a new catalog with sample videos
-    pub fn new() -> Self {
+    /// Create a new catalog with sample videos for a specific universe
+    pub fn new_for_universe(universe: Universe) -> Self {
+        match universe {
+            Universe::RetroTV => Self::new_retro_tv(),
+            Universe::SciFi => Self::new_sci_fi(),
+            Universe::MusicVideos => Self::new_music_videos(),
+            Universe::NewsDocumentary => Self::new_news_documentary(),
+            Universe::Commercials => Self::new_commercials(),
+            Universe::EsotericWeird => Self::new_esoteric_weird(),
+        }
+    }
+
+    /// Create Retro TV universe catalog
+    fn new_retro_tv() -> Self {
         Self {
             fifties: vec![
                 VideoEntry::new(
@@ -212,6 +286,300 @@ impl VideoCatalog {
         }
     }
 
+    /// Create Sci-Fi universe catalog
+    fn new_sci_fi() -> Self {
+        Self {
+            fifties: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=scifi1",
+                    "The Day the Earth Stood Still - Trailer",
+                    1951,
+                    "Classic sci-fi film about alien visitor",
+                ),
+            ],
+            sixties: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=scifi2",
+                    "Star Trek - Original Series Opening",
+                    1966,
+                    "To boldly go where no man has gone before",
+                ),
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=scifi3",
+                    "2001: A Space Odyssey - Trailer",
+                    1968,
+                    "Kubrick's masterpiece",
+                ),
+            ],
+            seventies: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=scifi4",
+                    "Star Wars - Original Trailer",
+                    1977,
+                    "A New Hope theatrical trailer",
+                ),
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=scifi5",
+                    "Alien - Theatrical Trailer",
+                    1979,
+                    "In space, no one can hear you scream",
+                ),
+            ],
+            eighties: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=scifi6",
+                    "Blade Runner - Trailer",
+                    1982,
+                    "Ridley Scott's cyberpunk masterpiece",
+                ),
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=scifi7",
+                    "The Terminator - Trailer",
+                    1984,
+                    "I'll be back",
+                ),
+            ],
+            nineties: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=scifi8",
+                    "The Matrix - Trailer",
+                    1999,
+                    "What is the Matrix?",
+                ),
+            ],
+            two_thousands: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=scifi9",
+                    "District 9 - Trailer",
+                    2009,
+                    "You are not welcome here",
+                ),
+            ],
+        }
+    }
+
+    /// Create Music Videos universe catalog
+    fn new_music_videos() -> Self {
+        Self {
+            fifties: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=music1",
+                    "Elvis Presley - Jailhouse Rock",
+                    1957,
+                    "The King of Rock and Roll",
+                ),
+            ],
+            sixties: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=music2",
+                    "The Beatles - A Hard Day's Night",
+                    1964,
+                    "Beatlemania at its peak",
+                ),
+            ],
+            seventies: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=music3",
+                    "Queen - Bohemian Rhapsody",
+                    1975,
+                    "Is this the real life?",
+                ),
+            ],
+            eighties: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=music4",
+                    "Michael Jackson - Thriller",
+                    1983,
+                    "The most iconic music video of all time",
+                ),
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=music5",
+                    "MTV - Video Killed the Radio Star",
+                    1981,
+                    "First music video on MTV",
+                ),
+            ],
+            nineties: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=music6",
+                    "Nirvana - Smells Like Teen Spirit",
+                    1991,
+                    "Grunge revolution",
+                ),
+            ],
+            two_thousands: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=music7",
+                    "OK Go - Here It Goes Again",
+                    2006,
+                    "Viral treadmill music video",
+                ),
+            ],
+        }
+    }
+
+    /// Create News & Documentary universe catalog
+    fn new_news_documentary() -> Self {
+        Self {
+            fifties: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=news1",
+                    "1950s Newsreel - Korean War",
+                    1953,
+                    "Historical news footage",
+                ),
+            ],
+            sixties: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=news2",
+                    "Moon Landing Broadcast - 1969",
+                    1969,
+                    "One small step for man",
+                ),
+            ],
+            seventies: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=news3",
+                    "Watergate Scandal - Nixon Resigns",
+                    1974,
+                    "Historic presidential resignation",
+                ),
+            ],
+            eighties: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=news4",
+                    "Berlin Wall Falls - 1989",
+                    1989,
+                    "End of the Cold War era",
+                ),
+            ],
+            nineties: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=news5",
+                    "CNN - Gulf War Coverage",
+                    1991,
+                    "24-hour news coverage revolution",
+                ),
+            ],
+            two_thousands: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=news6",
+                    "Obama Victory Speech - 2008",
+                    2008,
+                    "Yes We Can",
+                ),
+            ],
+        }
+    }
+
+    /// Create Commercials-only universe catalog
+    fn new_commercials() -> Self {
+        Self {
+            fifties: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=comm1",
+                    "Colgate Toothpaste - 1950s Ad",
+                    1955,
+                    "Cleans your breath while it cleans your teeth",
+                ),
+            ],
+            sixties: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=comm2",
+                    "Coca-Cola - Things Go Better with Coke",
+                    1963,
+                    "Classic Coke jingle",
+                ),
+            ],
+            seventies: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=comm3",
+                    "McDonald's - Big Mac Jingle",
+                    1975,
+                    "Two all-beef patties, special sauce...",
+                ),
+            ],
+            eighties: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=comm4",
+                    "Apple - 1984 Super Bowl Ad",
+                    1984,
+                    "Why 1984 won't be like 1984",
+                ),
+            ],
+            nineties: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=comm5",
+                    "Budweiser - Whassup?!",
+                    1999,
+                    "Iconic beer commercial",
+                ),
+            ],
+            two_thousands: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=comm6",
+                    "Old Spice - The Man Your Man Could Smell Like",
+                    2010,
+                    "Viral commercial phenomenon",
+                ),
+            ],
+        }
+    }
+
+    /// Create Esoteric & Weird TV universe catalog
+    fn new_esoteric_weird() -> Self {
+        Self {
+            fifties: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=weird1",
+                    "Test Pattern - TV Static Era",
+                    1955,
+                    "Late night TV test patterns and color bars",
+                ),
+            ],
+            sixties: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=weird2",
+                    "The Outer Limits - Opening Sequence",
+                    1963,
+                    "Do not attempt to adjust your television set",
+                ),
+            ],
+            seventies: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=weird3",
+                    "H.R. Pufnstuf - Psychedelic Kids Show",
+                    1970,
+                    "Trippy children's television",
+                ),
+            ],
+            eighties: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=weird4",
+                    "Max Headroom Broadcast Signal Intrusion",
+                    1987,
+                    "Mysterious pirate TV broadcast",
+                ),
+            ],
+            nineties: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=weird5",
+                    "Twin Peaks - Red Room Scene",
+                    1990,
+                    "David Lynch's surreal masterpiece",
+                ),
+            ],
+            two_thousands: vec![
+                VideoEntry::new(
+                    "https://www.youtube.com/watch?v=weird6",
+                    "Adult Swim - Off the Air",
+                    2011,
+                    "Experimental late night programming",
+                ),
+            ],
+        }
+    }
+
     /// Get videos for a specific era
     pub fn get_videos(&self, era: Era) -> &Vec<VideoEntry> {
         match era {
@@ -239,13 +607,14 @@ impl VideoCatalog {
 
 impl Default for VideoCatalog {
     fn default() -> Self {
-        Self::new()
+        Self::new_for_universe(Universe::RetroTV)
     }
 }
 
-/// History TV Channel Visualizer
+/// History TV Channel Visualizer with Multi-verse Support
 pub struct HistoryTVChannelVisualizer {
     color_scheme: ColorScheme,
+    current_universe: Universe,
     catalog: VideoCatalog,
     current_era: Era,
     current_video_index: usize,
@@ -257,15 +626,17 @@ pub struct HistoryTVChannelVisualizer {
 
 impl HistoryTVChannelVisualizer {
     pub fn new(color_scheme: ColorScheme) -> Self {
+        let universe = Universe::RetroTV;
         Self {
             color_scheme,
-            catalog: VideoCatalog::new(),
+            current_universe: universe,
+            catalog: VideoCatalog::new_for_universe(universe),
             current_era: Era::Fifties,
             current_video_index: 0,
             pulse: 0.0,
             animation_phase: 0.0,
             last_change: Instant::now(),
-            message: String::from("History TV Channel - Use Up/Down to change videos"),
+            message: String::from("Multi-verse TV - Use PgUp/PgDn to switch universes"),
         }
     }
 
@@ -319,6 +690,34 @@ impl HistoryTVChannelVisualizer {
         self.random_video_in_era();
         self.last_change = Instant::now();
         tracing::info!("History TV: Changed to era {}", self.current_era.display_name());
+    }
+
+    /// Switch to the next universe
+    pub fn next_universe(&mut self) {
+        self.current_universe = self.current_universe.next();
+        self.catalog = VideoCatalog::new_for_universe(self.current_universe);
+        self.current_era = Era::Fifties;
+        self.current_video_index = 0;
+        self.update_message();
+        self.last_change = Instant::now();
+        tracing::info!(
+            "Multi-verse TV: Jumped to {}",
+            self.current_universe.display_name()
+        );
+    }
+
+    /// Switch to the previous universe
+    pub fn previous_universe(&mut self) {
+        self.current_universe = self.current_universe.previous();
+        self.catalog = VideoCatalog::new_for_universe(self.current_universe);
+        self.current_era = Era::Fifties;
+        self.current_video_index = 0;
+        self.update_message();
+        self.last_change = Instant::now();
+        tracing::info!(
+            "Multi-verse TV: Jumped to {}",
+            self.current_universe.display_name()
+        );
     }
 
     /// Jump to a random video in the current era
@@ -466,13 +865,16 @@ impl Visualizer for HistoryTVChannelVisualizer {
             grid.set_cell(top_right_x, bottom_y, '╝');
         }
 
-        // Draw title
-        let title = "╣ HISTORY TV CHANNEL ╠";
-        Self::draw_centered(grid, 1, title);
+        // Draw title with universe
+        let title = format!("╣ {} ╠", self.current_universe.short_name());
+        Self::draw_centered(grid, 1, &title);
+
+        // Draw full universe name
+        Self::draw_centered(grid, 2, self.current_universe.display_name());
 
         // Draw current era
         let era_text = format!("Era: {}", self.current_era.display_name());
-        Self::draw_centered(grid, 3, &era_text);
+        Self::draw_centered(grid, 4, &era_text);
 
         // Draw current video info
         if let Some(video) = self.get_current_video() {
@@ -502,8 +904,9 @@ impl Visualizer for HistoryTVChannelVisualizer {
         }
 
         // Draw controls at bottom
-        Self::draw_centered(grid, grid.height().saturating_sub(3), "Controls:");
-        Self::draw_centered(grid, grid.height().saturating_sub(2), "↑↓ Change Video | ←→ Change Era | Q Quit");
+        Self::draw_centered(grid, grid.height().saturating_sub(4), "Controls:");
+        Self::draw_centered(grid, grid.height().saturating_sub(3), "↑↓ Video | ←→ Era | PgUp/PgDn Universe | Q Quit");
+        Self::draw_centered(grid, grid.height().saturating_sub(2), &format!("Universe: {} of 6", (self.current_universe as usize) + 1));
 
         // Draw pulsing indicator (shows audio reactivity)
         let pulse_chars = ['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷'];
@@ -521,6 +924,6 @@ impl Visualizer for HistoryTVChannelVisualizer {
     }
 
     fn name(&self) -> &str {
-        "History TV Channel"
+        "Multi-verse History TV"
     }
 }
