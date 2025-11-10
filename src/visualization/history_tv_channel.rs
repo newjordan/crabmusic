@@ -120,16 +120,16 @@ impl Era {
 /// Video metadata for the catalog
 #[derive(Debug, Clone)]
 pub struct VideoEntry {
-    pub url: String,
+    pub file_path: String,  // Local file path for video playback
     pub title: String,
     pub year: u16,
     pub description: String,
 }
 
 impl VideoEntry {
-    pub fn new(url: &str, title: &str, year: u16, description: &str) -> Self {
+    pub fn new(file_path: &str, title: &str, year: u16, description: &str) -> Self {
         Self {
-            url: url.to_string(),
+            file_path: file_path.to_string(),
             title: title.to_string(),
             year,
             description: description.to_string(),
@@ -161,23 +161,25 @@ impl VideoCatalog {
     }
 
     /// Create Retro TV universe catalog
+    /// NOTE: Replace these paths with your own video files!
+    /// Example: "/path/to/videos/1950s/soap_commercial.mp4"
     fn new_retro_tv() -> Self {
         Self {
             fifties: vec![
                 VideoEntry::new(
-                    "https://www.youtube.com/watch?v=dQw4w9WgXcQ", // Placeholder
+                    "videos/retro/1950s/soap_commercial.mp4",
                     "1950s TV Commercial - Soap Advertisement",
                     1955,
                     "Classic soap commercial from the golden age of television",
                 ),
                 VideoEntry::new(
-                    "https://www.youtube.com/watch?v=example2",
+                    "videos/retro/1950s/i_love_lucy.mp4",
                     "I Love Lucy - Classic Episode Excerpt",
                     1952,
                     "Iconic sitcom from the 1950s",
                 ),
                 VideoEntry::new(
-                    "https://www.youtube.com/watch?v=example3",
+                    "videos/retro/1950s/space_race_newsreel.mp4",
                     "1950s Newsreel - Space Race Begins",
                     1957,
                     "Historical newsreel footage",
@@ -755,10 +757,10 @@ impl HistoryTVChannelVisualizer {
         }
     }
 
-    /// Get the current video URL (for future video playback integration)
-    pub fn get_current_video_url(&self) -> Option<String> {
+    /// Get the current video file path for playback
+    pub fn get_current_video_path(&self) -> Option<String> {
         let videos = self.catalog.get_videos(self.current_era);
-        videos.get(self.current_video_index).map(|v| v.url.clone())
+        videos.get(self.current_video_index).map(|v| v.file_path.clone())
     }
 
     /// Get the current video metadata
@@ -770,6 +772,15 @@ impl HistoryTVChannelVisualizer {
     /// Add a new video to the catalog
     pub fn add_video(&mut self, era: Era, video: VideoEntry) {
         self.catalog.get_videos_mut(era).push(video);
+    }
+
+    /// Check if current video file exists
+    pub fn current_video_exists(&self) -> bool {
+        if let Some(path) = self.get_current_video_path() {
+            std::path::Path::new(&path).exists()
+        } else {
+            false
+        }
     }
 
     fn draw_centered(grid: &mut GridBuffer, row: usize, text: &str) {
@@ -904,8 +915,16 @@ impl Visualizer for HistoryTVChannelVisualizer {
         }
 
         // Draw controls at bottom
-        Self::draw_centered(grid, grid.height().saturating_sub(4), "Controls:");
-        Self::draw_centered(grid, grid.height().saturating_sub(3), "↑↓ Video | ←→ Era | PgUp/PgDn Universe | Q Quit");
+        Self::draw_centered(grid, grid.height().saturating_sub(5), "Controls:");
+        Self::draw_centered(grid, grid.height().saturating_sub(4), "↑↓ Video | ←→ Era | PgUp/PgDn Universe");
+
+        // Show play status
+        let play_status = if self.current_video_exists() {
+            "ENTER Play Video (ASCII Braille) | Q Quit"
+        } else {
+            "File not found - Add videos to play! | Q Quit"
+        };
+        Self::draw_centered(grid, grid.height().saturating_sub(3), play_status);
         Self::draw_centered(grid, grid.height().saturating_sub(2), &format!("Universe: {} of 6", (self.current_universe as usize) + 1));
 
         // Draw pulsing indicator (shows audio reactivity)
@@ -917,10 +936,15 @@ impl Visualizer for HistoryTVChannelVisualizer {
             grid.set_cell(pulse_x, pulse_y, pulse_chars[pulse_idx]);
         }
 
-        // Note: Actual video playback would require integration with video player
-        // For now, this shows the interface and catalog navigation
-        let status = "Note: Video playback requires --video flag + file paths";
-        Self::draw_centered(grid, grid.height().saturating_sub(1), status);
+        // Show file path at bottom
+        if let Some(path) = self.get_current_video_path() {
+            let path_display = if path.len() > grid.width().saturating_sub(10) {
+                format!("...{}", &path[path.len().saturating_sub(grid.width() - 13)..])
+            } else {
+                path
+            };
+            Self::draw_centered(grid, grid.height().saturating_sub(1), &format!("File: {}", path_display));
+        }
     }
 
     fn name(&self) -> &str {

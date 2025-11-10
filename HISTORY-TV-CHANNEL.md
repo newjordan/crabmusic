@@ -1,13 +1,14 @@
-# History TV Channel Feature with Multi-verse Switcher
+# History TV Channel - Real ASCII Video Player with Multi-verse
 
 ## Overview
 
-The **History TV Channel** is a revolutionary visualizer mode in CrabMusic that provides an interactive TV channel-like experience with a **multi-verse dimension**! Browse and "watch" videos from different historical eras (1950s through 2000s) across **6 parallel content universes**.
+The **History TV Channel** is a revolutionary **ACTUAL VIDEO PLAYER** that renders real videos as ASCII Braille art! Browse and **play videos** from different historical eras (1950s through 2000s) across **6 parallel content universes**.
 
-This feature transforms CrabMusic into a nostalgic time-traveling, dimension-hopping TV remote, where you can flip through commercials, TV shows, sci-fi classics, music videos, news clips, and experimental content from the past 50+ years.
+This feature transforms CrabMusic into a nostalgic time-traveling, dimension-hopping TV that **actually plays videos** in beautiful ASCII Braille rendering - flip through commercials, TV shows, sci-fi classics, music videos, news clips, and experimental content from the past 50+ years, and press ENTER to watch them in your terminal!
 
 ## Features
 
+- **REAL VIDEO PLAYBACK**: Actual video player using ASCII Braille rendering!
 - **6 Parallel Universes**: Jump between themed content dimensions
   - 🎬 Retro TV Universe
   - 🚀 Sci-Fi Universe
@@ -17,9 +18,10 @@ This feature transforms CrabMusic into a nostalgic time-traveling, dimension-hop
   - 👁️ Esoteric & Weird TV Universe
 - **6 Historical Eras**: Browse content from the 1950s, 1960s, 1970s, 1980s, 1990s, and 2000s
 - **Multi-dimensional Catalog**: Each universe has its own curated video collection for all eras
+- **Braille Art Rendering**: Videos play as beautiful ASCII art in real-time
 - **Intuitive Navigation**: Simple keyboard controls to switch between universes, videos, and eras
 - **Retro TV Interface**: ASCII art TV frame with universe, era, and video information displayed
-- **Audio-Reactive**: Visualizer responds to audio with pulsing animations
+- **FFmpeg Integration**: Supports all major video formats (MP4, AVI, MKV, etc.)
 
 ## How to Use
 
@@ -33,13 +35,14 @@ This feature transforms CrabMusic into a nostalgic time-traveling, dimension-hop
 
 When in the History TV Channel:
 
+- **ENTER**: **Play the selected video in ASCII Braille!**
 - **Page Up**: Jump to the next universe (dimension hop!)
 - **Page Down**: Jump to the previous universe
 - **↑ (Up Arrow)**: Switch to the next video in the current era
 - **↓ (Down Arrow)**: Switch to the previous video in the current era
 - **→ (Right Arrow)**: Jump to the next era (e.g., 1950s → 1960s)
 - **← (Left Arrow)**: Jump to the previous era (e.g., 1960s → 1950s)
-- **Q**: Quit the application
+- **Q**: Quit (from browser or during video playback)
 
 ### Switching to Other Channels
 
@@ -212,11 +215,36 @@ Potential improvements for the Multi-verse History TV:
 - **Thumbnail Display**: Show video thumbnails using ASCII art
 - **Time Portal Animation**: Special effects when switching universes
 
+## Video Playback
+
+### How It Works
+
+1. **Browse** videos in the channel interface (see metadata, year, description)
+2. **Press ENTER** to play the selected video
+3. **Watch** the video render in real-time as ASCII Braille art!
+4. **Exit** video returns you to the channel browser
+
+### Requirements
+
+- **Build with video feature**: `cargo build --release --features video`
+- **FFmpeg libraries** must be installed on your system
+- **Local video files** in the paths specified in the catalog
+
+### Setup Guide
+
+See **[HISTORY-TV-SETUP.md](./HISTORY-TV-SETUP.md)** for complete setup instructions, including:
+- How to organize video files
+- Where to find public domain content
+- How to update the video catalog
+- Video format optimization tips
+- Troubleshooting guide
+
 ## Notes
 
-- **Video Playback**: Currently, the History TV Channel displays video metadata and provides navigation. Actual video playback would require integration with the `--video` feature and file paths instead of URLs.
-- **YouTube URLs**: The sample URLs in the catalog are placeholders. You'll need to replace them with actual video URLs or local file paths.
-- **Performance**: The visualizer is lightweight and shouldn't impact performance, even with large video catalogs.
+- **File Paths**: The catalog uses local file paths (e.g., `videos/retro/1950s/commercial.mp4`)
+- **Placeholder Paths**: Default paths are placeholders - replace with your own video files!
+- **File Check**: UI shows whether video file exists before playing
+- **Performance**: ASCII rendering runs smoothly at 24-30 FPS for most videos
 
 ## Credits
 

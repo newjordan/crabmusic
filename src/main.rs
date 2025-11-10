@@ -1407,6 +1407,29 @@ impl Application {
                                                 }
                                             }
                                         }
+                                        KeyCode::Enter => {
+                                            if self.visualizer_mode == VisualizerMode::HistoryTV {
+                                                // Play the selected video in ASCII Braille mode
+                                                if let Some(viz) = (&*self.visualizer as &dyn std::any::Any)
+                                                    .downcast_ref::<crate::visualization::HistoryTVChannelVisualizer>()
+                                                {
+                                                    if let Some(video_path) = viz.get_current_video_path() {
+                                                        if std::path::Path::new(&video_path).exists() {
+                                                            tracing::info!("History TV: Playing video {}", video_path);
+                                                            // Exit the main loop and play video
+                                                            drop(renderer);
+                                                            if let Err(e) = crate::video::run_video_playback(&video_path) {
+                                                                tracing::error!("Video playback error: {}", e);
+                                                            }
+                                                            // Restart renderer after video
+                                                            renderer = TerminalRenderer::new()?;
+                                                        } else {
+                                                            tracing::warn!("History TV: Video file not found: {}", video_path);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
                                         KeyCode::Char('v') | KeyCode::Char('V') => {
                                             self.next_visualizer_mode();
                                         }
