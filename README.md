@@ -184,8 +184,23 @@ See `config.default.yaml` for all available options and detailed comments.
 - Rust 1.75 or later
 - System audio libraries:
   - **Linux**: ALSA development files (`libasound2-dev` on Debian/Ubuntu)
-  - **macOS**: CoreAudio (included with Xcode)
+  - **macOS**: CoreAudio (included with Xcode Command Line Tools)
   - **Windows**: WASAPI (included with Windows)
+
+#### macOS Setup
+
+On macOS, you'll need Xcode Command Line Tools installed:
+
+```bash
+xcode-select --install
+```
+
+**Audio Device Access**: macOS may prompt for microphone permissions on first run. Grant access in System Preferences → Security & Privacy → Privacy → Microphone.
+
+**Terminal Compatibility**: Best performance with:
+- iTerm2 (recommended for Unicode Braille support)
+- Terminal.app (built-in, works well)
+- Alacritty, kitty (modern GPU-accelerated terminals)
 
 ### Building
 
@@ -206,6 +221,22 @@ cargo bench
 cargo clippy
 cargo fmt
 ```
+
+### Platform-Specific Testing
+
+**Visual Test Suite** (Unix/macOS/Linux):
+```bash
+# Run the sacred geometry visual test suite
+./test-sacred-geometry.sh
+```
+
+**Visual Test Suite** (Windows):
+```powershell
+# Run the sacred geometry visual test suite
+.\test-sacred-geometry.ps1
+```
+
+Both scripts run interactive demos for manual visual verification of rendering quality.
 
 ### Project Structure
 
