@@ -28,11 +28,10 @@ use rendering::TerminalRenderer;
 use visualization::{
     character_sets::{get_all_character_sets, get_character_set, CharacterSet, CharacterSetType},
     color_schemes::{ColorScheme, ColorSchemeType},
-    FlowerOfLifeConfig, FlowerOfLifeVisualizer, GridBuffer, ImageChannelVisualizer, MandalaConfig,
-    MandalaVisualizer, ObjViewerVisualizer, NightNightVisualizer, OscilloscopeConfig,
+    GridBuffer, ImageChannelVisualizer, ObjViewerVisualizer, NightNightVisualizer, OscilloscopeConfig,
     OscilloscopeVisualizer, Raycaster3DVisualizer, ScrollDirection, SineWaveConfig,
     SineWaveVisualizer, SpectrogramVisualizer, SpectrumConfig, SpectrumMapping, SpectrumVisualizer,
-    TriggerSlope, VideoChannelVisualizer, Visualizer, WaveformMode, WaveformTunnelVisualizer,
+    TerrainLandscapeVisualizer, TriggerSlope, VideoChannelVisualizer, Visualizer, WaveformMode, WaveformTunnelVisualizer,
 };
 
 /// Global shutdown flag
@@ -300,8 +299,7 @@ enum VisualizerMode {
     XYOscilloscope,
     Spectrogram,
     WaveformTunnel,
-    FlowerOfLife,
-    Mandala,
+    TerrainLandscape,
     Raycaster3D,
     ObjViewer,
     NightNight,
@@ -318,9 +316,8 @@ impl VisualizerMode {
             VisualizerMode::Oscilloscope => VisualizerMode::XYOscilloscope,
             VisualizerMode::XYOscilloscope => VisualizerMode::Spectrogram,
             VisualizerMode::Spectrogram => VisualizerMode::WaveformTunnel,
-            VisualizerMode::WaveformTunnel => VisualizerMode::FlowerOfLife,
-            VisualizerMode::FlowerOfLife => VisualizerMode::Mandala,
-            VisualizerMode::Mandala => VisualizerMode::Raycaster3D,
+            VisualizerMode::WaveformTunnel => VisualizerMode::TerrainLandscape,
+            VisualizerMode::TerrainLandscape => VisualizerMode::Raycaster3D,
             VisualizerMode::Raycaster3D => VisualizerMode::ObjViewer,
             VisualizerMode::ObjViewer => VisualizerMode::NightNight,
             VisualizerMode::NightNight => VisualizerMode::Image,
@@ -338,9 +335,8 @@ impl VisualizerMode {
             VisualizerMode::XYOscilloscope => VisualizerMode::Oscilloscope,
             VisualizerMode::Spectrogram => VisualizerMode::XYOscilloscope,
             VisualizerMode::WaveformTunnel => VisualizerMode::Spectrogram,
-            VisualizerMode::FlowerOfLife => VisualizerMode::WaveformTunnel,
-            VisualizerMode::Mandala => VisualizerMode::FlowerOfLife,
-            VisualizerMode::Raycaster3D => VisualizerMode::Mandala,
+            VisualizerMode::TerrainLandscape => VisualizerMode::WaveformTunnel,
+            VisualizerMode::Raycaster3D => VisualizerMode::TerrainLandscape,
             VisualizerMode::ObjViewer => VisualizerMode::Raycaster3D,
             VisualizerMode::NightNight => VisualizerMode::ObjViewer,
             VisualizerMode::Image => VisualizerMode::NightNight,
@@ -357,8 +353,7 @@ impl VisualizerMode {
             VisualizerMode::XYOscilloscope => "XY Oscilloscope (Lissajous)",
             VisualizerMode::Spectrogram => "Spectrogram",
             VisualizerMode::WaveformTunnel => "Waveform Tunnel",
-            VisualizerMode::FlowerOfLife => "Flower of Life",
-            VisualizerMode::Mandala => "Mandala",
+            VisualizerMode::TerrainLandscape => "Green Grid Landscape",
             VisualizerMode::Raycaster3D => "Raycaster 3D",
             VisualizerMode::ObjViewer => "OBJ Viewer",
             VisualizerMode::NightNight => "Night Night",
@@ -376,19 +371,18 @@ impl VisualizerMode {
             VisualizerMode::XYOscilloscope => 3,
             VisualizerMode::Spectrogram => 4,
             VisualizerMode::WaveformTunnel => 5,
-            VisualizerMode::FlowerOfLife => 6,
-            VisualizerMode::Mandala => 7,
-            VisualizerMode::Raycaster3D => 8,
-            VisualizerMode::ObjViewer => 9,
-            VisualizerMode::NightNight => 10,
-            VisualizerMode::Image => 11,
-            VisualizerMode::Video => 12,
+            VisualizerMode::TerrainLandscape => 6,
+            VisualizerMode::Raycaster3D => 7,
+            VisualizerMode::ObjViewer => 8,
+            VisualizerMode::NightNight => 9,
+            VisualizerMode::Image => 10,
+            VisualizerMode::Video => 11,
         }
     }
 
     /// Total number of channels
     fn count() -> usize {
-        13
+        12
     }
 }
 
@@ -957,14 +951,8 @@ impl Application {
                 let viz = WaveformTunnelVisualizer::new(self.color_scheme.clone());
                 Box::new(viz)
             }
-            VisualizerMode::FlowerOfLife => {
-                let mut viz = FlowerOfLifeVisualizer::new(FlowerOfLifeConfig::default());
-                viz.set_color_scheme(self.color_scheme.clone());
-                Box::new(viz)
-            }
-            VisualizerMode::Mandala => {
-                let mut viz = MandalaVisualizer::new(MandalaConfig::default());
-                viz.set_color_scheme(self.color_scheme.clone());
+            VisualizerMode::TerrainLandscape => {
+                let viz = TerrainLandscapeVisualizer::new(self.color_scheme.clone());
                 Box::new(viz)
             }
             VisualizerMode::Raycaster3D => {

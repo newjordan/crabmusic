@@ -6,9 +6,7 @@
 pub mod braille;
 pub mod character_sets;
 pub mod color_schemes;
-mod flower_of_life;
 mod image_channel;
-mod mandala;
 mod obj_viewer;
 mod night_night;
 mod oscilloscope;
@@ -17,6 +15,7 @@ mod raycaster3d;
 mod sine_wave;
 pub mod spectrogram;
 mod spectrum;
+mod terrain_landscape;
 mod video_channel;
 pub mod waveform_tunnel;
 mod xy_oscilloscope;
@@ -24,9 +23,7 @@ pub mod controls;
 
 // Re-export visualizers for external use
 pub use braille::BrailleGrid;
-pub use flower_of_life::{FlowerOfLifeConfig, FlowerOfLifeVisualizer};
 pub use image_channel::ImageChannelVisualizer;
-pub use mandala::{MandalaConfig, MandalaVisualizer};
 pub use obj_viewer::ObjViewerVisualizer;
 pub use night_night::NightNightVisualizer;
 pub use oscilloscope::{OscilloscopeConfig, OscilloscopeVisualizer, TriggerSlope, WaveformMode};
@@ -34,6 +31,7 @@ pub use raycaster3d::Raycaster3DVisualizer;
 pub use sine_wave::{SineWaveConfig, SineWaveVisualizer};
 pub use spectrogram::{ScrollDirection, SpectrogramVisualizer};
 pub use spectrum::{SpectrumConfig, SpectrumMapping, SpectrumVisualizer};
+pub use terrain_landscape::TerrainLandscapeVisualizer;
 pub use video_channel::VideoChannelVisualizer;
 pub use waveform_tunnel::WaveformTunnelVisualizer;
 pub use xy_oscilloscope::{XYDisplayMode, XYOscilloscopeConfig, XYOscilloscopeVisualizer};
