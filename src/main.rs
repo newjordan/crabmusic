@@ -134,6 +134,14 @@ struct Args {
     /// Morph duration in milliseconds for A→B leg
     #[arg(long, value_name = "MS")]
     morph_duration: Option<u64>,
+
+    /// Start webcam capture mode
+    #[arg(long, short = 'w')]
+    webcam: bool,
+
+    /// Webcam device index (default: 0)
+    #[arg(long, value_name = "INDEX", default_value_t = 0)]
+    device_index: usize,
 }
 
 fn main() -> Result<()> {
@@ -176,6 +184,13 @@ fn main() -> Result<()> {
     if args.image_drop {
         tracing::info!("Starting image drag-and-drop mode");
         return img::drop_loop();
+    }
+
+    // Webcam mode takes over if requested
+    #[cfg(feature = "video")]
+    if args.webcam {
+        tracing::info!("Starting webcam capture mode (device index: {})", args.device_index);
+        return video::webcam::run_webcam_capture(args.device_index);
     }
 
     // Load configuration

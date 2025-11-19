@@ -1,0 +1,520 @@
+   Compiling proc-macro2 v1.0.103
+   Compiling quote v1.0.41
+   Compiling unicode-ident v1.0.20
+    Checking cfg-if v1.0.4
+    Checking windows-link v0.2.1
+   Compiling autocfg v1.5.0
+   Compiling windows_x86_64_msvc v0.53.1
+    Checking smallvec v1.15.1
+    Checking memchr v2.7.6
+   Compiling getrandom v0.3.4
+   Compiling libc v0.2.177
+    Checking once_cell v1.21.3
+   Compiling crossbeam-utils v0.8.21
+    Checking bytes v1.10.1
+    Checking itoa v1.0.15
+   Compiling shlex v1.3.0
+   Compiling find-msvc-tools v0.1.4
+    Checking log v0.4.28
+    Checking either v1.15.0
+   Compiling zerocopy v0.8.27
+    Checking simd-adler32 v0.3.7
+    Checking pin-project-lite v0.2.16
+    Checking stable_deref_trait v1.2.1
+    Checking futures-core v0.3.31
+   Compiling rayon-core v1.13.0
+   Compiling paste v1.0.15
+    Checking bitflags v2.10.0
+   Compiling anyhow v1.0.100
+    Checking arrayvec v0.7.6
+    Checking adler2 v2.0.1
+    Checking futures-sink v0.3.31
+   Compiling serde_core v1.0.228
+    Checking windows-sys v0.61.2
+   Compiling crc32fast v1.5.0
+    Checking bytemuck v1.24.0
+   Compiling built v0.7.7
+   Compiling thiserror v1.0.69
+   Compiling glob v0.3.3
+    Checking quick-error v2.0.1
+    Checking equivalent v1.0.2
+   Compiling serde v1.0.228
+    Checking zune-core v0.4.12
+    Checking weezl v0.1.10
+    Checking miniz_oxide v0.8.9
+    Checking new_debug_unreachable v1.0.6
+    Checking itertools v0.12.1
+    Checking bitstream-io v2.6.0
+   Compiling windows_x86_64_msvc v0.52.6
+    Checking imgref v1.12.0
+    Checking fnv v1.0.7
+   Compiling dunce v1.0.5
+    Checking rgb v0.8.52
+   Compiling noop_proc_macro v0.3.0
+    Checking zune-jpeg v0.4.21
+    Checking http v1.3.1
+   Compiling num-traits v0.2.19
+    Checking avif-serialize v0.8.6
+    Checking loop9 v0.1.5
+    Checking nom v8.0.0
+    Checking fdeflate v0.3.7
+   Compiling clang-sys v1.8.1
+   Compiling rav1e v0.7.1
+    Checking zune-inflate v0.2.54
+    Checking tracing-core v0.1.34
+    Checking windows-result v0.4.1
+    Checking windows-strings v0.5.1
+   Compiling regex-syntax v0.8.8
+    Checking byteorder-lite v0.1.0
+    Checking bit_field v0.10.3
+    Checking color_quant v1.1.0
+    Checking litemap v0.8.1
+    Checking lebe v0.5.3
+    Checking writeable v0.6.2
+   Compiling thiserror v2.0.17
+    Checking slab v0.4.11
+   Compiling minimal-lexical v0.2.1
+    Checking ryu v1.0.20
+    Checking windows-targets v0.53.5
+   Compiling libloading v0.8.9
+    Checking qoi v0.4.1
+    Checking pin-utils v0.1.0
+    Checking image-webp v0.2.4
+   Compiling jobserver v0.1.34
+    Checking gif v0.13.3
+   Compiling icu_properties_data v2.1.1
+   Compiling rustversion v1.0.22
+    Checking hashbrown v0.16.0
+   Compiling icu_normalizer_data v2.1.1
+   Compiling bindgen v0.72.1
+    Checking scopeguard v1.2.0
+    Checking windows-sys v0.60.2
+    Checking windows-targets v0.52.6
+    Checking http-body v1.0.1
+    Checking flate2 v1.1.5
+    Checking getrandom v0.2.16
+   Compiling parking_lot_core v0.9.12
+    Checking futures-task v0.3.31
+    Checking lock_api v0.4.14
+    Checking percent-encoding v2.3.2
+   Compiling rustc-hash v2.1.1
+   Compiling cc v1.2.43
+   Compiling nasm-rs v0.3.1
+   Compiling itertools v0.13.0
+   Compiling httparse v1.10.1
+    Checking crossbeam-epoch v0.9.18
+    Checking windows-link v0.1.3
+    Checking futures-io v0.3.31
+    Checking windows-threading v0.2.1
+   Compiling native-tls v0.2.14
+   Compiling num_cpus v1.17.0
+   Compiling syn v2.0.108
+   Compiling nom v7.1.3
+    Checking tower-service v0.3.3
+   Compiling winapi v0.3.9
+   Compiling vcpkg v0.2.15
+    Checking futures-util v0.3.31
+    Checking png v0.18.0
+   Compiling heck v0.5.0
+   Compiling pkg-config v0.3.32
+   Compiling simd_helpers v0.1.0
+    Checking indexmap v2.12.0
+    Checking try-lock v0.2.5
+    Checking crossbeam-deque v0.8.6
+    Checking num-integer v0.1.46
+    Checking pxfm v0.1.25
+    Checking atomic-waker v1.1.2
+    Checking windows-strings v0.4.2
+    Checking windows-result v0.3.4
+    Checking futures-channel v0.3.31
+   Compiling regex-automata v0.4.13
+    Checking static_assertions v1.1.0
+    Checking want v0.3.1
+    Checking utf8parse v0.2.2
+   Compiling serde_json v1.0.145
+    Checking once_cell_polyfill v1.70.2
+    Checking anstyle v1.0.13
+    Checking windows-registry v0.5.3
+    Checking num-bigint v0.4.6
+    Checking num-complex v0.4.6
+    Checking anstyle-parse v0.2.7
+    Checking form_urlencoded v1.2.2
+    Checking windows-result v0.1.2
+    Checking sync_wrapper v1.0.2
+   Compiling nokhwa-bindings-macos v0.2.3
+    Checking parking_lot v0.12.5
+    Checking is_terminal_polyfill v1.70.2
+   Compiling libm v0.2.15
+    Checking foldhash v0.1.5
+    Checking tower-layer v0.3.3
+    Checking utf8_iter v1.0.4
+    Checking ipnet v2.11.0
+    Checking base64 v0.22.1
+    Checking allocator-api2 v0.2.21
+    Checking colorchoice v1.0.4
+    Checking lazy_static v1.5.0
+   Compiling inflections v1.1.1
+    Checking rayon v1.11.0
+    Checking windows-core v0.54.0
+    Checking spin v0.9.8
+    Checking rand_core v0.6.4
+    Checking nanorand v0.7.0
+    Checking http-body-util v0.1.3
+    Checking instant v0.1.13
+    Checking castaway v0.2.4
+    Checking clap_lex v0.7.6
+    Checking strength_reduce v0.2.4
+   Compiling ffmpeg-next v8.0.0
+   Compiling cpal v0.15.3
+    Checking unicode-segmentation v1.12.0
+    Checking strsim v0.11.1
+    Checking zeroize v1.8.2
+    Checking iri-string v0.7.9
+    Checking unicode-width v0.1.14
+    Checking hashbrown v0.15.5
+    Checking flume v0.11.1
+    Checking microfft v0.6.0
+    Checking sharded-slab v0.1.7
+    Checking compact_str v0.7.1
+    Checking transpose v0.2.3
+    Checking primal-check v0.3.4
+    Checking float-cmp v0.10.0
+    Checking rustls-pki-types v1.13.0
+    Checking windows-sys v0.52.0
+    Checking tracing-log v0.2.0
+    Checking encoding_rs v0.8.35
+    Checking thread_local v1.1.9
+    Checking widestring v1.2.1
+    Checking socket2 v0.6.1
+    Checking anstyle-wincon v3.0.10
+    Checking anstyle-query v1.1.4
+    Checking windows v0.54.0
+   Compiling cexpr v0.6.0
+    Checking filetime v0.2.26
+    Checking urlencoding v2.1.3
+   Compiling mozjpeg-sys v2.2.3
+    Checking mime v0.3.17
+    Checking base64 v0.13.1
+    Checking num-rational v0.4.2
+    Checking unsafe-libyaml v0.2.11
+    Checking anstream v0.6.21
+    Checking byteorder v1.5.0
+    Checking cassowary v0.3.0
+    Checking dasp_sample v0.11.0
+    Checking rustfft v6.4.1
+    Checking ringbuf v0.4.8
+    Checking lru v0.12.5
+    Checking clap_builder v4.5.51
+    Checking unicode-truncate v1.1.0
+   Compiling regex v1.12.2
+    Checking spectrum-analyzer v1.7.0
+    Checking moxcms v0.7.9
+    Checking maybe-rayon v0.1.1
+    Checking crossterm_winapi v0.9.1
+    Checking matchers v0.2.0
+    Checking crossterm v0.27.0
+    Checking mio v1.1.0
+    Checking schannel v0.1.28
+    Checking winapi-util v0.1.11
+    Checking nu-ansi-term v0.50.3
+    Checking ctrlc v3.5.1
+    Checking same-file v1.0.6
+    Checking mozjpeg v0.10.13
+   Compiling synstructure v0.13.2
+    Checking walkdir v2.5.0
+    Checking tokio v1.48.0
+   Compiling zerofrom-derive v0.1.6
+   Compiling zerocopy-derive v0.8.27
+   Compiling yoke-derive v0.8.1
+   Compiling equator-macro v0.4.2
+   Compiling zerovec-derive v0.11.2
+   Compiling displaydoc v0.2.5
+   Compiling profiling-procmacros v1.0.17
+   Compiling thiserror-impl v1.0.69
+   Compiling num-derive v0.4.2
+   Compiling fax_derive v0.2.0
+   Compiling serde_derive v1.0.228
+   Compiling arg_enum_proc_macro v0.3.4
+   Compiling windows-implement v0.60.2
+   Compiling windows-interface v0.59.3
+   Compiling tracing-attributes v0.1.30
+   Compiling thiserror-impl v2.0.17
+   Compiling strum_macros v0.26.4
+   Compiling gltf-derive v1.4.1
+   Compiling clap_derive v4.5.49
+   Compiling stability v0.2.1
+    Checking profiling v1.0.17
+    Checking fax v0.2.6
+    Checking equator v0.4.2
+    Checking windows-core v0.62.2
+    Checking aligned-vec v0.6.4
+    Checking zerofrom v0.1.6
+    Checking tracing v0.1.41
+    Checking v_frame v0.3.9
+    Checking yoke v0.8.1
+    Checking windows-collections v0.3.2
+    Checking windows-numerics v0.3.1
+    Checking windows-future v0.3.2
+    Checking av1-grain v0.2.5
+    Checking tracing-subscriber v0.3.20
+    Checking strum v0.26.3
+    Checking zerovec v0.11.5
+    Checking zerotrie v0.2.3
+    Checking clap v4.5.51
+    Checking ratatui v0.26.3
+    Checking windows v0.62.2
+    Checking tinystr v0.8.2
+    Checking potential_utf v0.1.4
+    Checking icu_collections v2.1.1
+    Checking icu_locale_core v2.1.1
+    Checking tokio-util v0.7.17
+    Checking tower v0.5.2
+    Checking tokio-native-tls v0.3.1
+    Checking half v2.7.1
+    Checking ppv-lite86 v0.2.21
+    Checking h2 v0.4.12
+    Checking tower-http v0.6.6
+    Checking icu_provider v2.1.1
+    Checking serde_urlencoded v0.7.1
+    Checking notify-types v1.0.1
+    Checking gltf-json v1.4.1
+    Checking serde_yaml v0.9.34+deprecated
+    Checking tiff v0.10.3
+    Checking exr v1.73.0
+    Checking rand_chacha v0.3.1
+    Checking icu_properties v2.1.1
+    Checking icu_normalizer v2.1.1
+    Checking rand v0.8.5
+    Checking notify v7.0.0
+   Compiling ffmpeg-sys-next v8.0.1
+    Checking idna_adapter v1.2.1
+    Checking idna v1.1.0
+    Checking url v2.5.7
+    Checking hyper v1.7.0
+    Checking ravif v0.11.20
+    Checking image v0.25.8
+    Checking hyper-util v0.1.17
+    Checking hyper-tls v0.6.0
+    Checking reqwest v0.12.24
+    Checking nokhwa-core v0.1.8
+    Checking gltf v1.4.1
+    Checking nokhwa-bindings-linux v0.1.3
+    Checking nokhwa-bindings-windows v0.4.5
+    Checking wasapi v0.21.0
+    Checking nokhwa v0.10.10
+    Checking crabmusic v0.1.0 (E:\crabmusic)
+warning: unused imports: `DEFAULT_WIREFRAME_STEP_RAD` and `DEFAULT_WIREFRAME_TOL_RAD`
+ --> src\visualization\ray_tracer\renderer.rs:7:64
+  |
+7 |     is_on_wireframe_normal_rotated, rotate_vec_yaw_pitch_roll, DEFAULT_WIREFRAME_STEP_RAD, DEFAULT_WIREFRAME_TOL_RAD,
+  |                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: `crabmusic` (lib) generated 1 warning (run `cargo fix --lib -p crabmusic` to apply 1 suggestion)
+warning: unused import: `DynamicImage`
+   --> src\img\mod.rs:117:27
+    |
+117 |     use image::{imageops, DynamicImage, GenericImageView, RgbImage};
+    |                           ^^^^^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `Instant`
+  --> src\video\webcam.rs:12:27
+   |
+12 | use std::time::{Duration, Instant};
+   |                           ^^^^^^^
+
+warning: unused imports: `DEFAULT_WIREFRAME_STEP_RAD` and `DEFAULT_WIREFRAME_TOL_RAD`
+ --> src\visualization\ray_tracer\renderer.rs:7:64
+  |
+7 |     is_on_wireframe_normal_rotated, rotate_vec_yaw_pitch_roll, DEFAULT_WIREFRAME_STEP_RAD, DEFAULT_WIREFRAME_TOL_RAD,
+  |                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `braille::intensity_buffer_to_green_braille`
+  --> src\visualization\ray_tracer\mod.rs:39:9
+   |
+39 | pub use braille::intensity_buffer_to_green_braille;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `HitRecord` and `Hittable`
+  --> src\visualization\ray_tracer\mod.rs:41:20
+   |
+41 | pub use hittable::{HitRecord, Hittable};
+   |                    ^^^^^^^^^  ^^^^^^^^
+
+warning: unused import: `lighting::Light`
+  --> src\visualization\ray_tracer\mod.rs:42:9
+   |
+42 | pub use lighting::Light;
+   |         ^^^^^^^^^^^^^^^
+
+warning: unused imports: `Ray` and `Vector3`
+  --> src\visualization\ray_tracer\mod.rs:43:16
+   |
+43 | pub use math::{Ray, Vector3};
+   |                ^^^  ^^^^^^^
+
+warning: unused import: `mesh::TriangleMesh`
+  --> src\visualization\ray_tracer\mod.rs:44:9
+   |
+44 | pub use mesh::TriangleMesh;
+   |         ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `render`
+  --> src\visualization\ray_tracer\mod.rs:45:20
+   |
+45 | pub use renderer::{render, render_with_orientation, render_edges_with_orientation, WireframeRotation};
+   |                    ^^^^^^
+
+warning: unused import: `sphere::Sphere`
+  --> src\visualization\ray_tracer\mod.rs:47:9
+   |
+47 | pub use sphere::Sphere;
+   |         ^^^^^^^^^^^^^^
+
+warning: unused import: `triangle::Triangle`
+  --> src\visualization\ray_tracer\mod.rs:48:9
+   |
+48 | pub use triangle::Triangle;
+   |         ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `RenderMode::*`
+  --> src\visualization\ray_tracer\mod.rs:50:9
+   |
+50 | pub use RenderMode::*;
+   |         ^^^^^^^^^^^^^
+
+warning: unused import: `XYDisplayMode`
+  --> src\visualization\mod.rs:39:27
+   |
+39 | pub use xy_oscilloscope::{XYDisplayMode, XYOscilloscopeConfig, XYOscilloscopeVisualizer};
+   |                           ^^^^^^^^^^^^^
+
+warning: unused import: `controls::Transform3DControls`
+  --> src\visualization\mod.rs:40:9
+   |
+40 | pub use controls::Transform3DControls;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: variable `last_used_threshold` is assigned to, but never used
+  --> src\video\webcam.rs:49:13
+   |
+49 |     let mut last_used_threshold: u8 = manual_threshold;
+   |             ^^^^^^^^^^^^^^^^^^^
+   |
+   = note: consider using `_last_used_threshold` instead
+   = note: `#[warn(unused_variables)]` on by default
+
+warning: value assigned to `last_used_threshold` is never read
+  --> src\video\webcam.rs:79:9
+   |
+79 |         last_used_threshold = used_threshold;
+   |         ^^^^^^^^^^^^^^^^^^^
+   |
+   = help: maybe it is overwritten before being read?
+   = note: `#[warn(unused_assignments)]` on by default
+
+warning: value assigned to `last_used_threshold` is never read
+   --> src\video\mod.rs:139:13
+    |
+139 |     let mut last_used_threshold: u8 = manual_threshold;
+    |             ^^^^^^^^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+
+warning: methods `remove_effect` and `effect_count` are never used
+   --> src\effects\mod.rs:207:12
+    |
+149 | impl EffectPipeline {
+    | ------------------- methods in this implementation
+...
+207 |     pub fn remove_effect(&mut self, name: &str) -> Option<Box<dyn Effect>> {
+    |            ^^^^^^^^^^^^^
+...
+307 |     pub fn effect_count(&self) -> usize {
+    |            ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` on by default
+
+warning: methods `threshold`, `set_threshold`, `blur_radius`, and `set_blur_radius` are never used
+   --> src\effects\bloom.rs:139:12
+    |
+105 | impl BloomEffect {
+    | ---------------- methods in this implementation
+...
+139 |     pub fn threshold(&self) -> f32 {
+    |            ^^^^^^^^^
+...
+147 |     pub fn set_threshold(&mut self, threshold: f32) {
+    |            ^^^^^^^^^^^^^
+...
+152 |     pub fn blur_radius(&self) -> usize {
+    |            ^^^^^^^^^^^
+...
+160 |     pub fn set_blur_radius(&mut self, radius: usize) {
+    |            ^^^^^^^^^^^^^^^
+
+warning: struct `GridOverlayEffect` is never constructed
+  --> src\effects\grid_overlay.rs:34:12
+   |
+34 | pub struct GridOverlayEffect {
+   |            ^^^^^^^^^^^^^^^^^
+
+warning: associated items `new`, `spacing`, and `set_spacing` are never used
+  --> src\effects\grid_overlay.rs:56:12
+   |
+40 | impl GridOverlayEffect {
+   | ---------------------- associated items in this implementation
+...
+56 |     pub fn new(spacing: usize) -> Self {
+   |            ^^^
+...
+65 |     pub fn spacing(&self) -> usize {
+   |            ^^^^^^^
+...
+73 |     pub fn set_spacing(&mut self, spacing: usize) {
+   |            ^^^^^^^^^^^
+
+warning: struct `PassthroughEffect` is never constructed
+  --> src\effects\passthrough.rs:33:12
+   |
+33 | pub struct PassthroughEffect {
+   |            ^^^^^^^^^^^^^^^^^
+
+warning: associated function `new` is never used
+  --> src\effects\passthrough.rs:50:12
+   |
+38 | impl PassthroughEffect {
+   | ---------------------- associated function in this implementation
+...
+50 |     pub fn new() -> Self {
+   |            ^^^
+
+warning: methods `decay_rate` and `set_decay_rate` are never used
+  --> src\effects\phosphor.rs:67:12
+   |
+37 | impl PhosphorGlowEffect {
+   | ----------------------- methods in this implementation
+...
+67 |     pub fn decay_rate(&self) -> f32 {
+   |            ^^^^^^^^^^
+...
+75 |     pub fn set_decay_rate(&mut self, decay_rate: f32) {
+   |            ^^^^^^^^^^^^^^
+
+warning: methods `spacing` and `set_spacing` are never used
+  --> src\effects\scanline.rs:63:12
+   |
+35 | impl ScanlineEffect {
+   | ------------------- methods in this implementation
+...
+63 |     pub fn spacing(&self) -> usize {
+   |            ^^^^^^^
+...
+71 |     pub fn set_spacing(&mut self, spacing: usize) {
+   |            ^^^^^^^^^^^
+
+warning: `crabmusic` (bin "crabmusic") generated 25 warnings (run `cargo fix --bin "crabmusic"` to apply 14 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 25.30s

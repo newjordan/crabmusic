@@ -15,6 +15,7 @@ Made with love by Frosty40. Build bridges not bombs.
 - 💾 Save Braille art to text: writes `<image_stem>.braille.txt`
 - 📐 Smart fit: letterbox ON/OFF, live terminal resize handling, optional canvas maximize `x`
 - 🎞️ Video playback: `--video <file>` (feature‑gated)
+- 📹 Webcam capture: live camera feed with smart resolution governor for optimal FPS (feature-gated)
 - 🎵 Audio visualization: microphone and Windows WASAPI loopback capture
 - 🔊 Audio output (hear while visualizing) and device selection for input/output
 - ⚙️ Configurable via YAML with hot‑reload

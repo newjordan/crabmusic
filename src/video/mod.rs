@@ -9,6 +9,10 @@ use crate::rendering::TerminalRenderer;
 use crate::visualization::braille::BrailleGrid;
 use crate::visualization::GridBuffer;
 
+#[cfg(feature = "video")]
+pub mod webcam;
+
+
 /// Run video playback mode.
 ///
 /// When compiled without the `video` feature, this runs a short animated
@@ -71,7 +75,7 @@ pub fn run_video_playback(_path: &str) -> Result<()> {
 
 #[cfg(feature = "video")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ColorMode {
+pub enum ColorMode {
     Off,
     Grayscale,
     Full,
@@ -492,7 +496,7 @@ pub fn run_video_playback(path: &str) -> Result<()> {
 /// Map an 8-bit luminance image onto a BrailleGrid via nearest-neighbor scaling
 
 #[cfg(feature = "video")]
-fn draw_centered(grid: &mut GridBuffer, text: &str) {
+pub fn draw_centered(grid: &mut GridBuffer, text: &str) {
     let start_x = (grid.width().saturating_sub(text.len())) / 2;
     for (i, ch) in text.chars().enumerate() {
         let x = start_x + i;
@@ -578,7 +582,7 @@ pub fn blit_luma_to_braille(
 }
 
 /// Compute an Otsu threshold from an 8-bit luma slice
-fn otsu_threshold(luma: &[u8]) -> u8 {
+pub fn otsu_threshold(luma: &[u8]) -> u8 {
     let mut hist = [0u32; 256];
     for &v in luma {
         hist[v as usize] += 1;
