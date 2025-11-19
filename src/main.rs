@@ -21,7 +21,7 @@ mod visualization;
 
 #[cfg(windows)]
 use audio::WasapiLoopbackDevice;
-use audio::{AudioCaptureDevice, AudioOutputDevice, AudioRingBuffer, CpalAudioDevice};
+use audio::{AudioCaptureDevice, AudioOutputDevice, AudioRingBuffer, CpalAudioDevice, SilentAudioDevice};
 use dsp::DspProcessor;
 use effects::EffectPipeline;
 use rendering::TerminalRenderer;
@@ -695,19 +695,24 @@ impl Application {
                         );
                         std::thread::sleep(Duration::from_millis(delay));
                     } else {
+
                         tracing::error!(
                             "Failed to initialize audio capture after {} attempts: {}",
                             MAX_RETRIES,
                             e
                         );
-                        return Err(e).context(format!(
-                            "Failed to initialize audio capture after {} attempts. \
-                             Please ensure:\n\
-                             - An audio input device is connected and enabled\n\
-                             - Your audio system is running (PulseAudio/PipeWire on Linux)\n\
-                             - You have permission to access audio devices (check 'audio' group on Linux)",
-                            MAX_RETRIES
-                        ));
+                        
+                        tracing::warn!("FALLBACK: Initializing silent audio device (no audio hardware found).");
+                        tracing::warn!("The application will run in visualizer-only mode with simulated silence.");
+                        
+                        // Fallback to silent device
+                        let device = SilentAudioDevice::new(
+                            ring_buffer.clone(),
+                            44100, // Default sample rate
+                            2,     // Default channels
+                        ).context("Failed to initialize silent audio device")?;
+                        
+                        return Ok(Box::new(device));
                     }
                 }
             }

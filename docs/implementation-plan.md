@@ -92,6 +92,7 @@ This document provides a structured implementation plan for **crabmusic**, break
 6. [VIZ-006](stories/VIZ-006-spectrum-visualizer.md) - Spectrum Analyzer Visualizer ✅ Complete
 7. [VIZ-007](stories/VIZ-007-oscilloscope-visualizer.md) - Oscilloscope Visualizer ✅ Complete
 8. [VIZ-008](stories/VIZ-008-braille-video-playback.md) - Braille Video Playback (Experimental)
+9. [VIZ-013](stories/VIZ-013-green-grid-landscape.md) - Green Grid Landscape Channel ✅ Complete
 
 **Dependencies**: DSP-002 must be complete (need audio parameters)
 

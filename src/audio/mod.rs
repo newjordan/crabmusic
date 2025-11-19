@@ -7,6 +7,7 @@
 mod cpal_device;
 mod output_device;
 mod ring_buffer;
+mod silent_device;
 
 #[cfg(windows)]
 mod wasapi_loopback;
@@ -14,6 +15,7 @@ mod wasapi_loopback;
 pub use cpal_device::CpalAudioDevice;
 pub use output_device::AudioOutputDevice;
 pub use ring_buffer::AudioRingBuffer;
+pub use silent_device::SilentAudioDevice;
 
 #[cfg(windows)]
 pub use wasapi_loopback::WasapiLoopbackDevice;

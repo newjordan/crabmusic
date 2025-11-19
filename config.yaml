@@ -4,7 +4,7 @@ audio:
   buffer_capacity: 8192
   device_name: null
   output_device_name: null
-  use_loopback: true
+  use_loopback: false
 dsp:
   fft_size: 1024
   smoothing: 0.05
