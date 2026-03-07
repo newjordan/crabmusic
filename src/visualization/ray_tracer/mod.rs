@@ -36,15 +36,29 @@ impl Default for RenderMode {
     }
 }
 
+#[allow(unused_imports)]
 pub use braille::intensity_buffer_to_green_braille;
+#[allow(unused_imports)]
 pub use camera::Camera;
+#[allow(unused_imports)]
 pub use hittable::{HitRecord, Hittable};
+#[allow(unused_imports)]
 pub use lighting::Light;
+#[allow(unused_imports)]
 pub use math::{Ray, Vector3};
+#[allow(unused_imports)]
 pub use mesh::TriangleMesh;
-pub use renderer::{render, render_with_orientation, render_edges_with_orientation, WireframeRotation};
+#[allow(unused_imports)]
+pub use renderer::{
+    render, render_edges_with_orientation, render_with_orientation, WireframeRotation,
+};
+#[allow(unused_imports)]
 pub use scene::Scene;
+#[allow(unused_imports)]
 pub use sphere::Sphere;
+#[allow(unused_imports)]
 pub use triangle::Triangle;
+#[allow(unused_imports)]
 pub use wireframe::{DEFAULT_WIREFRAME_STEP_RAD, DEFAULT_WIREFRAME_TOL_RAD};
+#[allow(unused_imports)]
 pub use RenderMode::*;

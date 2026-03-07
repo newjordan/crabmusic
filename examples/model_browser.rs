@@ -52,9 +52,18 @@ fn print_usage(program: &str) {
     println!();
     println!("Usage:");
     println!("  {}                    # Interactive mode", program);
-    println!("  {} list               # List all available models", program);
-    println!("  {} view <model_id>    # Download and view a model", program);
-    println!("  {} download <model_id> # Download model without viewing", program);
+    println!(
+        "  {} list               # List all available models",
+        program
+    );
+    println!(
+        "  {} view <model_id>    # Download and view a model",
+        program
+    );
+    println!(
+        "  {} download <model_id> # Download model without viewing",
+        program
+    );
     println!("  {} cache              # Show cache information", program);
     println!("  {} clear-cache        # Clear downloaded models", program);
     println!();
@@ -138,13 +147,14 @@ fn list_models() {
         if !models.is_empty() {
             println!("┌─ {} Models ─────────────────────────────────", complexity);
             for model in models {
-                let cached = if crabmusic::visualization::ray_tracer::model_downloader::is_model_cached(
-                    &format!("{}.gltf", model.id),
-                ) {
-                    "✓"
-                } else {
-                    " "
-                };
+                let cached =
+                    if crabmusic::visualization::ray_tracer::model_downloader::is_model_cached(
+                        &format!("{}.gltf", model.id),
+                    ) {
+                        "✓"
+                    } else {
+                        " "
+                    };
                 println!(
                     "│ [{}] {:15} - {} ({} KB)",
                     cached, model.id, model.name, model.size_kb
@@ -184,7 +194,8 @@ fn view_model(model_id: &str) {
 
     // Download the model
     let filename = format!("{}.gltf", model_info.id);
-    let model_path = match download_model_with_progress(model_info.url, &filename, model_info.name) {
+    let model_path = match download_model_with_progress(model_info.url, &filename, model_info.name)
+    {
         Ok(path) => path,
         Err(e) => {
             eprintln!("✗ Failed to download model: {}", e);
@@ -207,8 +218,8 @@ fn view_model(model_id: &str) {
     // Set up camera
     let camera = Camera::new(
         Vector3::new(0.0, 0.0, 5.0), // Camera position
-        4.0,                          // Viewport width
-        3.0,                          // Viewport height
+        4.0,                         // Viewport width
+        3.0,                         // Viewport height
     );
 
     // Render in solid mode
@@ -298,4 +309,3 @@ fn clear_cache() {
         println!("Cache clear cancelled");
     }
 }
-

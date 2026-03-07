@@ -5,20 +5,92 @@
 
 use anyhow::Result;
 
+use crate::braille_quality::{self, BrailleQualitySettings};
+use crate::config::RenderingConfig;
 use crate::rendering::TerminalRenderer;
+use crate::runtime_controls::{
+    apply_quality_action, quality_control_action_from_key, ColorMode, QualityControlAction,
+};
 use crate::visualization::braille::BrailleGrid;
 use crate::visualization::GridBuffer;
 
-#[cfg(feature = "video")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedVideoInput {
+    pub playback_target: String,
+    pub display_label: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VideoPlaybackExit {
+    UserQuit,
+    EndOfStream,
+    NextChannel,
+    PreviousChannel,
+    RetuneArchive,
+}
+
+fn playback_exit_from_key(
+    code: crossterm::event::KeyCode,
+    kind: crossterm::event::KeyEventKind,
+    allow_app_navigation: bool,
+) -> Option<VideoPlaybackExit> {
+    if kind != crossterm::event::KeyEventKind::Press {
+        return None;
+    }
+
+    match code {
+        crossterm::event::KeyCode::Char('q')
+        | crossterm::event::KeyCode::Char('Q')
+        | crossterm::event::KeyCode::Esc => Some(VideoPlaybackExit::UserQuit),
+        crossterm::event::KeyCode::Right if allow_app_navigation => {
+            Some(VideoPlaybackExit::NextChannel)
+        }
+        crossterm::event::KeyCode::Left if allow_app_navigation => {
+            Some(VideoPlaybackExit::PreviousChannel)
+        }
+        crossterm::event::KeyCode::Char('u') | crossterm::event::KeyCode::Char('U')
+            if allow_app_navigation =>
+        {
+            Some(VideoPlaybackExit::RetuneArchive)
+        }
+        _ => None,
+    }
+}
+
+fn playback_navigation_hint(
+    allow_app_navigation: bool,
+    show_archive_retune_hint: bool,
+) -> &'static str {
+    if !allow_app_navigation {
+        ""
+    } else if show_archive_retune_hint {
+        " | ←/→ chan | u retune"
+    } else {
+        " | ←/→ chan"
+    }
+}
+
+#[cfg(all(feature = "video", windows))]
 pub mod webcam;
 
+#[cfg(feature = "video")]
+pub mod internet_archive;
+
+#[cfg(feature = "video")]
+pub mod youtube;
 
 /// Run video playback mode.
 ///
 /// When compiled without the `video` feature, this runs a short animated
 /// demo using the Braille grid and instructs how to enable real video.
 #[cfg(not(feature = "video"))]
-pub fn run_video_playback(_path: &str) -> Result<()> {
+#[allow(dead_code)]
+pub fn run_video_playback(path: &str) -> Result<()> {
+    run_video_playback_with_config(path, &RenderingConfig::default())
+}
+
+#[cfg(not(feature = "video"))]
+pub fn run_video_playback_with_config(_path: &str, _rendering: &RenderingConfig) -> Result<()> {
     // Friendly stub: animate a short moving pattern so users see the plumbing
     // works even when the real video feature is disabled.
     let mut renderer = TerminalRenderer::new()?;
@@ -71,19 +143,145 @@ pub fn run_video_playback(_path: &str) -> Result<()> {
     Ok(())
 }
 
+#[cfg(not(feature = "video"))]
+pub fn run_video_playback_once_with_config(
+    path: &str,
+    rendering: &RenderingConfig,
+    show_archive_retune_hint: bool,
+) -> Result<VideoPlaybackExit> {
+    let _ = show_archive_retune_hint;
+    run_video_playback_with_config(path, rendering)?;
+    Ok(VideoPlaybackExit::EndOfStream)
+}
+
+#[cfg(not(feature = "video"))]
+pub fn prepare_video_input(input: &str) -> Result<PreparedVideoInput> {
+    Ok(PreparedVideoInput {
+        playback_target: input.to_string(),
+        display_label: None,
+    })
+}
+
 /// Implementation when `video` feature is enabled.
 
 #[cfg(feature = "video")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ColorMode {
-    Off,
-    Grayscale,
-    Full,
+#[cfg(feature = "video")]
+#[derive(Debug, Clone, Copy)]
+struct VideoRenderSettings {
+    color_mode: ColorMode,
+    letterbox: bool,
+    manual_threshold: u8,
+    auto_threshold: bool,
+    temporal_blend_preset: usize,
+    temporal_hysteresis_preset: usize,
+    quality: BrailleQualitySettings,
+}
+
+#[cfg(feature = "video")]
+impl Default for VideoRenderSettings {
+    fn default() -> Self {
+        Self::from_rendering_config(&RenderingConfig::default())
+    }
+}
+
+#[cfg(feature = "video")]
+impl VideoRenderSettings {
+    fn from_rendering_config(rendering: &RenderingConfig) -> Self {
+        Self {
+            color_mode: ColorMode::Off,
+            letterbox: true,
+            manual_threshold: 128,
+            auto_threshold: false,
+            temporal_blend_preset: rendering.video_temporal_blend_preset(),
+            temporal_hysteresis_preset: rendering.video_temporal_hysteresis_preset(),
+            quality: rendering.video_braille_quality(),
+        }
+    }
+
+    fn temporal_blend(self) -> f32 {
+        braille_quality::TEMPORAL_BLEND_PRESETS[self
+            .temporal_blend_preset
+            .min(braille_quality::TEMPORAL_BLEND_PRESETS.len() - 1)]
+    }
+
+    fn cycle_temporal_blend(&mut self) {
+        self.temporal_blend_preset =
+            (self.temporal_blend_preset + 1) % braille_quality::TEMPORAL_BLEND_PRESETS.len();
+    }
+
+    fn temporal_hysteresis(self) -> u8 {
+        braille_quality::TEMPORAL_HYSTERESIS_PRESETS[self
+            .temporal_hysteresis_preset
+            .min(braille_quality::TEMPORAL_HYSTERESIS_PRESETS.len() - 1)]
+    }
+
+    fn cycle_temporal_hysteresis(&mut self) {
+        self.temporal_hysteresis_preset = (self.temporal_hysteresis_preset + 1)
+            % braille_quality::TEMPORAL_HYSTERESIS_PRESETS.len();
+    }
+
+    fn reset_quality_controls(&mut self, defaults: &Self) {
+        *self = *defaults;
+    }
+
+    fn handle_quality_action(&mut self, action: QualityControlAction, defaults: &Self) {
+        if action == QualityControlAction::Reset {
+            self.reset_quality_controls(defaults);
+        } else {
+            apply_quality_action(action, &mut self.quality, &mut self.color_mode);
+        }
+    }
 }
 
 /// Decodes frames with FFmpeg, maps to Braille, and renders to the terminal.
 #[cfg(feature = "video")]
+#[allow(dead_code)]
 pub fn run_video_playback(path: &str) -> Result<()> {
+    run_video_playback_with_config(path, &RenderingConfig::default())
+}
+
+/// Decodes frames with FFmpeg, maps to Braille, and renders to the terminal.
+#[cfg(feature = "video")]
+pub fn run_video_playback_with_config(path: &str, rendering: &RenderingConfig) -> Result<()> {
+    run_video_playback_internal(path, rendering, true, false, false).map(|_| ())
+}
+
+#[cfg(feature = "video")]
+pub fn run_video_playback_once_with_config(
+    path: &str,
+    rendering: &RenderingConfig,
+    show_archive_retune_hint: bool,
+) -> Result<VideoPlaybackExit> {
+    run_video_playback_internal(path, rendering, false, true, show_archive_retune_hint)
+}
+
+#[cfg(feature = "video")]
+pub fn prepare_video_input(input: &str) -> Result<PreparedVideoInput> {
+    if let Some(resolved) = youtube::resolve_youtube_input(input)? {
+        return Ok(PreparedVideoInput {
+            playback_target: resolved.stream_url.to_string(),
+            display_label: Some(format!(
+                "Resolved YouTube video: {} ({})",
+                resolved.title, resolved.webpage_url
+            )),
+        });
+    }
+
+    Ok(PreparedVideoInput {
+        playback_target: input.to_string(),
+        display_label: None,
+    })
+}
+
+/// Decodes frames with FFmpeg, maps to Braille, and renders to the terminal.
+#[cfg(feature = "video")]
+fn run_video_playback_internal(
+    path: &str,
+    rendering: &RenderingConfig,
+    loop_forever: bool,
+    allow_app_navigation: bool,
+    show_archive_retune_hint: bool,
+) -> Result<VideoPlaybackExit> {
     use anyhow::Context;
     use crossterm::event::{self, Event, KeyCode, KeyEventKind};
     use ffmpeg::{
@@ -117,8 +315,8 @@ pub fn run_video_playback(path: &str) -> Result<()> {
     let mut target_dot_h = braille.dot_height();
 
     // Visual controls state
-    let mut color_mode = ColorMode::Off; // Off → Grayscale → Full
-    let mut letterbox = true; // Preserve aspect ratio by default
+    let default_settings = VideoRenderSettings::from_rendering_config(rendering);
+    let mut settings = default_settings;
 
     // Effects pipeline (disabled by default; toggle with 'e')
     let mut effect_pipeline = EffectPipeline::new();
@@ -130,16 +328,12 @@ pub fn run_video_playback(path: &str) -> Result<()> {
 
     // Dummy audio params for effects (video mode has no audio input)
     let audio_params = AudioParameters::default();
-    // Threshold controls for image extraction (manual/auto)
-    let mut manual_threshold: u8 = 128;
-    let mut auto_thresh: bool = false;
-
-    // HUD visibility and last used threshold for on-screen display
+    // HUD visibility
     let mut show_hud: bool = true;
-    let mut last_used_threshold: u8 = manual_threshold;
-
     // Default: loop playback forever until the user quits
     loop {
+        let mut previous_dot_luma: Option<Vec<u8>> = None;
+        let mut previous_dot_mask: Option<Vec<u8>> = None;
         // Open input and find the best video stream
         let mut ictx = format::input(&path).with_context(|| format!("open input {}", path))?;
         let input = ictx
@@ -206,7 +400,7 @@ pub fn run_video_playback(path: &str) -> Result<()> {
                 // Resize to dot grid with optional letterboxing
                 let dst_w = target_dot_w;
                 let dst_h = target_dot_h;
-                let (fit_w, fit_h) = if letterbox {
+                let (fit_w, fit_h) = if settings.letterbox {
                     let src_aspect = src_w as f32 / src_h as f32;
                     let dst_aspect = dst_w as f32 / dst_h as f32;
                     if src_aspect > dst_aspect {
@@ -245,24 +439,50 @@ pub fn run_video_playback(path: &str) -> Result<()> {
                 let gray = image::DynamicImage::ImageRgb8(canvas.clone()).to_luma8();
 
                 // Blit to Braille dots using manual or auto (Otsu) threshold
-                braille.clear();
-                let used_threshold: u8 = if auto_thresh {
-                    otsu_threshold(gray.as_raw())
+                let dot_w = braille.dot_width();
+                let dot_h = braille.dot_height();
+                let dot_luma = braille_quality::preprocess_luma_to_dot_grid(
+                    gray.as_raw(),
+                    dst_w,
+                    dst_h,
+                    dot_w,
+                    dot_h,
+                    settings.quality,
+                );
+                let blended_dot_luma = braille_quality::blend_dot_luma_with_previous(
+                    &dot_luma,
+                    previous_dot_luma.as_deref(),
+                    settings.temporal_blend(),
+                );
+                let used_threshold: u8 = if settings.auto_threshold {
+                    otsu_threshold(&blended_dot_luma)
                 } else {
-                    manual_threshold
+                    settings.manual_threshold
                 };
-                // Remember for HUD display
-                last_used_threshold = used_threshold;
-
-                blit_luma_to_braille(gray.as_raw(), dst_w, dst_h, used_threshold, &mut braille);
+                let hysteresis_dot_luma = braille_quality::apply_temporal_hysteresis(
+                    &blended_dot_luma,
+                    previous_dot_mask.as_deref(),
+                    settings.temporal_hysteresis(),
+                );
+                braille_quality::render_dot_luma_to_braille(
+                    &hysteresis_dot_luma,
+                    dot_w,
+                    dot_h,
+                    used_threshold,
+                    settings.quality.dither_mode,
+                    &mut braille,
+                );
+                previous_dot_luma = Some(blended_dot_luma);
+                previous_dot_mask = Some(braille_quality::capture_braille_dot_mask(&braille));
 
                 // Write characters and colors according to color mode
-                let gray_bytes = gray.as_raw();
+                let toned_gray = braille_quality::apply_tone_curve(gray.as_raw(), settings.quality);
+                let gray_bytes = toned_gray.as_slice();
                 let rgb_bytes = canvas.as_raw();
                 for cy in 0..h_cells {
                     for cx in 0..w_cells {
                         let ch = braille.get_char(cx, cy);
-                        match color_mode {
+                        match settings.color_mode {
                             ColorMode::Off => {
                                 grid.set_cell(cx, cy, ch);
                             }
@@ -330,10 +550,15 @@ pub fn run_video_playback(path: &str) -> Result<()> {
                     draw_video_hud(
                         &mut grid,
                         path,
-                        last_used_threshold,
-                        auto_thresh,
-                        letterbox,
-                        color_mode,
+                        allow_app_navigation,
+                        show_archive_retune_hint,
+                        used_threshold,
+                        settings.auto_threshold,
+                        settings.letterbox,
+                        settings.color_mode,
+                        settings.quality,
+                        settings.temporal_blend(),
+                        settings.temporal_hysteresis(),
                         &effect_pipeline,
                         &last_effect,
                     );
@@ -345,20 +570,20 @@ pub fn run_video_playback(path: &str) -> Result<()> {
                 while event::poll(Duration::from_millis(0))? {
                     match event::read()? {
                         Event::Key(k) => {
+                            if let Some(exit) =
+                                playback_exit_from_key(k.code, k.kind, allow_app_navigation)
+                            {
+                                decoder.send_eof()?;
+                                renderer.cleanup()?;
+                                return Ok(exit);
+                            }
+
                             match k.code {
-                                // Quit: only on initial press
-                                KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc
-                                    if k.kind == KeyEventKind::Press =>
-                                {
-                                    decoder.send_eof()?;
-                                    renderer.cleanup()?;
-                                    return Ok(());
-                                }
                                 // Color mode cycle: only on press (avoid rapid cycling on repeat)
                                 KeyCode::Char('c') | KeyCode::Char('C')
                                     if k.kind == KeyEventKind::Press =>
                                 {
-                                    color_mode = match color_mode {
+                                    settings.color_mode = match settings.color_mode {
                                         ColorMode::Off => ColorMode::Grayscale,
                                         ColorMode::Grayscale => ColorMode::Full,
                                         ColorMode::Full => ColorMode::Off,
@@ -368,7 +593,8 @@ pub fn run_video_playback(path: &str) -> Result<()> {
                                 KeyCode::Char('l') | KeyCode::Char('L')
                                     if k.kind == KeyEventKind::Press =>
                                 {
-                                    letterbox = !letterbox;
+                                    settings.letterbox = !settings.letterbox;
+                                    previous_dot_luma = None;
                                 }
                                 // Toggle HUD (F1): only on press
                                 KeyCode::F(1) if k.kind == KeyEventKind::Press => {
@@ -438,8 +664,11 @@ pub fn run_video_playback(path: &str) -> Result<()> {
                                         KeyEventKind::Press | KeyEventKind::Repeat
                                     ) =>
                                 {
-                                    if manual_threshold < 250 {
-                                        manual_threshold = manual_threshold.saturating_add(5);
+                                    if settings.manual_threshold < 250 {
+                                        settings.manual_threshold =
+                                            settings.manual_threshold.saturating_add(5);
+                                        previous_dot_luma = None;
+                                        previous_dot_mask = None;
                                     }
                                 }
                                 KeyCode::Char('-') | KeyCode::Char('_')
@@ -448,15 +677,84 @@ pub fn run_video_playback(path: &str) -> Result<()> {
                                         KeyEventKind::Press | KeyEventKind::Repeat
                                     ) =>
                                 {
-                                    if manual_threshold > 5 {
-                                        manual_threshold = manual_threshold.saturating_sub(5);
+                                    if settings.manual_threshold > 5 {
+                                        settings.manual_threshold =
+                                            settings.manual_threshold.saturating_sub(5);
+                                        previous_dot_luma = None;
+                                        previous_dot_mask = None;
                                     }
                                 }
                                 // Auto threshold toggle: only on press
                                 KeyCode::Char('a') | KeyCode::Char('A')
                                     if k.kind == KeyEventKind::Press =>
                                 {
-                                    auto_thresh = !auto_thresh;
+                                    settings.auto_threshold = !settings.auto_threshold;
+                                    previous_dot_luma = None;
+                                    previous_dot_mask = None;
+                                }
+                                code if k.kind == KeyEventKind::Press
+                                    && quality_control_action_from_key(code).is_some() =>
+                                {
+                                    settings.handle_quality_action(
+                                        quality_control_action_from_key(code).unwrap(),
+                                        &default_settings,
+                                    );
+                                    previous_dot_luma = None;
+                                    previous_dot_mask = None;
+                                }
+                                KeyCode::Char('d') | KeyCode::Char('D')
+                                    if k.kind == KeyEventKind::Press =>
+                                {
+                                    settings.quality.cycle_dither();
+                                    previous_dot_luma = None;
+                                    previous_dot_mask = None;
+                                }
+                                KeyCode::Char('p') | KeyCode::Char('P')
+                                    if k.kind == KeyEventKind::Press =>
+                                {
+                                    settings.quality.cycle_preset();
+                                    previous_dot_luma = None;
+                                    previous_dot_mask = None;
+                                }
+                                KeyCode::Char('g') | KeyCode::Char('G')
+                                    if k.kind == KeyEventKind::Press =>
+                                {
+                                    settings.quality.cycle_gamma();
+                                    previous_dot_luma = None;
+                                    previous_dot_mask = None;
+                                }
+                                KeyCode::Char('v') | KeyCode::Char('V')
+                                    if k.kind == KeyEventKind::Press =>
+                                {
+                                    settings.quality.cycle_contrast();
+                                    previous_dot_luma = None;
+                                    previous_dot_mask = None;
+                                }
+                                KeyCode::Char('z') | KeyCode::Char('Z')
+                                    if k.kind == KeyEventKind::Press =>
+                                {
+                                    settings.quality.cycle_exposure();
+                                    previous_dot_luma = None;
+                                    previous_dot_mask = None;
+                                }
+                                KeyCode::Char('t') | KeyCode::Char('T')
+                                    if k.kind == KeyEventKind::Press =>
+                                {
+                                    settings.cycle_temporal_blend();
+                                    previous_dot_luma = None;
+                                    previous_dot_mask = None;
+                                }
+                                KeyCode::Char('y') | KeyCode::Char('Y')
+                                    if k.kind == KeyEventKind::Press =>
+                                {
+                                    settings.cycle_temporal_hysteresis();
+                                    previous_dot_luma = None;
+                                    previous_dot_mask = None;
+                                }
+                                KeyCode::Char('0') if k.kind == KeyEventKind::Press => {
+                                    settings.reset_quality_controls(&default_settings);
+                                    previous_dot_luma = None;
+                                    previous_dot_mask = None;
                                 }
                                 _ => {}
                             }
@@ -470,6 +768,8 @@ pub fn run_video_playback(path: &str) -> Result<()> {
                             target_dot_w = braille.dot_width();
 
                             target_dot_h = braille.dot_height();
+                            previous_dot_luma = None;
+                            previous_dot_mask = None;
                         }
                         _ => {}
                     }
@@ -488,6 +788,11 @@ pub fn run_video_playback(path: &str) -> Result<()> {
         decoder.send_eof()?;
         let mut frame = Video::empty();
         while decoder.receive_frame(&mut frame).is_ok() {}
+
+        if !loop_forever {
+            renderer.cleanup()?;
+            return Ok(VideoPlaybackExit::EndOfStream);
+        }
 
         // Loop repeats: reopen the input and continue playback
     }
@@ -510,10 +815,15 @@ pub fn draw_centered(grid: &mut GridBuffer, text: &str) {
 fn draw_video_hud(
     grid: &mut GridBuffer,
     path: &str,
+    allow_app_navigation: bool,
+    show_archive_retune_hint: bool,
     used_threshold: u8,
     auto_thresh: bool,
     letterbox: bool,
     color_mode: ColorMode,
+    quality: BrailleQualitySettings,
+    temporal_blend: f32,
+    temporal_hysteresis: u8,
     pipeline: &crate::effects::EffectPipeline,
     last_effect: &str,
 ) {
@@ -536,11 +846,20 @@ fn draw_video_hud(
     } else {
         "OFF".to_string()
     };
+    let navigation_hint = playback_navigation_hint(allow_app_navigation, show_archive_retune_hint);
     let status = format!(
-        "{} | +/- thr={} | a auto={} | l letterbox={} | c color={} | fx={}",
+        "{}{} | +/- thr={} | a auto={} | F1-7 quality | p {} | d {} | g {:.2} | v {:.2} | z {:.2} | t {:.2} | y {} | l letterbox={} | c color={} | fx={}",
         name,
+        navigation_hint,
         used_threshold,
         if auto_thresh { "ON" } else { "OFF" },
+        quality.preset_label(),
+        quality.dither_mode.short_name(),
+        quality.gamma(),
+        quality.contrast(),
+        quality.exposure(),
+        temporal_blend,
+        temporal_hysteresis,
         if letterbox { "ON" } else { "OFF" },
         color_str,
         eff
@@ -552,6 +871,7 @@ fn draw_video_hud(
 ///
 /// - luma: length = img_w * img_h
 /// - threshold: 0..=255; pixels >= threshold set their corresponding dot
+#[allow(dead_code)]
 pub fn blit_luma_to_braille(
     luma: &[u8],
     img_w: usize,
@@ -559,69 +879,25 @@ pub fn blit_luma_to_braille(
     threshold: u8,
     braille: &mut BrailleGrid,
 ) {
-    if img_w == 0 || img_h == 0 {
-        return;
-    }
-
-    let dot_w = braille.dot_width();
-    let dot_h = braille.dot_height();
-
-    for dy in 0..dot_h {
-        // Map dot row to source row (nearest-neighbor)
-        let sy = (dy * img_h) / dot_h;
-        let sy_off = sy * img_w;
-        for dx in 0..dot_w {
-            let sx = (dx * img_w) / dot_w;
-            let v = luma[sy_off + sx];
-
-            if v >= threshold {
-                braille.set_dot(dx, dy);
-            }
-        }
-    }
+    braille_quality::blit_luma_to_braille_with_quality(
+        luma,
+        img_w,
+        img_h,
+        threshold,
+        BrailleQualitySettings::default(),
+        braille,
+    );
 }
 
 /// Compute an Otsu threshold from an 8-bit luma slice
 pub fn otsu_threshold(luma: &[u8]) -> u8 {
-    let mut hist = [0u32; 256];
-    for &v in luma {
-        hist[v as usize] += 1;
-    }
-    let total: u32 = luma.len() as u32;
-    let mut sum_all: u64 = 0;
-    for i in 0..256 {
-        sum_all += (i as u64) * (hist[i] as u64);
-    }
-
-    let mut sum_b: u64 = 0;
-    let mut w_b: u32 = 0;
-    let mut max_var: f64 = -1.0;
-    let mut threshold: u8 = 128;
-
-    for t in 0..256 {
-        w_b += hist[t] as u32;
-        if w_b == 0 {
-            continue;
-        }
-        let w_f = total - w_b;
-        if w_f == 0 {
-            break;
-        }
-        sum_b += (t as u64) * (hist[t] as u64);
-        let m_b = sum_b as f64 / w_b as f64;
-        let m_f = (sum_all - sum_b) as f64 / w_f as f64;
-        let var_between = (w_b as f64) * (w_f as f64) * (m_b - m_f).powi(2);
-        if var_between > max_var {
-            max_var = var_between;
-            threshold = t as u8;
-        }
-    }
-    threshold
+    braille_quality::otsu_threshold(luma)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crossterm::event::{KeyCode, KeyEventKind};
 
     #[test]
     fn test_blit_luma_to_braille_full_on() {
@@ -648,5 +924,64 @@ mod tests {
         // Ensure we didn't get empty or full; smoke assertion
         assert_ne!(ch, '⠀');
         assert_ne!(ch, '⣿');
+    }
+
+    #[test]
+    fn embedded_playback_maps_navigation_keys_to_exit_actions() {
+        assert_eq!(
+            playback_exit_from_key(KeyCode::Right, KeyEventKind::Press, true),
+            Some(VideoPlaybackExit::NextChannel)
+        );
+        assert_eq!(
+            playback_exit_from_key(KeyCode::Left, KeyEventKind::Press, true),
+            Some(VideoPlaybackExit::PreviousChannel)
+        );
+        assert_eq!(
+            playback_exit_from_key(KeyCode::Char('u'), KeyEventKind::Press, true),
+            Some(VideoPlaybackExit::RetuneArchive)
+        );
+    }
+
+    #[test]
+    fn standalone_playback_ignores_app_navigation_keys() {
+        assert_eq!(
+            playback_exit_from_key(KeyCode::Right, KeyEventKind::Press, false),
+            None
+        );
+        assert_eq!(
+            playback_exit_from_key(KeyCode::Char('u'), KeyEventKind::Press, false),
+            None
+        );
+        assert_eq!(
+            playback_exit_from_key(KeyCode::Char('q'), KeyEventKind::Press, false),
+            Some(VideoPlaybackExit::UserQuit)
+        );
+    }
+
+    #[test]
+    fn playback_exit_requires_initial_key_press() {
+        assert_eq!(
+            playback_exit_from_key(KeyCode::Right, KeyEventKind::Repeat, true),
+            None
+        );
+        assert_eq!(
+            playback_exit_from_key(KeyCode::Char('q'), KeyEventKind::Release, true),
+            None
+        );
+    }
+
+    #[test]
+    fn playback_navigation_hint_shows_archive_controls_when_available() {
+        assert_eq!(
+            playback_navigation_hint(true, true),
+            " | ←/→ chan | u retune"
+        );
+        assert_eq!(playback_navigation_hint(true, false), " | ←/→ chan");
+    }
+
+    #[test]
+    fn playback_navigation_hint_is_hidden_for_standalone_playback() {
+        assert_eq!(playback_navigation_hint(false, false), "");
+        assert_eq!(playback_navigation_hint(false, true), "");
     }
 }

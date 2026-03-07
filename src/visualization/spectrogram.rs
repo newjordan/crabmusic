@@ -30,9 +30,9 @@ pub enum ScrollDirection {
 ///
 /// ```
 /// use crabmusic::visualization::spectrogram::{SpectrogramVisualizer, ScrollDirection};
-/// use crabmusic::visualization::ColorScheme;
+/// use crabmusic::visualization::color_schemes::{ColorScheme, ColorSchemeType};
 ///
-/// let color_scheme = ColorScheme::new_rainbow();
+/// let color_scheme = ColorScheme::new(ColorSchemeType::Rainbow);
 /// let visualizer = SpectrogramVisualizer::new(color_scheme, ScrollDirection::Up);
 /// ```
 pub struct SpectrogramVisualizer {
@@ -60,9 +60,9 @@ impl SpectrogramVisualizer {
     ///
     /// ```
     /// use crabmusic::visualization::spectrogram::{SpectrogramVisualizer, ScrollDirection};
-    /// use crabmusic::visualization::ColorScheme;
+    /// use crabmusic::visualization::color_schemes::{ColorScheme, ColorSchemeType};
     ///
-    /// let color_scheme = ColorScheme::new_rainbow();
+    /// let color_scheme = ColorScheme::new(ColorSchemeType::Rainbow);
     /// let visualizer = SpectrogramVisualizer::new(color_scheme, ScrollDirection::Up);
     /// ```
     pub fn new(color_scheme: ColorScheme, scroll_direction: ScrollDirection) -> Self {

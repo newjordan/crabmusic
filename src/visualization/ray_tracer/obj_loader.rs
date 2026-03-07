@@ -11,20 +11,27 @@ use std::path::Path;
 #[inline]
 fn parse_index(tok: &str, len: usize) -> Option<usize> {
     // OBJ indices are 1-based; negative indices are relative to end
-    if tok.is_empty() { return None; }
+    if tok.is_empty() {
+        return None;
+    }
     if let Ok(mut idx) = tok.parse::<i32>() {
-        if idx > 0 { return Some((idx as usize) - 1); }
+        if idx > 0 {
+            return Some((idx as usize) - 1);
+        }
         // negative
         let n = len as i32;
         idx = n + idx; // idx is negative
-        if idx >= 0 { return Some(idx as usize); }
+        if idx >= 0 {
+            return Some(idx as usize);
+        }
     }
     None
 }
 
 /// Load a very simple OBJ (triangles/quads) into MeshData
 pub fn load_obj<P: AsRef<Path>>(path: P) -> Result<MeshData> {
-    let file = File::open(&path).with_context(|| format!("Failed to open OBJ file: {}", path.as_ref().display()))?;
+    let file = File::open(&path)
+        .with_context(|| format!("Failed to open OBJ file: {}", path.as_ref().display()))?;
     let reader = BufReader::new(file);
 
     let mut positions: Vec<Vector3> = Vec::new();
@@ -44,7 +51,9 @@ pub fn load_obj<P: AsRef<Path>>(path: P) -> Result<MeshData> {
     for line_res in reader.lines() {
         let line = line_res?;
         let s = line.trim();
-        if s.is_empty() || s.starts_with('#') { continue; }
+        if s.is_empty() || s.starts_with('#') {
+            continue;
+        }
         if s.starts_with("v ") {
             // position
             let parts: Vec<&str> = s.split_whitespace().collect();
@@ -70,9 +79,12 @@ pub fn load_obj<P: AsRef<Path>>(path: P) -> Result<MeshData> {
                 let mut v_idx: Option<usize> = None;
                 let mut vn_idx: Option<usize> = None;
                 let mut parts = tok.split('/');
-                if let Some(a) = parts.next() { v_idx = parse_index(a, positions.len()); }
+                if let Some(a) = parts.next() {
+                    v_idx = parse_index(a, positions.len());
+                }
                 if let Some(_vt) = parts.next() {
-                    if let Some(c) = parts.next() { // v/vt/vn
+                    if let Some(c) = parts.next() {
+                        // v/vt/vn
                         vn_idx = parse_index(c, normals.len());
                     } else {
                         // v/vt
@@ -88,7 +100,9 @@ pub fn load_obj<P: AsRef<Path>>(path: P) -> Result<MeshData> {
                 }
                 if let Some(vi) = v_idx {
                     let key = (vi, vn_idx);
-                    let new_idx = if let Some(&idxu) = vert_map.get(&key) { idxu } else {
+                    let new_idx = if let Some(&idxu) = vert_map.get(&key) {
+                        idxu
+                    } else {
                         // create new vertex in output arrays
                         let out_i = out_positions.len() as u32;
                         out_positions.push(positions[vi]);
@@ -116,7 +130,10 @@ pub fn load_obj<P: AsRef<Path>>(path: P) -> Result<MeshData> {
     }
 
     // Build MeshData
-    let normals_opt = if has_any_normals && !has_any_missing_normals && out_normals.len() == out_positions.len() {
+    let normals_opt = if has_any_normals
+        && !has_any_missing_normals
+        && out_normals.len() == out_positions.len()
+    {
         Some(out_normals)
     } else {
         None
@@ -133,4 +150,3 @@ pub fn load_obj<P: AsRef<Path>>(path: P) -> Result<MeshData> {
 
     Ok(mesh)
 }
-

@@ -6,20 +6,20 @@
 audio:
   # Sample rate in Hz (common values: 44100, 48000)
   sample_rate: 44100
-  
+
   # Number of audio channels (1 = mono, 2 = stereo)
   # Note: Stereo is automatically converted to mono for visualization
   channels: 2
-  
+
   # Audio buffer size in samples
   # Smaller = lower latency, higher CPU usage
   # Larger = higher latency, lower CPU usage
   buffer_size: 2048
-  
+
   # Ring buffer capacity in samples
   # Should be at least 2x buffer_size, typically 4-8x
   buffer_capacity: 8192
-  
+
   # Input audio device name (null = use system default input)
   # Run with --list-devices to see available devices
   # For system audio capture, use loopback/monitor devices
@@ -29,27 +29,32 @@ audio:
   # This is where audio playback will be sent (speakers/headphones)
   output_device_name: null
 
+  # Optional: omit this key to use the OS-aware default.
+  # Windows: defaults to true.
+  # Linux/macOS: defaults to false, and any explicit true value is auto-disabled.
+  # use_loopback: auto
+
 # DSP (Digital Signal Processing) configuration
 dsp:
   # FFT window size (must be power of 2: 512, 1024, 2048, 4096, 8192)
   # Larger = better frequency resolution, slower updates
   # Smaller = faster updates, lower frequency resolution
   fft_size: 2048
-  
+
   # Hop size for FFT processing (samples between FFT windows)
   # Smaller = smoother updates, higher CPU usage
   hop_size: 512
-  
+
   # Window function type for FFT
   # Options: rectangular, hann, hamming, blackman, blackman_harris
   # hann is a good default for most music
   window_type: hann
-  
+
   # Frequency range to analyze (Hz)
   frequency_range:
-    min: 20.0      # Human hearing lower limit
-    max: 20000.0   # Human hearing upper limit
-  
+    min: 20.0 # Human hearing lower limit
+    max: 20000.0 # Human hearing upper limit
+
   # Smoothing factor for audio parameters (0.0-1.0)
   # Higher = smoother but slower response
   # Lower = faster response but more jittery
@@ -62,24 +67,24 @@ visualization:
     # Amplitude scaling factor (0.1-10.0)
     # Higher = taller waves
     amplitude_scale: 1.0
-    
+
     # Frequency scaling factor (0.1-10.0)
     # Higher = more wave cycles visible
     frequency_scale: 1.0
-    
+
     # Phase offset in radians (0.0-6.28)
     # Shifts the wave horizontally
     phase_offset: 0.0
-    
+
     # Smoothing factor for wave animation (0.0-1.0)
     # Higher = smoother transitions
     smoothing_factor: 0.8
-    
+
     # Character set to use for rendering
     # Options: basic, extended, blocks, shading, dots, lines, braille
     # Press 'C' during playback to cycle through character sets
     character_set: blocks
-    
+
     # Wave thickness in pixels (1-10)
     # Higher = thicker lines
     thickness: 1
@@ -90,17 +95,64 @@ rendering:
   # 60 is recommended for smooth animation
   # Lower values reduce CPU usage
   target_fps: 60
-  
+
   # Enable differential rendering (only update changed cells)
   # Significantly improves performance
   enable_differential: true
-  
+
   # Enable double buffering
   # Reduces screen tearing
   enable_double_buffer: true
-  
+
   # Minimum terminal dimensions
   # Application will warn if terminal is smaller
   min_width: 80
   min_height: 24
 
+  # Default braille quality for still-image rendering.
+  # Available presets: motion, cinema, punch, newsprint, planet_killer
+  # Optional manual overrides will mark the runtime HUD as custom (CUS).
+  braille_image:
+    preset: cinema
+    # dither_mode: atkinson
+    # gamma_preset: 2
+    # contrast_preset: 1
+    # exposure_preset: 1
+
+  # Default braille quality for video playback.
+  # `temporal_blend_preset` uses the built-in frame-memory presets (0-4).
+  braille_video:
+    preset: motion
+    temporal_blend_preset: 2
+    temporal_hysteresis_preset: 2
+    # dither_mode: bayer4x4
+    # gamma_preset: 1
+    # contrast_preset: 1
+    # exposure_preset: 1
+
+# Internet Archive oddball TV configuration
+internet_archive:
+  # Press 'u' during playback to retune the current archive channel.
+  # Archive channels auto-advance to a new show when playback reaches EOF.
+  # The channel rotation now includes Archive TV, Archive Cooking,
+  # and Archive Public Access.
+  tv_queries:
+    - "mediatype:movies AND collection:prelinger"
+    - "mediatype:movies AND collection:classic_tv"
+  cooking_queries:
+    - "mediatype:movies AND collection:classic_tv AND (title:(cooking OR kitchen OR recipe) OR subject:(cooking OR kitchen OR recipe))"
+    - "mediatype:movies AND (title:(cooking OR kitchen OR recipe) OR subject:(cooking OR kitchen OR recipe))"
+  public_access_queries:
+    - "mediatype:movies AND collection:classic_tv AND (title:(\"public access\" OR telethon) OR subject:(\"public access\" OR telethon))"
+    - "mediatype:movies AND (title:(telethon) OR subject:(telethon))"
+  industrial_queries:
+    - "mediatype:movies AND collection:prelinger AND (subject:(industrial OR training) OR title:(industrial OR training))"
+    - "mediatype:movies AND (subject:(industrial OR training) OR title:(industrial OR training))"
+  educational_queries:
+    - "mediatype:movies AND collection:prelinger AND (subject:(educational OR classroom OR school) OR title:(educational OR classroom OR school))"
+    - "mediatype:movies AND (subject:(educational OR classroom OR school) OR title:(educational OR classroom OR school))"
+  local_news_queries:
+    - "mediatype:movies AND (title:(\"local news\" OR newscast) OR subject:(\"local news\" OR newscast))"
+    - "mediatype:movies AND collection:classic_tv AND (title:(\"local news\" OR newscast) OR subject:(\"local news\" OR newscast))"
+  rows_per_page: 50
+  max_pages: 20

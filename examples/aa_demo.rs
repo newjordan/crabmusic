@@ -1,24 +1,22 @@
 // Anti-Aliasing Demo
 //
-// Demonstrates the new anti-aliased Braille rendering capabilities
-// Shows side-by-side comparison of binary vs anti-aliased rendering
+// Demonstrates Braille rendering capabilities using the current stable API.
+// Shows side-by-side comparison of segmented drawing vs built-in primitives.
 
-use crabmusic::visualization::{BrailleGrid, Color, GridBuffer};
+use crabmusic::visualization::{BrailleGrid, Color};
 use std::io::{self, Write};
 
 fn main() {
     println!("🦀 CrabMusic - Anti-Aliasing Demo\n");
-    println!("Comparing Binary vs Anti-Aliased Braille Rendering\n");
+    println!("Comparing segmented drawing vs built-in BrailleGrid primitives\n");
 
     // Create two grids for comparison
     let width = 40;
     let height = 20;
 
     let mut binary_grid = BrailleGrid::new(width, height);
-    let mut aa_grid = BrailleGrid::new(width, height);
-    aa_grid.set_antialiasing(true);
+    let mut smooth_grid = BrailleGrid::new(width, height);
 
-    let white = Color::new(255, 255, 255);
     let cyan = Color::new(0, 255, 255);
     let magenta = Color::new(255, 0, 255);
     let yellow = Color::new(255, 255, 0);
@@ -31,8 +29,8 @@ fn main() {
     // Binary circle (left side)
     draw_circle_binary(&mut binary_grid, center_x - 20.0, center_y, 15.0, cyan);
 
-    // AA circle (right side)
-    aa_grid.draw_circle_aa(center_x + 20.0, center_y, 15.0, cyan);
+    // Built-in circle (right side)
+    smooth_grid.draw_circle((center_x + 20.0) as usize, center_y as usize, 15, cyan);
 
     // Draw diagonal lines
     println!("Drawing diagonal lines...");
@@ -40,8 +38,8 @@ fn main() {
     // Binary line
     binary_grid.draw_line_with_color(5, 5, 30, 70, magenta);
 
-    // AA line
-    aa_grid.draw_line_aa_with_color(5.0, 5.0, 30.0, 70.0, magenta);
+    // Built-in line
+    smooth_grid.draw_line_with_color(5, 5, 30, 70, magenta);
 
     // Draw sine wave
     println!("Drawing sine waves...");
@@ -62,8 +60,14 @@ fn main() {
                 yellow,
             );
 
-            // AA
-            aa_grid.draw_line_aa_with_color(prev_x, prev_y, x, y, yellow);
+            // Built-in
+            smooth_grid.draw_line_with_color(
+                prev_x as usize,
+                prev_y as usize,
+                x as usize,
+                y as usize,
+                yellow,
+            );
         }
     }
 
@@ -75,16 +79,15 @@ fn main() {
     render_braille_grid(&binary_grid);
 
     println!("\n\n╔════════════════════════════════════════╗");
-    println!("║      ANTI-ALIASED (Enhanced)           ║");
+    println!("║        BUILT-IN BRAILLE SHAPES         ║");
     println!("╚════════════════════════════════════════╝\n");
 
-    render_braille_grid(&aa_grid);
+    render_braille_grid(&smooth_grid);
 
     println!("\n\n✨ Key Improvements:");
-    println!("  • Smoother circles (no jagged edges)");
-    println!("  • Sub-pixel accurate lines");
-    println!("  • Better curve rendering");
-    println!("  • Perfect for sacred geometry!\n");
+    println!("  • Custom segmented drawing on the left");
+    println!("  • Built-in BrailleGrid primitives on the right");
+    println!("  • Handy for checking rendering behavior after API changes\n");
 }
 
 /// Draw a circle using binary line segments (for comparison)

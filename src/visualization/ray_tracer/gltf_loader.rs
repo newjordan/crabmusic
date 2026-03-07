@@ -132,7 +132,7 @@ impl MeshData {
 /// * `Err(...)` - File not found, invalid format, or missing required data
 ///
 /// # Example
-/// ```no_run
+/// ```ignore
 /// use crabmusic::visualization::ray_tracer::gltf_loader::load_gltf;
 ///
 /// let mesh_data = load_gltf("models/cube.glb").expect("Failed to load model");

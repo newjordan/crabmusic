@@ -10,15 +10,31 @@ pub struct VideoChannelVisualizer {
     pulse: f32,
     // Temporary: disable actual video; render white noise instead
     noise_seed: u64,
+    display_name: String,
+    idle_label: String,
     current_path: Option<String>,
 }
 
 impl VideoChannelVisualizer {
     pub fn new(color_scheme: ColorScheme) -> Self {
+        Self::new_named(
+            color_scheme,
+            "White Noise (Video)",
+            "White noise (video channel disabled)",
+        )
+    }
+
+    pub fn new_named(
+        color_scheme: ColorScheme,
+        display_name: impl Into<String>,
+        idle_label: impl Into<String>,
+    ) -> Self {
         Self {
             color_scheme,
             pulse: 0.0,
             noise_seed: 0xC2B2_AE35_87B9_3A15,
+            display_name: display_name.into(),
+            idle_label: idle_label.into(),
             current_path: None,
         }
     }
@@ -46,6 +62,21 @@ impl VideoChannelVisualizer {
             }
         }
     }
+
+    fn truncate_for_width(text: &str, width: usize) -> String {
+        let char_count = text.chars().count();
+        if char_count <= width {
+            return text.to_string();
+        }
+
+        if width <= 1 {
+            return "…".to_string();
+        }
+
+        let mut out = text.chars().take(width - 1).collect::<String>();
+        out.push('…');
+        out
+    }
 }
 
 impl Visualizer for VideoChannelVisualizer {
@@ -72,16 +103,34 @@ impl Visualizer for VideoChannelVisualizer {
                 grid.set_cell(x, y, CHARS[idx] as char);
             }
         }
-        let label = "White noise (video channel disabled)";
-        for (i, ch) in label.chars().enumerate() {
-            if i < grid.width() {
-                grid.set_cell(i, 0, ch);
-            }
-        }
+
+        let title = Self::truncate_for_width(&self.display_name, grid.width().saturating_sub(2));
+        Self::draw_centered(grid, 0, &title);
+
+        let subtitle = self.current_path.as_deref().unwrap_or(&self.idle_label);
+        let subtitle = Self::truncate_for_width(subtitle, grid.width().saturating_sub(4));
+        Self::draw_centered(grid, 2, &subtitle);
+
         let _ = &self.color_scheme; // Reserved for future colorization
     }
 
     fn name(&self) -> &str {
-        "White Noise (Video)"
+        &self.display_name
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn archive_named_video_channel_uses_custom_name() {
+        let viz = VideoChannelVisualizer::new_named(
+            ColorScheme::default(),
+            "Archive TV",
+            "Tuning random old television...",
+        );
+
+        assert_eq!(viz.name(), "Archive TV");
     }
 }

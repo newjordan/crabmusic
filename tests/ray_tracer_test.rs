@@ -2,7 +2,6 @@ use crabmusic::visualization::ray_tracer::*;
 
 #[test]
 fn test_ray_tracer_renders_sphere_center_and_corners() {
-    let scene = Scene::new_with_sphere();
     let camera = Camera::new(Vector3::new(0.0, 0.0, 0.0), 4.0, 3.0);
     let (w, h) = (40_usize, 30_usize);
 

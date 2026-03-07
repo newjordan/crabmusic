@@ -342,6 +342,20 @@ impl AudioCaptureDevice for WasapiLoopbackDevice {
 
         self.capture_thread = Some(handle);
 
+        // Wait for the capture thread to actually start (with timeout)
+        let start_time = std::time::Instant::now();
+        while !self.is_capturing.load(Ordering::Relaxed) {
+            if start_time.elapsed().as_secs() > 5 {
+                error!("Timeout waiting for WASAPI capture thread to start");
+                return Err(AudioError::StreamError(
+                    "Capture thread failed to start".to_string(),
+                ));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        info!("WASAPI loopback capture thread started successfully");
+
         Ok(())
     }
 

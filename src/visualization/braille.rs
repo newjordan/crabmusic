@@ -47,7 +47,7 @@ pub enum BrailleDot {
 /// assert_eq!(dots_to_char(0b11111111), '⣿');
 ///
 /// // Top-left and bottom-right
-/// assert_eq!(dots_to_char(0b10000001), '⡁');
+/// assert_eq!(dots_to_char(0b10000001), '⢁');
 /// ```
 #[inline]
 pub fn dots_to_char(dots: u8) -> char {
@@ -184,6 +184,33 @@ impl BrailleGrid {
         let cell_index = cell_y * self.width + cell_x;
 
         self.colors[cell_index] = Some(color);
+    }
+
+    /// Check whether a single dot is active at the specified position
+    pub fn is_dot_set(&self, dot_x: usize, dot_y: usize) -> bool {
+        if dot_x >= self.dot_width() || dot_y >= self.dot_height() {
+            return false;
+        }
+
+        let cell_x = dot_x / 2;
+        let cell_y = dot_y / 4;
+        let cell_index = cell_y * self.width + cell_x;
+
+        let local_x = dot_x % 2;
+        let local_y = dot_y % 4;
+        let dot_bit = match (local_x, local_y) {
+            (0, 0) => BrailleDot::Dot1 as u8,
+            (0, 1) => BrailleDot::Dot2 as u8,
+            (0, 2) => BrailleDot::Dot3 as u8,
+            (0, 3) => BrailleDot::Dot7 as u8,
+            (1, 0) => BrailleDot::Dot4 as u8,
+            (1, 1) => BrailleDot::Dot5 as u8,
+            (1, 2) => BrailleDot::Dot6 as u8,
+            (1, 3) => BrailleDot::Dot8 as u8,
+            _ => unreachable!(),
+        };
+
+        self.patterns[cell_index] & dot_bit != 0
     }
 
     /// Helper: Get dot index (0-7) from local coordinates

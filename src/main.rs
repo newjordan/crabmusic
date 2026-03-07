@@ -1,971 +1,776 @@
 // CrabMusic - Real-time ASCII music visualizer
 // Main application entry point
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use clap::Parser;
-use crossterm::event::{self, Event, KeyCode, KeyEvent};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::sync::mpsc;
 
 // Module declarations
 mod audio;
+mod braille_quality;
 mod config;
 mod dsp;
+#[allow(dead_code)]
 mod effects;
 mod error;
+mod grid_postprocess;
+#[allow(dead_code)]
 mod img;
 mod rendering;
+mod runtime_controls;
 mod video;
 mod visualization;
 
 #[cfg(windows)]
 use audio::WasapiLoopbackDevice;
-use audio::{AudioCaptureDevice, AudioOutputDevice, AudioRingBuffer, CpalAudioDevice, SilentAudioDevice};
+use audio::{
+    AudioCaptureDevice, AudioOutputDevice, AudioRingBuffer, CpalAudioDevice, SilentAudioDevice,
+};
+use config::{AppConfig, BrailleColorMode, InternetArchiveConfig, RenderingConfig};
 use dsp::DspProcessor;
 use effects::EffectPipeline;
+use grid_postprocess::GridBraillePostProcessor;
 use rendering::TerminalRenderer;
-use visualization::{
-    character_sets::{get_all_character_sets, get_character_set, CharacterSet, CharacterSetType},
-    color_schemes::{ColorScheme, ColorSchemeType},
-    GridBuffer, ImageChannelVisualizer, ObjViewerVisualizer, NightNightVisualizer, OscilloscopeConfig,
-    OscilloscopeVisualizer, Raycaster3DVisualizer, ScrollDirection, SineWaveConfig,
-    SineWaveVisualizer, SpectrogramVisualizer, SpectrumConfig, SpectrumMapping, SpectrumVisualizer,
-    TerrainLandscapeVisualizer, TriggerSlope, VideoChannelVisualizer, Visualizer, WaveformMode, WaveformTunnelVisualizer,
+use runtime_controls::{
+    apply_quality_action, quality_control_action_from_key, quality_summary, ColorMode,
+    QualityControlAction,
 };
-
-/// Global shutdown flag
-static SHUTDOWN: AtomicBool = AtomicBool::new(false);
-
-/// CrabMusic - Real-time ASCII music visualizer
+use visualization::{
+    character_sets::CharacterSet, color_schemes::ColorScheme, primitives::PrimitivesVisualizer,
+    ray_tracer::RenderMode, GravityWellVisualizer, GridBuffer, GridTunnelVisualizer,
+    ImageChannelVisualizer, NightNightVisualizer, ObjViewerVisualizer, OscilloscopeConfig,
+    OscilloscopeVisualizer, Raycaster3DVisualizer, SineWaveVisualizer, SpectrogramVisualizer,
+    SpectrumConfig, SpectrumMapping, SpectrumVisualizer, StarfieldVisualizer,
+    TerrainLandscapeVisualizer, TriggerSlope, VideoChannelVisualizer, Visualizer, WaveformMode,
+    WaveformTunnelVisualizer, XYOscilloscopeConfig, XYOscilloscopeVisualizer,
+};
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Path to configuration file
-    #[arg(short, long, value_name = "FILE")]
-    config: Option<String>,
+    #[arg(short, long, default_value = "config.yaml")]
+    config: String,
 
-    /// Target FPS (overrides config file)
-    #[arg(short, long, value_name = "FPS")]
-    fps: Option<u32>,
-
-    /// Enable verbose logging
+    /// Audio device name
     #[arg(short, long)]
-    verbose: bool,
-
-    /// Enable debug logging (more verbose than -v)
-    #[arg(short, long)]
-    debug: bool,
-
-    /// Test mode: render test pattern instead of audio visualization
-    #[arg(short, long)]
-    test: bool,
-
-    /// Amplitude sensitivity multiplier (overrides config file)
-    #[arg(long, value_name = "FLOAT")]
-    sensitivity: Option<f32>,
-
-    /// Input audio device name (overrides config file)
-    #[arg(long, value_name = "NAME")]
     device: Option<String>,
 
-    /// Output audio device name for playback (overrides config file)
-    #[arg(long, value_name = "NAME")]
-    output_device: Option<String>,
-
-    /// List available audio devices and exit
+    /// List available audio devices
     #[arg(long)]
     list_devices: bool,
 
-    /// Use Windows WASAPI loopback to capture system audio (Windows only, no virtual cable needed)
-    #[cfg(windows)]
+    /// Test mode (no audio)
     #[arg(long)]
-    loopback: bool,
+    test: bool,
 
-    /// Character set to use (basic, extended, blocks, shading, dots, lines, braille)
-    #[arg(long, value_name = "SET")]
-    charset: Option<String>,
+    /// Verbose logging
+    #[arg(short, long)]
+    verbose: bool,
 
-    /// Sample rate in Hz (overrides config file)
-    #[arg(long, value_name = "HZ")]
-    sample_rate: Option<u32>,
-
-    /// FFT size (must be power of 2: 512, 1024, 2048, 4096, 8192)
-    #[arg(long, value_name = "SIZE")]
-    fft_size: Option<usize>,
-
-    /// Enable hot-reload of configuration file
+    /// Debug logging
     #[arg(long)]
-    hot_reload: bool,
+    debug: bool,
 
-    /// Disable audio output (visualization only, no playback)
+    /// Play video/GIF file (path to video file)
     #[arg(long)]
-    no_audio_output: bool,
-
-    /// Show frequency labels on spectrum analyzer for debugging/calibration
-    #[arg(long)]
-    show_labels: bool,
-
-    /// Show version information
-    #[arg(long)]
-    version_info: bool,
-
-    /// Play a video file in the terminal using Braille rendering (feature-gated)
-    #[arg(long, value_name = "FILE")]
     video: Option<String>,
-
-    /// Display an image file as Braille art (requires feature: image)
-    #[arg(long, value_name = "FILE")]
-    image: Option<String>,
-
-    /// Start image drag-and-drop mode (paste file paths to render)
-    #[arg(long)]
-    image_drop: bool,
-
-    /// Start morph between two images (provide both)
-    #[arg(long, value_name = "FILE")]
-    morph_a: Option<String>,
-
-    /// Second image for morph (B)
-    #[arg(long, value_name = "FILE")]
-    morph_b: Option<String>,
-
-    /// Morph duration in milliseconds for A→B leg
-    #[arg(long, value_name = "MS")]
-    morph_duration: Option<u64>,
-
-    /// Start webcam capture mode
-    #[arg(long, short = 'w')]
-    webcam: bool,
-
-    /// Webcam device index (default: 0)
-    #[arg(long, value_name = "INDEX", default_value_t = 0)]
-    device_index: usize,
 }
 
-fn main() -> Result<()> {
-    // Parse command-line arguments
-    let args = Args::parse();
-
-    // Handle version info
-    if args.version_info {
-        print_version_info();
-        return Ok(());
-    }
-
-    // Handle list devices
-    if args.list_devices {
-        list_audio_devices()?;
-        return Ok(());
-    }
-
-    // Initialize logging
-    init_logging(args.verbose, args.debug)?;
-
-    tracing::info!("CrabMusic v{} starting...", env!("CARGO_PKG_VERSION"));
-
-    // Video mode takes over if requested
-    if let Some(path) = args.video.as_deref() {
-        tracing::info!("Starting video mode for file: {}", path);
-        return video::run_video_playback(path);
-    }
-    // Image morph mode takes over if both morph_a and morph_b are provided
-    if let (Some(ref a), Some(ref b)) = (args.morph_a.as_ref(), args.morph_b.as_ref()) {
-        tracing::info!("Starting image morph mode: {} <-> {}", a, b);
-        return img::render_image(a.as_str(), Some(b.as_str()), args.morph_duration);
-    }
-
-    // Image modes take over if requested
-    if let Some(path) = args.image.as_deref() {
-        tracing::info!("Starting image mode for file: {}", path);
-        return img::render_image(path, None, None);
-    }
-    if args.image_drop {
-        tracing::info!("Starting image drag-and-drop mode");
-        return img::drop_loop();
-    }
-
-    // Webcam mode takes over if requested
-    #[cfg(feature = "video")]
-    if args.webcam {
-        tracing::info!("Starting webcam capture mode (device index: {})", args.device_index);
-        return video::webcam::run_webcam_capture(args.device_index);
-    }
-
-    // Load configuration
-    let config_path = args.config.as_deref().unwrap_or("config.yaml");
-    let mut config = config::AppConfig::load_or_default(config_path)?;
-
-    // Apply CLI overrides
-    if let Some(fps) = args.fps {
-        config.rendering.target_fps = fps;
-        tracing::info!("Overriding FPS from CLI: {}", fps);
-    }
-
-    if let Some(sensitivity) = args.sensitivity {
-        config.visualization.sine_wave.amplitude = sensitivity;
-        tracing::info!("Overriding sensitivity from CLI: {}", sensitivity);
-    }
-
-    if let Some(ref device) = args.device {
-        config.audio.device_name = Some(device.clone());
-        tracing::info!("Overriding input audio device from CLI: {}", device);
-    }
-
-    if let Some(output_device) = args.output_device {
-        config.audio.output_device_name = Some(output_device.clone());
-        tracing::info!("Overriding output audio device from CLI: {}", output_device);
-    }
-
-    if let Some(sample_rate) = args.sample_rate {
-        config.audio.sample_rate = sample_rate;
-        tracing::info!("Overriding sample rate from CLI: {}", sample_rate);
-    }
-
-    if let Some(fft_size) = args.fft_size {
-        config.dsp.fft_size = fft_size;
-        tracing::info!("Overriding FFT size from CLI: {}", fft_size);
-    }
-
-    if let Some(charset) = args.charset.as_ref() {
-        config.visualization.character_set = charset.clone();
-        tracing::info!("Overriding character set from CLI: {}", charset);
-    }
-
-    // Validate configuration
-    config.validate().context("Invalid configuration")?;
-
-    // Setup Ctrl+C handler
-    setup_shutdown_handler()?;
-
-    // Determine if we should use loopback (persisted via config; CLI overrides)
-    #[cfg(windows)]
-    let use_loopback = if args.loopback {
-        true
-    } else if args.device.is_some() {
-        false
-    } else {
-        config.audio.use_loopback
-    };
-    #[cfg(not(windows))]
-    let use_loopback = false;
-
-    // Persist the resolved loopback preference for next runs
-    // If config file doesn't exist yet, save current preference to create it
-    if !std::path::Path::new(config_path).exists() {
-        let mut cfg_to_save = config.clone();
-        cfg_to_save.audio.use_loopback = use_loopback;
-        if let Err(e) = cfg_to_save.save(config_path) {
-            tracing::warn!("Failed to save initial config (creating file): {}", e);
-        } else {
-            tracing::info!("Created {} with loopback preference", config_path);
-        }
-    }
-
-    if config.audio.use_loopback != use_loopback {
-        config.audio.use_loopback = use_loopback;
-        if let Err(e) = config.save(config_path) {
-            tracing::warn!("Failed to save config (loopback preference): {}", e);
-        } else {
-            tracing::info!("Saved loopback preference to {}", config_path);
-        }
-    }
-
-    // Create and run application
-    let app =
-        Application::new_with_config(config, args.no_audio_output, use_loopback, args.show_labels)?;
-
-    // Friendly tip: if loopback is off, mic starts OFF too until you press 'M'
-    if !use_loopback {
-        tracing::warn!("No system loopback. MIC starts OFF. Press 'M' to enable mic input, or run with --loopback to capture system audio.");
-    }
-
-    if args.test {
-        app.run_test_mode()?;
-    } else {
-        app.run()?;
-    }
-
-    tracing::info!("Shutdown complete");
-    Ok(())
-}
-
-/// Visualizer mode enum
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum VisualizerMode {
+pub enum VisualizerMode {
     SineWave,
     Spectrum,
     Oscilloscope,
     XYOscilloscope,
-    Spectrogram,
-    WaveformTunnel,
-    TerrainLandscape,
     Raycaster3D,
     ObjViewer,
+    Primitives,
+    GridTunnel,
+    GravityWell,
+    WaveformTunnel,
+    TerrainLandscape,
+    Starfield,
+    Spectrogram,
     NightNight,
     Image,
     Video,
+    InternetArchive,
+    ArchiveCooking,
+    ArchivePublicAccess,
+    ArchiveIndustrial,
+    ArchiveEducational,
+    ArchiveLocalNews,
 }
 
 impl VisualizerMode {
-    /// Get the next visualizer mode in the cycle
     fn next(&self) -> Self {
         match self {
             VisualizerMode::SineWave => VisualizerMode::Spectrum,
             VisualizerMode::Spectrum => VisualizerMode::Oscilloscope,
             VisualizerMode::Oscilloscope => VisualizerMode::XYOscilloscope,
-            VisualizerMode::XYOscilloscope => VisualizerMode::Spectrogram,
-            VisualizerMode::Spectrogram => VisualizerMode::WaveformTunnel,
-            VisualizerMode::WaveformTunnel => VisualizerMode::TerrainLandscape,
-            VisualizerMode::TerrainLandscape => VisualizerMode::Raycaster3D,
+            VisualizerMode::XYOscilloscope => VisualizerMode::Raycaster3D,
             VisualizerMode::Raycaster3D => VisualizerMode::ObjViewer,
-            VisualizerMode::ObjViewer => VisualizerMode::NightNight,
+            VisualizerMode::ObjViewer => VisualizerMode::Primitives,
+            VisualizerMode::Primitives => VisualizerMode::GridTunnel,
+            VisualizerMode::GridTunnel => VisualizerMode::GravityWell,
+            VisualizerMode::GravityWell => VisualizerMode::WaveformTunnel,
+            VisualizerMode::WaveformTunnel => VisualizerMode::TerrainLandscape,
+            VisualizerMode::TerrainLandscape => VisualizerMode::Starfield,
+            VisualizerMode::Starfield => VisualizerMode::Spectrogram,
+            VisualizerMode::Spectrogram => VisualizerMode::NightNight,
             VisualizerMode::NightNight => VisualizerMode::Image,
             VisualizerMode::Image => VisualizerMode::Video,
-            VisualizerMode::Video => VisualizerMode::SineWave,
+            VisualizerMode::Video => VisualizerMode::InternetArchive,
+            VisualizerMode::InternetArchive => VisualizerMode::ArchiveCooking,
+            VisualizerMode::ArchiveCooking => VisualizerMode::ArchivePublicAccess,
+            VisualizerMode::ArchivePublicAccess => VisualizerMode::ArchiveIndustrial,
+            VisualizerMode::ArchiveIndustrial => VisualizerMode::ArchiveEducational,
+            VisualizerMode::ArchiveEducational => VisualizerMode::ArchiveLocalNews,
+            VisualizerMode::ArchiveLocalNews => VisualizerMode::SineWave,
         }
     }
 
-    /// Get the previous visualizer mode in the cycle
     fn prev(&self) -> Self {
         match self {
-            VisualizerMode::SineWave => VisualizerMode::Video,
+            VisualizerMode::SineWave => VisualizerMode::ArchiveLocalNews,
             VisualizerMode::Spectrum => VisualizerMode::SineWave,
             VisualizerMode::Oscilloscope => VisualizerMode::Spectrum,
             VisualizerMode::XYOscilloscope => VisualizerMode::Oscilloscope,
-            VisualizerMode::Spectrogram => VisualizerMode::XYOscilloscope,
-            VisualizerMode::WaveformTunnel => VisualizerMode::Spectrogram,
-            VisualizerMode::TerrainLandscape => VisualizerMode::WaveformTunnel,
-            VisualizerMode::Raycaster3D => VisualizerMode::TerrainLandscape,
+            VisualizerMode::Raycaster3D => VisualizerMode::XYOscilloscope,
             VisualizerMode::ObjViewer => VisualizerMode::Raycaster3D,
-            VisualizerMode::NightNight => VisualizerMode::ObjViewer,
+            VisualizerMode::Primitives => VisualizerMode::ObjViewer,
+            VisualizerMode::GridTunnel => VisualizerMode::Primitives,
+            VisualizerMode::GravityWell => VisualizerMode::GridTunnel,
+            VisualizerMode::WaveformTunnel => VisualizerMode::GravityWell,
+            VisualizerMode::TerrainLandscape => VisualizerMode::WaveformTunnel,
+            VisualizerMode::Starfield => VisualizerMode::TerrainLandscape,
+            VisualizerMode::Spectrogram => VisualizerMode::Starfield,
+            VisualizerMode::NightNight => VisualizerMode::Spectrogram,
             VisualizerMode::Image => VisualizerMode::NightNight,
             VisualizerMode::Video => VisualizerMode::Image,
+            VisualizerMode::InternetArchive => VisualizerMode::Video,
+            VisualizerMode::ArchiveCooking => VisualizerMode::InternetArchive,
+            VisualizerMode::ArchivePublicAccess => VisualizerMode::ArchiveCooking,
+            VisualizerMode::ArchiveIndustrial => VisualizerMode::ArchivePublicAccess,
+            VisualizerMode::ArchiveEducational => VisualizerMode::ArchiveIndustrial,
+            VisualizerMode::ArchiveLocalNews => VisualizerMode::ArchiveEducational,
         }
     }
 
-    /// Get the name of the visualizer mode
-    fn name(&self) -> &str {
+    #[allow(dead_code)]
+    fn name(&self) -> &'static str {
         match self {
             VisualizerMode::SineWave => "Sine Wave",
-            VisualizerMode::Spectrum => "Spectrum Analyzer",
+            VisualizerMode::Spectrum => "Spectrum",
             VisualizerMode::Oscilloscope => "Oscilloscope",
-            VisualizerMode::XYOscilloscope => "XY Oscilloscope (Lissajous)",
-            VisualizerMode::Spectrogram => "Spectrogram",
-            VisualizerMode::WaveformTunnel => "Waveform Tunnel",
-            VisualizerMode::TerrainLandscape => "Green Grid Landscape",
+            VisualizerMode::XYOscilloscope => "XY Oscilloscope",
             VisualizerMode::Raycaster3D => "Raycaster 3D",
-            VisualizerMode::ObjViewer => "OBJ Viewer",
+            VisualizerMode::ObjViewer => "3D Model Viewer",
+            VisualizerMode::Primitives => "Primitives 3D",
+            VisualizerMode::GridTunnel => "Grid Tunnel",
+            VisualizerMode::GravityWell => "Gravity Well",
+            VisualizerMode::WaveformTunnel => "Waveform Tunnel",
+            VisualizerMode::TerrainLandscape => "Terrain Landscape",
+            VisualizerMode::Starfield => "Starfield",
+            VisualizerMode::Spectrogram => "Spectrogram",
             VisualizerMode::NightNight => "Night Night",
-            VisualizerMode::Image => "Image Viewer",
-            VisualizerMode::Video => "Video Player",
+            VisualizerMode::Image => "Image Mode",
+            VisualizerMode::Video => "Video Mode",
+            VisualizerMode::InternetArchive => "Archive TV",
+            VisualizerMode::ArchiveCooking => "Archive Cooking",
+            VisualizerMode::ArchivePublicAccess => "Archive Public Access",
+            VisualizerMode::ArchiveIndustrial => "Archive Industrial Films",
+            VisualizerMode::ArchiveEducational => "Archive Educational",
+            VisualizerMode::ArchiveLocalNews => "Archive Local News",
         }
     }
 
-    /// Get zero-based index of the mode (for channel number)
     fn index(&self) -> usize {
-        match self {
-            VisualizerMode::SineWave => 0,
-            VisualizerMode::Spectrum => 1,
-            VisualizerMode::Oscilloscope => 2,
-            VisualizerMode::XYOscilloscope => 3,
-            VisualizerMode::Spectrogram => 4,
-            VisualizerMode::WaveformTunnel => 5,
-            VisualizerMode::TerrainLandscape => 6,
-            VisualizerMode::Raycaster3D => 7,
-            VisualizerMode::ObjViewer => 8,
-            VisualizerMode::NightNight => 9,
-            VisualizerMode::Image => 10,
-            VisualizerMode::Video => 11,
-        }
+        *self as usize
     }
 
-    /// Total number of channels
     fn count() -> usize {
-        12
+        22 // Total number of visualizer modes
     }
 }
 
-/// Application state
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum ArchiveChannelKind {
+    Tv,
+    Cooking,
+    PublicAccess,
+    Industrial,
+    Educational,
+    LocalNews,
+}
+
+impl ArchiveChannelKind {
+    fn from_visualizer_mode(mode: VisualizerMode) -> Option<Self> {
+        match mode {
+            VisualizerMode::InternetArchive => Some(Self::Tv),
+            VisualizerMode::ArchiveCooking => Some(Self::Cooking),
+            VisualizerMode::ArchivePublicAccess => Some(Self::PublicAccess),
+            VisualizerMode::ArchiveIndustrial => Some(Self::Industrial),
+            VisualizerMode::ArchiveEducational => Some(Self::Educational),
+            VisualizerMode::ArchiveLocalNews => Some(Self::LocalNews),
+            _ => None,
+        }
+    }
+
+    fn visualizer_mode(self) -> VisualizerMode {
+        match self {
+            Self::Tv => VisualizerMode::InternetArchive,
+            Self::Cooking => VisualizerMode::ArchiveCooking,
+            Self::PublicAccess => VisualizerMode::ArchivePublicAccess,
+            Self::Industrial => VisualizerMode::ArchiveIndustrial,
+            Self::Educational => VisualizerMode::ArchiveEducational,
+            Self::LocalNews => VisualizerMode::ArchiveLocalNews,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Tv => "Archive TV",
+            Self::Cooking => "Archive Cooking",
+            Self::PublicAccess => "Archive Public Access",
+            Self::Industrial => "Archive Industrial Films",
+            Self::Educational => "Archive Educational",
+            Self::LocalNews => "Archive Local News",
+        }
+    }
+
+    fn idle_label(self) -> &'static str {
+        match self {
+            Self::Tv => "Random old TV from Internet Archive • press U to retune",
+            Self::Cooking => "Random vintage cooking shows • press U to retune",
+            Self::PublicAccess => "Random public-access oddities • press U to retune",
+            Self::Industrial => "Random industrial and training films • press U to retune",
+            Self::Educational => "Random educational films • press U to retune",
+            Self::LocalNews => "Random local news oddities • press U to retune",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArchiveRequestContext {
+    ManualHotkey,
+    RotationMode,
+    PlaybackEnded,
+}
+
+impl ArchiveRequestContext {
+    fn requires_active_channel_match(self) -> bool {
+        matches!(self, Self::RotationMode | Self::PlaybackEnded)
+    }
+}
+
+fn is_quit_key(code: KeyCode) -> bool {
+    matches!(code, KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc)
+}
+
+fn is_channel_navigation_key(code: KeyCode) -> bool {
+    matches!(
+        code,
+        KeyCode::Right | KeyCode::Left | KeyCode::Char('v') | KeyCode::Char('V')
+    )
+}
+
+fn should_process_key_event(
+    code: KeyCode,
+    kind: KeyEventKind,
+    time_since_last_press: Duration,
+    debounce_ms: u64,
+) -> bool {
+    if is_channel_navigation_key(code) {
+        return kind == KeyEventKind::Press;
+    }
+
+    if is_quit_key(code) {
+        return true;
+    }
+
+    time_since_last_press.as_millis() >= debounce_ms as u128
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AudioRuntimeFlags {
+    use_loopback: bool,
+    microphone_enabled: bool,
+}
+
+fn runtime_audio_flags(capture_enabled: bool, requested_use_loopback: bool) -> AudioRuntimeFlags {
+    if capture_enabled {
+        AudioRuntimeFlags {
+            use_loopback: requested_use_loopback,
+            microphone_enabled: !requested_use_loopback,
+        }
+    } else {
+        AudioRuntimeFlags {
+            use_loopback: false,
+            microphone_enabled: false,
+        }
+    }
+}
+
+fn create_silent_audio_device(
+    buffer_capacity: usize,
+    sample_rate: u32,
+    channels: u16,
+) -> Result<Box<dyn AudioCaptureDevice>> {
+    Ok(Box::new(SilentAudioDevice::new(
+        Arc::new(AudioRingBuffer::new(buffer_capacity)),
+        sample_rate,
+        channels,
+    )?))
+}
+
+fn create_audio_capture_device(
+    args: &Args,
+    buffer_capacity: usize,
+    sample_rate: u32,
+    channels: u16,
+    requested_use_loopback: bool,
+    configured_device_name: Option<String>,
+) -> Result<Box<dyn AudioCaptureDevice>> {
+    if args.test {
+        return create_silent_audio_device(buffer_capacity, sample_rate, channels);
+    }
+
+    let ring_buffer = Arc::new(AudioRingBuffer::new(buffer_capacity));
+
+    if requested_use_loopback {
+        #[cfg(windows)]
+        {
+            return Ok(Box::new(WasapiLoopbackDevice::new(ring_buffer)?));
+        }
+
+        #[cfg(not(windows))]
+        {
+            anyhow::bail!("Audio loopback capture is only supported on Windows")
+        }
+    }
+
+    Ok(Box::new(CpalAudioDevice::new_with_device(
+        ring_buffer,
+        args.device.clone().or(configured_device_name),
+    )?))
+}
+
+static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+
 struct Application {
     audio_device: Box<dyn AudioCaptureDevice>,
     audio_output: Option<AudioOutputDevice>,
     dsp_processor: DspProcessor,
     visualizer: Box<dyn Visualizer>,
-    effect_pipeline: EffectPipeline,
-    renderer: TerminalRenderer,
-    #[allow(dead_code)] // Held for lifetime management
-    ring_buffer: Arc<AudioRingBuffer>,
-    target_fps: u32,
-    sample_rate: u32,
-    /// True if we're capturing system audio via WASAPI loopback (Windows)
-    use_loopback: bool,
-    current_charset: CharacterSet,
-    #[allow(dead_code)] // Reserved for future charset cycling feature
-    charset_index: usize,
-    /// When false and not using loopback, we ignore mic input for processing
-    microphone_enabled: bool,
-    sensitivity_multiplier: f32,
-    show_labels: bool,
     visualizer_mode: VisualizerMode,
+    renderer: TerminalRenderer,
+    effect_pipeline: EffectPipeline,
     color_scheme: ColorScheme,
-    color_scheme_index: usize,
+    target_fps: u32,
+    microphone_enabled: bool,
+    show_channel_number: bool,
+    sensitivity_multiplier: f32,
     last_key_press: Instant,
     key_debounce_ms: u64,
-    // Oscilloscope configuration state
-    osc_show_grid: bool,
-    osc_waveform_mode: WaveformMode,
-    osc_trigger_slope: TriggerSlope,
-    // Spectrum configuration state
-    spectrum_peak_hold: bool,
-    spectrum_mapping: SpectrumMapping,
-    spectrum_range_preset_index: usize,
-    // Raycaster 3D configuration state
-    ray3d_mode: crate::visualization::ray_tracer::RenderMode,
-    ray3d_brightness_boost: f32,
+    file_prompt_active: bool,
+    file_prompt_buffer: String,
+    file_prompt_error: Option<String>,
+    paste_suppress_deadline: Option<Instant>,
+
+    // Raycaster3D specific
+    ray3d_mode: RenderMode,
     ray3d_wire_step_rad: f32,
     ray3d_wire_tol_rad: f32,
     ray3d_rotation_speed_y: f32,
     ray3d_auto_rotate: bool,
-    // Model Viewer configuration state
-    model_viewer_index: usize,
+    ray3d_brightness_boost: f32,
+
+    // ObjViewer specific
     model_viewer_auto_rotate: bool,
 
-    // Effect control state
-    selected_effect_for_intensity: Option<String>, // Track which effect to adjust intensity for
-    // UI overlays
-    show_channel_number: bool,
-    // File input prompt state (Image/Video channels)
-    file_prompt_active: bool,
-    file_prompt_buffer: String,
-    file_prompt_error: Option<String>,
-    // Suppress char-by-char events immediately after a paste to avoid duplication
-    paste_suppress_deadline: Option<Instant>,
+    // Spectrum specific
+    spectrum_mapping: SpectrumMapping,
+    spectrum_range_preset_index: usize,
+    spectrum_peak_hold: bool,
+    show_labels: bool,
+
+    // Oscilloscope specific
+    osc_show_grid: bool,
+    osc_waveform_mode: WaveformMode,
+    osc_trigger_slope: TriggerSlope,
+
+    current_charset: CharacterSet,
+    live_quality: braille_quality::BrailleQualitySettings,
+    live_quality_defaults: braille_quality::BrailleQualitySettings,
+    live_color_mode: ColorMode,
+    live_color_mode_default: ColorMode,
+    live_postprocess: GridBraillePostProcessor,
+
+    // Config
+    audio_buffer_capacity: usize,
+    use_loopback: bool,
+    rendering_config: RenderingConfig,
+
+    // Internet Archive specific
+    internet_archive: InternetArchiveConfig,
+    archive_stream_tx: mpsc::Sender<Result<crate::video::internet_archive::ArchiveStream>>,
+    archive_stream_rx: mpsc::Receiver<Result<crate::video::internet_archive::ArchiveStream>>,
+    is_loading_archive: bool,
+    pending_archive_channel: ArchiveChannelKind,
+    archive_request_context: ArchiveRequestContext,
+    last_archive_identifiers: HashMap<ArchiveChannelKind, String>,
+}
+
+fn color_mode_from_config(color_mode: BrailleColorMode) -> ColorMode {
+    match color_mode {
+        BrailleColorMode::Off => ColorMode::Off,
+        BrailleColorMode::Grayscale => ColorMode::Grayscale,
+        BrailleColorMode::Full => ColorMode::Full,
+    }
 }
 
 impl Application {
-    /// Create a new application instance with configuration
-    fn new_with_config(
-        config: config::AppConfig,
-        no_audio_output: bool,
-        use_loopback: bool,
-        show_labels: bool,
-    ) -> Result<Self> {
-        tracing::info!("Initializing components with configuration...");
-        tracing::debug!(
-            "Configuration: sample_rate={}, fft_size={}, fps={}",
-            config.audio.sample_rate,
-            config.dsp.fft_size,
-            config.rendering.target_fps
-        );
-
-        // Create ring buffer for audio pipeline
-        // REDUCED from 10 to 4 for lower latency - just enough to prevent dropouts
-        // With 512-sample chunks @ 44.1kHz, this is ~46ms of buffering (4 * 11.6ms)
-        let ring_buffer = Arc::new(AudioRingBuffer::new(4));
-        tracing::debug!("Ring buffer created with capacity: 4 (low-latency mode)");
-
-        // Initialize audio capture with retry logic
-        tracing::debug!("Initializing audio capture device...");
-        let audio_device = Self::init_audio_capture_with_retry(
-            ring_buffer.clone(),
-            config.audio.device_name.clone(),
-            use_loopback,
+    fn fallback_to_audio_off(&mut self) -> Result<()> {
+        let audio_config = self.audio_device.get_config();
+        self.audio_output = None;
+        self.use_loopback = false;
+        self.microphone_enabled = false;
+        self.audio_device = create_silent_audio_device(
+            self.audio_buffer_capacity,
+            audio_config.sample_rate,
+            audio_config.channels,
         )?;
-        tracing::info!("Audio capture device initialized successfully");
+        Ok(())
+    }
 
-        // Get the actual sample rate from the audio device
-        let actual_sample_rate = audio_device.get_config().sample_rate;
-        if actual_sample_rate != config.audio.sample_rate {
-            tracing::warn!(
-                "Audio device sample rate ({} Hz) differs from config ({} Hz). Using device sample rate.",
-                actual_sample_rate,
-                config.audio.sample_rate
-            );
-        }
+    fn new(config: AppConfig, args: &Args) -> Result<Self> {
+        let renderer = TerminalRenderer::new()?;
+        let rendering_config = config.rendering.clone();
+        let requested_use_loopback = config.audio.resolved_use_loopback();
+        let mut audio_flags = runtime_audio_flags(true, requested_use_loopback);
 
-        // Initialize audio output (optional, with graceful degradation)
-        let audio_output = if no_audio_output {
-            tracing::info!("Audio output disabled by CLI flag");
-            None
-        } else {
-            tracing::debug!("Initializing audio output device...");
+        let audio_device = match create_audio_capture_device(
+            args,
+            config.audio.buffer_capacity,
+            config.audio.sample_rate,
+            config.audio.channels,
+            requested_use_loopback,
+            config.audio.device_name.clone(),
+        ) {
+            Ok(device) => device,
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    "Failed to initialize audio capture; falling back to audio-off mode"
+                );
+                audio_flags = runtime_audio_flags(false, requested_use_loopback);
+                create_silent_audio_device(
+                    config.audio.buffer_capacity,
+                    config.audio.sample_rate,
+                    config.audio.channels,
+                )?
+            }
+        };
+
+        // Initialize audio output if microphone is enabled (for passthrough)
+        // or if we want to support playback in the future
+        let audio_output = if audio_flags.microphone_enabled {
             match AudioOutputDevice::new_with_device(config.audio.output_device_name.clone()) {
-                Ok(output) => {
-                    tracing::info!("Audio output device initialized successfully");
-                    Some(output)
-                }
-                Err(e) => {
+                Ok(device) => Some(device),
+                Err(error) => {
                     tracing::warn!(
-                        "Failed to initialize audio output: {}. Continuing without audio playback.",
-                        e
+                        error = %error,
+                        "Failed to initialize audio playback; continuing with playback off"
                     );
                     None
                 }
             }
+        } else {
+            None
         };
 
-        // Initialize DSP processor with actual sample rate from audio device
-        tracing::debug!("Initializing DSP processor...");
-        let dsp_processor = DspProcessor::new(actual_sample_rate, config.dsp.fft_size)
-            .context("Failed to initialize DSP processor")?;
-        tracing::info!(
-            "DSP processor initialized: sample_rate={}, fft_size={}",
-            actual_sample_rate,
-            config.dsp.fft_size
-        );
+        let dsp_processor = DspProcessor::new(config.audio.sample_rate, config.dsp.fft_size)?;
 
-        // Determine initial character set
-        let charset_type = match config.visualization.character_set.as_str() {
-            "basic" => CharacterSetType::Basic,
-            "extended" => CharacterSetType::Extended,
-            "blocks" => CharacterSetType::Blocks,
-            "shading" => CharacterSetType::Shading,
-            "dots" => CharacterSetType::Dots,
-            "lines" => CharacterSetType::Lines,
-            "braille" => CharacterSetType::Braille,
-            "smooth64" | "smooth_64" => CharacterSetType::Smooth64,
-            "smooth128" | "smooth_128" => CharacterSetType::Smooth128,
-            "smooth256" | "smooth_256" => CharacterSetType::Smooth256,
-            _ => CharacterSetType::Smooth64, // Default to smooth gradients!
-        };
-        let current_charset = get_character_set(charset_type);
-        let charset_index = match charset_type {
-            CharacterSetType::Basic => 0,
-            CharacterSetType::Extended => 1,
-            CharacterSetType::Blocks => 2,
-            CharacterSetType::Shading => 3,
-            CharacterSetType::Dots => 4,
-            CharacterSetType::Lines => 5,
-            CharacterSetType::Braille => 6,
-            CharacterSetType::Smooth64 => 7,
-            CharacterSetType::Smooth128 => 8,
-            CharacterSetType::Smooth256 => 9,
-        };
+        let color_scheme = ColorScheme::default();
+        let current_charset =
+            CharacterSet::from_name(&config.visualization.character_set).unwrap_or_default();
+        let live_quality = rendering_config.live_braille_quality();
+        let live_color_mode = color_mode_from_config(rendering_config.live_color_mode());
 
-        // Initialize visualizer (start with sine wave)
-        tracing::debug!("Initializing visualizer...");
-        let viz_config = SineWaveConfig {
+        // Default visualizer
+        let sine_config = visualization::SineWaveConfig {
             amplitude_sensitivity: config.visualization.sine_wave.amplitude,
-            ..Default::default()
+            frequency_sensitivity: config.visualization.sine_wave.frequency,
+            thickness_sensitivity: 5.0, // Default value
+            base_frequency: 1.0,
+            smoothing_factor: config.visualization.sine_wave.smoothing,
+            phase_speed: 0.1,
         };
-        let visualizer: Box<dyn Visualizer> = Box::new(SineWaveVisualizer::new(
-            viz_config.clone(),
+
+        let visualizer = Box::new(SineWaveVisualizer::new(
+            sine_config,
             current_charset.clone(),
         ));
-        let visualizer_mode = VisualizerMode::SineWave;
-        tracing::info!(
-            "Visualizer initialized: type=sine_wave, sensitivity={}",
-            config.visualization.sine_wave.amplitude
-        );
 
-        // Initialize terminal renderer
-        tracing::debug!("Initializing terminal renderer...");
-        let renderer = TerminalRenderer::new().context("Failed to initialize terminal renderer")?;
-        let (width, height) = renderer.dimensions();
-        tracing::info!("Terminal renderer initialized: {}x{}", width, height);
-        tracing::info!("All components initialized successfully");
-
-        // Initialize color scheme (start with monochrome)
-        let color_scheme = ColorScheme::new(ColorSchemeType::Monochrome);
-        let color_scheme_index = 0;
-
-        // Initialize effect pipeline with effects
-        let mut effect_pipeline = EffectPipeline::new();
-        // Add bloom effect (glow for bright elements with Gaussian blur)
-        effect_pipeline.add_effect(Box::new(effects::bloom::BloomEffect::new(0.7, 2)));
-        // Add scanline effect (CRT-style horizontal lines)
-        effect_pipeline.add_effect(Box::new(effects::scanline::ScanlineEffect::new(2)));
-        // Add phosphor glow effect (temporal persistence for CRT-style trails)
-        effect_pipeline.add_effect(Box::new(effects::phosphor::PhosphorGlowEffect::new(
-            0.3, 0.7,
-        )));
-        // Add grid overlay effect for testing (optional)
-        // effect_pipeline.add_effect(Box::new(effects::grid_overlay::GridOverlayEffect::new(10)));
-        effect_pipeline.set_enabled(false); // Start with effects disabled
-        tracing::debug!(
-            "Effect pipeline initialized with Bloom + Scanline + Phosphor effects (disabled)"
-        );
+        // Create Internet Archive stream channel
+        let (tx, rx) = mpsc::channel(1);
 
         Ok(Self {
             audio_device,
             audio_output,
             dsp_processor,
             visualizer,
-            effect_pipeline,
+            visualizer_mode: VisualizerMode::SineWave,
             renderer,
-            ring_buffer,
-            target_fps: config.rendering.target_fps,
-            sample_rate: actual_sample_rate,
-            use_loopback,
-            current_charset,
-            charset_index,
-            microphone_enabled: false, // Start with microphone disabled by default
-            sensitivity_multiplier: 1.0, // Start at 100% sensitivity
-            show_labels,
-            visualizer_mode,
+            effect_pipeline: EffectPipeline::new(),
             color_scheme,
-            color_scheme_index,
+            target_fps: config.rendering.target_fps,
+            microphone_enabled: audio_flags.microphone_enabled,
+            show_channel_number: false,
+            sensitivity_multiplier: 1.0,
             last_key_press: Instant::now(),
-            key_debounce_ms: 200, // 200ms debounce = max 5 key presses per second
-            // Oscilloscope defaults
-            osc_show_grid: true,
-            osc_waveform_mode: WaveformMode::LineAndFill,
-            osc_trigger_slope: TriggerSlope::Positive,
-            // Spectrum defaults
-            spectrum_peak_hold: true, // Start with peaks enabled
-            spectrum_mapping: SpectrumMapping::NoteBars,
-            spectrum_range_preset_index: 1, // Default to A1–A5
-            // Raycaster 3D defaults
-            ray3d_mode: crate::visualization::ray_tracer::RenderMode::Wireframe {
-                step_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_STEP_RAD,
-                tol_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_TOL_RAD,
-            },
-            ray3d_rotation_speed_y: 0.6,
-            ray3d_auto_rotate: true,
-
-            ray3d_brightness_boost: 0.0,
-            ray3d_wire_step_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_STEP_RAD,
-            ray3d_wire_tol_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_TOL_RAD,
-            // Model Viewer defaults
-            model_viewer_index: 0, // Start with first model (cube)
-            model_viewer_auto_rotate: true,
-            // Effect control defaults
-            selected_effect_for_intensity: None, // No effect selected initially
-            // UI overlays defaults
-            show_channel_number: true,
-            // File prompt defaults
+            key_debounce_ms: 200,
             file_prompt_active: false,
             file_prompt_buffer: String::new(),
             file_prompt_error: None,
             paste_suppress_deadline: None,
+
+            ray3d_mode: RenderMode::Wireframe {
+                step_rad: visualization::ray_tracer::DEFAULT_WIREFRAME_STEP_RAD,
+                tol_rad: visualization::ray_tracer::DEFAULT_WIREFRAME_TOL_RAD,
+            },
+            ray3d_wire_step_rad: visualization::ray_tracer::DEFAULT_WIREFRAME_STEP_RAD,
+            ray3d_wire_tol_rad: visualization::ray_tracer::DEFAULT_WIREFRAME_TOL_RAD,
+            ray3d_rotation_speed_y: 0.5,
+            ray3d_auto_rotate: true,
+            ray3d_brightness_boost: 0.0,
+
+            model_viewer_auto_rotate: true,
+
+            spectrum_mapping: SpectrumMapping::NoteBars,
+            spectrum_range_preset_index: 0,
+            spectrum_peak_hold: true,
+            show_labels: true,
+
+            osc_show_grid: true,
+            osc_waveform_mode: WaveformMode::Line,
+            osc_trigger_slope: TriggerSlope::Positive,
+
+            current_charset,
+            live_quality,
+            live_quality_defaults: live_quality,
+            live_color_mode,
+            live_color_mode_default: live_color_mode,
+            live_postprocess: GridBraillePostProcessor,
+            audio_buffer_capacity: config.audio.buffer_capacity,
+            use_loopback: audio_flags.use_loopback,
+            rendering_config,
+
+            internet_archive: config.internet_archive.clone(),
+            archive_stream_tx: tx,
+            archive_stream_rx: rx,
+            is_loading_archive: false,
+            pending_archive_channel: ArchiveChannelKind::Tv,
+            archive_request_context: ArchiveRequestContext::ManualHotkey,
+            last_archive_identifiers: HashMap::new(),
         })
     }
 
-    /// Create a new application instance (legacy method for backward compatibility)
-    #[allow(dead_code)]
-    fn new(target_fps: u32, sensitivity: f32) -> Result<Self> {
-        let mut config = config::AppConfig::default();
-        config.rendering.target_fps = target_fps;
-        config.visualization.sine_wave.amplitude = sensitivity;
-        Self::new_with_config(config, false, false, false)
-    }
-
-    /// Initialize audio capture with retry logic
-    ///
-    /// Attempts to initialize audio capture with exponential backoff retry strategy.
-    /// Retries 3 times with delays of 100ms, 500ms, and 1000ms.
-    fn init_audio_capture_with_retry(
-        ring_buffer: Arc<AudioRingBuffer>,
-        device_name: Option<String>,
-        use_loopback: bool,
-    ) -> Result<Box<dyn AudioCaptureDevice>> {
-        const MAX_RETRIES: u32 = 3;
-        const RETRY_DELAYS_MS: [u64; 3] = [100, 500, 1000];
-
-        // Use WASAPI loopback on Windows if requested
-        #[cfg(windows)]
-        if use_loopback {
-            tracing::info!("Using Windows WASAPI loopback for system audio capture");
-            match WasapiLoopbackDevice::new(ring_buffer.clone()) {
-                Ok(device) => {
-                    tracing::info!("WASAPI loopback device initialized successfully");
-                    return Ok(Box::new(device));
-                }
-                Err(e) => {
-                    tracing::error!("Failed to initialize WASAPI loopback: {}", e);
-                    tracing::info!("Falling back to standard input device (microphone) via CPAL");
-                    // Continue to CPAL fallback below
-                }
-            }
+    fn play_video_stream(&mut self, path: &str) -> Result<()> {
+        let archive_channel = ArchiveChannelKind::from_visualizer_mode(self.visualizer_mode);
+        let prepared = video::prepare_video_input(path)
+            .with_context(|| format!("Failed to prepare video input: {path}"))?;
+        if let Some(label) = &prepared.display_label {
+            tracing::info!("{label}");
         }
+        self.renderer
+            .cleanup()
+            .context("Failed to hand off terminal to video playback")?;
 
-        // Fall back to CPAL device (microphone or specified device)
-        for attempt in 0..MAX_RETRIES {
-            match CpalAudioDevice::new_with_device(ring_buffer.clone(), device_name.clone()) {
-                Ok(device) => {
-                    if attempt > 0 {
-                        tracing::info!(
-                            "Audio capture initialized successfully after {} retries",
-                            attempt
+        let playback_result = video::run_video_playback_once_with_config(
+            &prepared.playback_target,
+            &self.rendering_config,
+            archive_channel.is_some(),
+        );
+
+        self.renderer = TerminalRenderer::new().context("Failed to restore main renderer")?;
+        self.last_key_press = Instant::now();
+
+        match playback_result.with_context(|| format!("Failed to play video input: {path}"))? {
+            video::VideoPlaybackExit::UserQuit => Ok(()),
+            video::VideoPlaybackExit::NextChannel => {
+                self.next_visualizer_mode();
+                Ok(())
+            }
+            video::VideoPlaybackExit::PreviousChannel => {
+                self.prev_visualizer_mode();
+                Ok(())
+            }
+            video::VideoPlaybackExit::RetuneArchive => {
+                if let Some(channel) =
+                    ArchiveChannelKind::from_visualizer_mode(self.visualizer_mode)
+                {
+                    self.request_archive_stream_for(channel, ArchiveRequestContext::ManualHotkey);
+                }
+                Ok(())
+            }
+            video::VideoPlaybackExit::EndOfStream => {
+                if let Some(channel) = archive_channel {
+                    if self.visualizer_mode == channel.visualizer_mode() {
+                        self.request_archive_stream_for(
+                            channel,
+                            ArchiveRequestContext::PlaybackEnded,
                         );
                     }
-                    return Ok(Box::new(device));
                 }
-                Err(e) => {
-                    if attempt < MAX_RETRIES - 1 {
-                        let delay = RETRY_DELAYS_MS[attempt as usize];
-                        tracing::warn!(
-                            "Failed to initialize audio capture (attempt {}/{}): {}. Retrying in {}ms...",
-                            attempt + 1,
-                            MAX_RETRIES,
-                            e,
-                            delay
-                        );
-                        std::thread::sleep(Duration::from_millis(delay));
-                    } else {
-
-                        tracing::error!(
-                            "Failed to initialize audio capture after {} attempts: {}",
-                            MAX_RETRIES,
-                            e
-                        );
-                        
-                        tracing::warn!("FALLBACK: Initializing silent audio device (no audio hardware found).");
-                        tracing::warn!("The application will run in visualizer-only mode with simulated silence.");
-                        
-                        // Fallback to silent device
-                        let device = SilentAudioDevice::new(
-                            ring_buffer.clone(),
-                            44100, // Default sample rate
-                            2,     // Default channels
-                        ).context("Failed to initialize silent audio device")?;
-                        
-                        return Ok(Box::new(device));
-                    }
-                }
+                Ok(())
             }
         }
-
-        unreachable!()
     }
 
-    /// Cycle to the next character set
-    #[allow(dead_code)] // Reserved for future charset cycling feature
-    fn next_charset(&mut self) {
-        let charsets = get_all_character_sets();
-        self.charset_index = (self.charset_index + 1) % charsets.len();
-        self.current_charset = charsets[self.charset_index].clone();
-        tracing::info!("Switched to character set: {}", self.current_charset.name);
-    }
-
-    /// Cycle to the next color scheme
-    fn next_color_scheme(&mut self) {
-        let schemes = ColorSchemeType::all();
-        self.color_scheme_index = (self.color_scheme_index + 1) % schemes.len();
-        let scheme_type = schemes[self.color_scheme_index];
-        self.color_scheme = ColorScheme::new(scheme_type);
-        // Recreate visualizer to apply new color scheme
-        self.recreate_visualizer();
-        tracing::info!("Switched to color scheme: {}", scheme_type.name());
-    }
-
-    /// Toggle microphone on/off
-    fn toggle_microphone(&mut self) {
-        self.microphone_enabled = !self.microphone_enabled;
-        let status = if self.microphone_enabled { "ON" } else { "OFF" };
-        tracing::info!("Microphone toggled: {}", status);
-    }
-
-    /// Toggle effects pipeline on/off (master toggle)
-    fn toggle_effects(&mut self) {
-        let new_state = !self.effect_pipeline.is_enabled();
-        self.effect_pipeline.set_enabled(new_state);
-        let status = if new_state { "ON" } else { "OFF" };
-        self.selected_effect_for_intensity = None; // Master toggle affects all effects
-        tracing::info!("Effects toggled: {}", status);
-    }
-
-    /// Toggle a specific effect by name
-    fn toggle_effect(&mut self, effect_name: &str) {
-        if let Some(effect) = self.effect_pipeline.get_effect_mut(effect_name) {
-            let new_state = !effect.is_enabled();
-            effect.set_enabled(new_state);
-            let status = if new_state { "ON" } else { "OFF" };
-            self.selected_effect_for_intensity = Some(effect_name.to_string());
-            tracing::info!("{} effect toggled: {}", effect_name, status);
-        }
-    }
-
-    /// Increase intensity of selected effect (or all if none selected)
-    fn increase_effect_intensity(&mut self) {
-        if let Some(ref effect_name) = self.selected_effect_for_intensity {
-            // Adjust specific effect
-            if let Some(effect) = self.effect_pipeline.get_effect_mut(effect_name) {
-                let old_intensity = effect.intensity();
-                let new_intensity = (old_intensity + 0.1).min(1.0);
-                effect.set_intensity(new_intensity);
-                tracing::info!(
-                    "{} intensity: {:.1}% → {:.1}%",
-                    effect_name,
-                    old_intensity * 100.0,
-                    new_intensity * 100.0
-                );
-            }
-        } else {
-            // Adjust all effects - collect names as owned Strings to avoid borrow issues
-            let effect_names: Vec<String> = self
-                .effect_pipeline
-                .effect_names()
-                .into_iter()
-                .map(|s| s.to_string())
-                .collect();
-            for effect_name in effect_names {
-                if let Some(effect) = self.effect_pipeline.get_effect_mut(&effect_name) {
-                    let new_intensity = (effect.intensity() + 0.1).min(1.0);
-                    effect.set_intensity(new_intensity);
-                }
-            }
-            tracing::info!("All effects intensity increased by 10%");
-        }
-    }
-
-    /// Decrease intensity of selected effect (or all if none selected)
-    fn decrease_effect_intensity(&mut self) {
-        if let Some(ref effect_name) = self.selected_effect_for_intensity {
-            // Adjust specific effect
-            if let Some(effect) = self.effect_pipeline.get_effect_mut(effect_name) {
-                let old_intensity = effect.intensity();
-                let new_intensity = (old_intensity - 0.1).max(0.0);
-                effect.set_intensity(new_intensity);
-                tracing::info!(
-                    "{} intensity: {:.1}% → {:.1}%",
-                    effect_name,
-                    old_intensity * 100.0,
-                    new_intensity * 100.0
-                );
-            }
-        } else {
-            // Adjust all effects - collect names as owned Strings to avoid borrow issues
-            let effect_names: Vec<String> = self
-                .effect_pipeline
-                .effect_names()
-                .into_iter()
-                .map(|s| s.to_string())
-                .collect();
-            for effect_name in effect_names {
-                if let Some(effect) = self.effect_pipeline.get_effect_mut(&effect_name) {
-                    let new_intensity = (effect.intensity() - 0.1).max(0.0);
-                    effect.set_intensity(new_intensity);
-                }
-            }
-            tracing::info!("All effects intensity decreased by 10%");
-        }
-    }
-
-    /// Increase sensitivity by 10%
-    fn increase_sensitivity(&mut self) {
-        self.sensitivity_multiplier = (self.sensitivity_multiplier + 0.1).min(5.0);
-        self.recreate_visualizer();
-        tracing::info!(
-            "Sensitivity increased to {:.1}x",
-            self.sensitivity_multiplier
-        );
-    }
-
-    /// Decrease sensitivity by 10%
-    fn decrease_sensitivity(&mut self) {
-        self.sensitivity_multiplier = (self.sensitivity_multiplier - 0.1).max(0.1);
-        self.recreate_visualizer();
-        tracing::info!(
-            "Sensitivity decreased to {:.1}x",
-            self.sensitivity_multiplier
-        );
-    }
-
-    /// Set sensitivity to a preset value (1-9 = 0.5x to 4.5x)
-    fn set_sensitivity_preset(&mut self, preset: u8) {
-        if (1..=9).contains(&preset) {
-            self.sensitivity_multiplier = 0.5 * preset as f32;
-            self.recreate_visualizer();
-            tracing::info!(
-                "Sensitivity preset {} set to {:.1}x",
-                preset,
-                self.sensitivity_multiplier
-            );
-        }
-    }
-
-    /// Switch to the next visualizer mode
     fn next_visualizer_mode(&mut self) {
         self.visualizer_mode = self.visualizer_mode.next();
         self.recreate_visualizer();
-        tracing::info!("Switched to visualizer: {}", self.visualizer_mode.name());
+        self.autotune_archive_mode();
     }
 
-    /// Switch to the previous visualizer mode
     fn prev_visualizer_mode(&mut self) {
         self.visualizer_mode = self.visualizer_mode.prev();
         self.recreate_visualizer();
-        tracing::info!("Switched to visualizer: {}", self.visualizer_mode.name());
+        self.autotune_archive_mode();
     }
 
-    /// Recreate visualizer with current mode and sensitivity
+    fn autotune_archive_mode(&mut self) {
+        if let Some(channel) = ArchiveChannelKind::from_visualizer_mode(self.visualizer_mode) {
+            self.request_archive_stream_for(channel, ArchiveRequestContext::RotationMode);
+        }
+    }
+
+    fn request_archive_stream(&mut self, context: ArchiveRequestContext) {
+        let channel = ArchiveChannelKind::from_visualizer_mode(self.visualizer_mode)
+            .unwrap_or(ArchiveChannelKind::Tv);
+        self.request_archive_stream_for(channel, context);
+    }
+
+    fn request_archive_stream_for(
+        &mut self,
+        channel: ArchiveChannelKind,
+        context: ArchiveRequestContext,
+    ) {
+        let queries = match channel {
+            ArchiveChannelKind::Tv => &self.internet_archive.tv_queries,
+            ArchiveChannelKind::Cooking => &self.internet_archive.cooking_queries,
+            ArchiveChannelKind::PublicAccess => &self.internet_archive.public_access_queries,
+            ArchiveChannelKind::Industrial => &self.internet_archive.industrial_queries,
+            ArchiveChannelKind::Educational => &self.internet_archive.educational_queries,
+            ArchiveChannelKind::LocalNews => &self.internet_archive.local_news_queries,
+        };
+
+        if queries.is_empty() {
+            tracing::warn!(
+                "No Internet Archive queries configured for {}",
+                channel.name()
+            );
+            return;
+        }
+
+        if self.is_loading_archive {
+            tracing::warn!("Already loading an Internet Archive video.");
+            return;
+        }
+
+        self.is_loading_archive = true;
+        self.pending_archive_channel = channel;
+        self.archive_request_context = context;
+        let excluded_identifier = self.last_archive_identifiers.get(&channel).cloned();
+
+        tracing::info!(
+            "Requesting random Internet Archive video for {} ({})...",
+            channel.name(),
+            match context {
+                ArchiveRequestContext::ManualHotkey => "manual",
+                ArchiveRequestContext::RotationMode => "rotation",
+                ArchiveRequestContext::PlaybackEnded => "autoplay",
+            }
+        );
+
+        let queries = queries.to_vec();
+        let rows_per_page = self.internet_archive.rows_per_page;
+        let max_pages = self.internet_archive.max_pages;
+        let tx = self.archive_stream_tx.clone();
+        tokio::spawn(async move {
+            let result = match tokio::task::spawn_blocking(move || {
+                crate::video::internet_archive::get_random_video_stream_excluding(
+                    &queries,
+                    rows_per_page,
+                    max_pages,
+                    excluded_identifier.as_deref(),
+                )
+            })
+            .await
+            {
+                Ok(result) => result,
+                Err(e) => Err(anyhow!("Internet Archive fetch task failed: {}", e)),
+            };
+
+            if let Err(e) = tx.send(result).await {
+                tracing::error!(
+                    "Failed to send Internet Archive stream back to main thread: {}",
+                    e
+                );
+            }
+        });
+    }
+
     fn recreate_visualizer(&mut self) {
         self.visualizer = match self.visualizer_mode {
             VisualizerMode::SineWave => {
-                let mut config = SineWaveConfig::default();
+                let mut config = visualization::SineWaveConfig::default();
                 config.amplitude_sensitivity *= self.sensitivity_multiplier;
-                config.frequency_sensitivity *= self.sensitivity_multiplier;
-                config.thickness_sensitivity *= self.sensitivity_multiplier;
                 let mut viz = SineWaveVisualizer::new(config, self.current_charset.clone());
                 viz.set_color_scheme(self.color_scheme.clone());
                 Box::new(viz)
             }
             VisualizerMode::Spectrum => {
-                let mut config = SpectrumConfig::default();
-                config.amplitude_sensitivity *= self.sensitivity_multiplier;
-                config.show_labels = self.show_labels;
-                config.peak_hold_enabled = self.spectrum_peak_hold;
-                config.mapping = self.spectrum_mapping;
-                if matches!(self.spectrum_mapping, SpectrumMapping::NoteBars) {
-                    let (_label, min, max) = match self.spectrum_range_preset_index % 3 {
-                        0 => ("A2-A5", 110.0, 880.0),
-                        1 => ("A1-A5", 55.0, 880.0),
-                        _ => ("A1-A6", 55.0, 1760.0),
-                    };
-                    config.freq_min = min;
-                    config.freq_max = max;
-                }
+                let config = SpectrumConfig::default();
+                let sample_rate = self.audio_device.get_config().sample_rate;
                 let mut viz =
-                    SpectrumVisualizer::new(config, self.sample_rate, self.current_charset.clone());
+                    SpectrumVisualizer::new(config, sample_rate, self.current_charset.clone());
                 viz.set_color_scheme(self.color_scheme.clone());
+                viz.set_mapping(match self.spectrum_mapping {
+                    SpectrumMapping::NoteBars => visualization::SpectrumMapping::NoteBars,
+                    SpectrumMapping::LogBars => visualization::SpectrumMapping::LogBars,
+                });
+                viz.set_peak_hold(self.spectrum_peak_hold);
+                viz.set_show_labels(self.show_labels);
                 Box::new(viz)
             }
             VisualizerMode::Oscilloscope => {
-                let mut config = OscilloscopeConfig::default();
-                config.amplitude_sensitivity *= self.sensitivity_multiplier;
-                // Apply oscilloscope-specific settings
-                config.show_grid = self.osc_show_grid;
-                config.waveform_mode = self.osc_waveform_mode;
-                config.trigger_slope = self.osc_trigger_slope;
+                let config = OscilloscopeConfig::default();
                 let mut viz = OscilloscopeVisualizer::new(config);
                 viz.set_color_scheme(self.color_scheme.clone());
+                viz.set_show_grid(self.osc_show_grid);
                 Box::new(viz)
             }
             VisualizerMode::XYOscilloscope => {
-                let mut config = visualization::XYOscilloscopeConfig::default();
-                config.sensitivity *= self.sensitivity_multiplier;
-                let mut viz = visualization::XYOscilloscopeVisualizer::new(config);
+                let config = XYOscilloscopeConfig::default();
+                let mut viz = XYOscilloscopeVisualizer::new(config);
                 viz.set_color_scheme(self.color_scheme.clone());
-                Box::new(viz)
-            }
-            VisualizerMode::Spectrogram => {
-                let viz = SpectrogramVisualizer::new(
-                    self.color_scheme.clone(),
-                    ScrollDirection::Up, // Default to scrolling up
-                );
-                Box::new(viz)
-            }
-            VisualizerMode::WaveformTunnel => {
-                let viz = WaveformTunnelVisualizer::new(self.color_scheme.clone());
-                Box::new(viz)
-            }
-            VisualizerMode::TerrainLandscape => {
-                let viz = TerrainLandscapeVisualizer::new(self.color_scheme.clone());
                 Box::new(viz)
             }
             VisualizerMode::Raycaster3D => {
                 let mode = match self.ray3d_mode {
-                    crate::visualization::ray_tracer::RenderMode::Wireframe { .. } => {
-                        crate::visualization::ray_tracer::RenderMode::Wireframe {
-                            step_rad: self.ray3d_wire_step_rad,
-                            tol_rad: self.ray3d_wire_tol_rad,
-                        }
-                    }
-                    crate::visualization::ray_tracer::RenderMode::Solid => {
-                        crate::visualization::ray_tracer::RenderMode::Solid
-                    }
+                    RenderMode::Wireframe { .. } => RenderMode::Wireframe {
+                        step_rad: self.ray3d_wire_step_rad,
+                        tol_rad: self.ray3d_wire_tol_rad,
+                    },
+                    RenderMode::Solid => RenderMode::Solid,
                 };
                 let mut viz = Raycaster3DVisualizer::new_with(mode, self.ray3d_brightness_boost);
                 viz.set_rotation_speed_y(self.ray3d_rotation_speed_y);
@@ -973,13 +778,50 @@ impl Application {
                 Box::new(viz)
             }
             VisualizerMode::ObjViewer => {
-                let mut viz = ObjViewerVisualizer::new_with_model_index(self.model_viewer_index);
+                let mut viz = ObjViewerVisualizer::new_with_model_index(0);
                 viz.set_auto_rotate(self.model_viewer_auto_rotate);
                 Box::new(viz)
             }
-            VisualizerMode::NightNight => {
-                let viz = NightNightVisualizer::new(self.color_scheme.clone());
+            VisualizerMode::Primitives => {
+                let mut viz = PrimitivesVisualizer::new(self.color_scheme.clone());
+                viz.set_color_scheme(self.color_scheme.clone());
                 Box::new(viz)
+            }
+            VisualizerMode::GridTunnel => {
+                let mut viz = GridTunnelVisualizer::new(self.color_scheme.clone());
+                viz.set_color_scheme(self.color_scheme.clone());
+                Box::new(viz)
+            }
+            VisualizerMode::GravityWell => {
+                let mut viz = GravityWellVisualizer::new(self.color_scheme.clone());
+                viz.set_color_scheme(self.color_scheme.clone());
+                Box::new(viz)
+            }
+            VisualizerMode::WaveformTunnel => {
+                let mut viz = WaveformTunnelVisualizer::new(self.color_scheme.clone());
+                viz.set_color_scheme(self.color_scheme.clone());
+                Box::new(viz)
+            }
+            VisualizerMode::TerrainLandscape => {
+                let mut viz = TerrainLandscapeVisualizer::new(self.color_scheme.clone());
+                viz.set_color_scheme(self.color_scheme.clone());
+                Box::new(viz)
+            }
+            VisualizerMode::Starfield => {
+                let mut viz = StarfieldVisualizer::new(self.color_scheme.clone());
+                viz.set_color_scheme(self.color_scheme.clone());
+                Box::new(viz)
+            }
+            VisualizerMode::Spectrogram => {
+                let mut viz = SpectrogramVisualizer::new(
+                    self.color_scheme.clone(),
+                    visualization::ScrollDirection::Up,
+                );
+                viz.set_color_scheme(self.color_scheme.clone());
+                Box::new(viz)
+            }
+            VisualizerMode::NightNight => {
+                Box::new(NightNightVisualizer::new(self.color_scheme.clone()))
             }
             VisualizerMode::Image => {
                 let mut viz = ImageChannelVisualizer::new(self.color_scheme.clone());
@@ -991,7 +833,139 @@ impl Application {
                 viz.set_color_scheme(self.color_scheme.clone());
                 Box::new(viz)
             }
+            VisualizerMode::InternetArchive => {
+                let mut viz = VideoChannelVisualizer::new_named(
+                    self.color_scheme.clone(),
+                    ArchiveChannelKind::Tv.name(),
+                    ArchiveChannelKind::Tv.idle_label(),
+                );
+                viz.set_color_scheme(self.color_scheme.clone());
+                Box::new(viz)
+            }
+            VisualizerMode::ArchiveCooking => {
+                let mut viz = VideoChannelVisualizer::new_named(
+                    self.color_scheme.clone(),
+                    ArchiveChannelKind::Cooking.name(),
+                    ArchiveChannelKind::Cooking.idle_label(),
+                );
+                viz.set_color_scheme(self.color_scheme.clone());
+                Box::new(viz)
+            }
+            VisualizerMode::ArchivePublicAccess => {
+                let mut viz = VideoChannelVisualizer::new_named(
+                    self.color_scheme.clone(),
+                    ArchiveChannelKind::PublicAccess.name(),
+                    ArchiveChannelKind::PublicAccess.idle_label(),
+                );
+                viz.set_color_scheme(self.color_scheme.clone());
+                Box::new(viz)
+            }
+            VisualizerMode::ArchiveIndustrial => {
+                let mut viz = VideoChannelVisualizer::new_named(
+                    self.color_scheme.clone(),
+                    ArchiveChannelKind::Industrial.name(),
+                    ArchiveChannelKind::Industrial.idle_label(),
+                );
+                viz.set_color_scheme(self.color_scheme.clone());
+                Box::new(viz)
+            }
+            VisualizerMode::ArchiveEducational => {
+                let mut viz = VideoChannelVisualizer::new_named(
+                    self.color_scheme.clone(),
+                    ArchiveChannelKind::Educational.name(),
+                    ArchiveChannelKind::Educational.idle_label(),
+                );
+                viz.set_color_scheme(self.color_scheme.clone());
+                Box::new(viz)
+            }
+            VisualizerMode::ArchiveLocalNews => {
+                let mut viz = VideoChannelVisualizer::new_named(
+                    self.color_scheme.clone(),
+                    ArchiveChannelKind::LocalNews.name(),
+                    ArchiveChannelKind::LocalNews.idle_label(),
+                );
+                viz.set_color_scheme(self.color_scheme.clone());
+                Box::new(viz)
+            }
         };
+    }
+    fn next_color_scheme(&mut self) {
+        self.color_scheme = self.color_scheme.next();
+        // Update visualizer with new color scheme
+        // Note: Some visualizers might need explicit update
+        if let Some(viz) =
+            (&mut *self.visualizer as &mut dyn std::any::Any).downcast_mut::<SineWaveVisualizer>()
+        {
+            viz.set_color_scheme(self.color_scheme.clone());
+        } else if let Some(viz) =
+            (&mut *self.visualizer as &mut dyn std::any::Any).downcast_mut::<SpectrumVisualizer>()
+        {
+            viz.set_color_scheme(self.color_scheme.clone());
+        } else if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+            .downcast_mut::<OscilloscopeVisualizer>()
+        {
+            viz.set_color_scheme(self.color_scheme.clone());
+        } else if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+            .downcast_mut::<ImageChannelVisualizer>()
+        {
+            viz.set_color_scheme(self.color_scheme.clone());
+        } else if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+            .downcast_mut::<VideoChannelVisualizer>()
+        {
+            viz.set_color_scheme(self.color_scheme.clone());
+        } else if let Some(viz) =
+            (&mut *self.visualizer as &mut dyn std::any::Any).downcast_mut::<PrimitivesVisualizer>()
+        {
+            viz.set_color_scheme(self.color_scheme.clone());
+        } else if let Some(viz) =
+            (&mut *self.visualizer as &mut dyn std::any::Any).downcast_mut::<GridTunnelVisualizer>()
+        {
+            viz.set_color_scheme(self.color_scheme.clone());
+        } else if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+            .downcast_mut::<GravityWellVisualizer>()
+        {
+            viz.set_color_scheme(self.color_scheme.clone());
+        } else if let Some(viz) =
+            (&mut *self.visualizer as &mut dyn std::any::Any).downcast_mut::<StarfieldVisualizer>()
+        {
+            viz.set_color_scheme(self.color_scheme.clone());
+        }
+        // Raycaster and ObjViewer might use their own coloring or ignore it
+    }
+
+    fn toggle_effects(&mut self) {
+        self.effect_pipeline.toggle_enabled();
+    }
+
+    fn toggle_effect(&mut self, name: &str) {
+        self.effect_pipeline.toggle_effect(name);
+    }
+
+    fn decrease_effect_intensity(&mut self) {
+        self.effect_pipeline.decrease_all_intensities();
+    }
+
+    fn increase_effect_intensity(&mut self) {
+        self.effect_pipeline.increase_all_intensities();
+    }
+
+    fn toggle_microphone(&mut self) {
+        self.microphone_enabled = !self.microphone_enabled;
+    }
+
+    fn increase_sensitivity(&mut self) {
+        self.sensitivity_multiplier = (self.sensitivity_multiplier + 0.1).min(5.0);
+        self.recreate_visualizer();
+    }
+
+    fn decrease_sensitivity(&mut self) {
+        self.sensitivity_multiplier = (self.sensitivity_multiplier - 0.1).max(0.1);
+        self.recreate_visualizer();
+    }
+
+    fn set_sensitivity_preset(&mut self, level: u8) {
+        self.sensitivity_multiplier = level as f32 * 0.5;
+        self.recreate_visualizer();
     }
 
     /// Apply character set mapping and colors to the grid
@@ -1030,7 +1004,7 @@ impl Application {
         }
     }
 
-    /// Try to load a file into the current channel (Image/Video)
+    /// Try to load a file into the current channel (Image/Video/Archive TV)
     fn try_load_current_channel_path(&mut self, path: &str) -> Result<(), String> {
         match self.visualizer_mode {
             VisualizerMode::Image => {
@@ -1051,12 +1025,38 @@ impl Application {
                     Err("internal visualizer type mismatch (Video)".into())
                 }
             }
-            _ => Err("File input is only available in Image/Video channels".into()),
+            VisualizerMode::InternetArchive
+            | VisualizerMode::ArchiveCooking
+            | VisualizerMode::ArchivePublicAccess
+            | VisualizerMode::ArchiveIndustrial
+            | VisualizerMode::ArchiveEducational
+            | VisualizerMode::ArchiveLocalNews => {
+                if let Some(v) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                    .downcast_mut::<crate::visualization::VideoChannelVisualizer>()
+                {
+                    v.try_load(path)
+                } else {
+                    Err("internal visualizer type mismatch (Internet Archive)".into())
+                }
+            }
+            _ => Err("File input is only available in Image/Video/Archive TV channels".into()),
         }
     }
 
     /// Add UI overlay with renderer info and controls
     fn add_ui_overlay(&self, grid: &mut GridBuffer) {
+        if self.is_loading_archive {
+            let loading_text = format!("Tuning {}...", self.pending_archive_channel.name());
+            let start_x = (grid.width().saturating_sub(loading_text.len())) / 2;
+            let y = grid.height() / 2;
+            for (i, ch) in loading_text.chars().enumerate() {
+                let x = start_x + i;
+                if x < grid.width() {
+                    grid.set_cell(x, y, ch);
+                }
+            }
+            return; // Don't draw other UI while loading
+        }
         let visualizer_name = self.visualizer.name();
         let scheme_type = self.color_scheme.scheme_type();
         let color_scheme_name = scheme_type.name();
@@ -1106,7 +1106,7 @@ impl Application {
 
         let info_text = if self.visualizer_mode == VisualizerMode::Oscilloscope {
             format!(
-                " {}{} | {} | {} | {} | ←/→ V:chan I:num O:color E:fx B:bloom S:scan H:phosphor []:intensity G:grid F:fill T:trigger M:mic Q:quit ",
+                    " {}{} | {} | {} | {} | ←/→ V:chan I:num U:archive O:color E:fx B:bloom S:scan H:phosphor []:intensity G:grid F:fill T:trigger M:mic Q:quit ",
                 channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status
             )
         } else if self.visualizer_mode == VisualizerMode::Spectrum {
@@ -1121,12 +1121,12 @@ impl Application {
                     _ => ("A1-A6", 55.0, 1760.0),
                 };
                 format!(
-                    " {}{} | {} | {} | {} | ←/→ V:chan I:num O:color E:fx B:bloom S:scan H:phosphor []:intensity P:peaks L:labels N:map({}) R:range({}) M:mic +/-:sens Q:quit ",
+                    " {}{} | {} | {} | {} | ←/→ V:chan I:num U:archive O:color E:fx B:bloom S:scan H:phosphor []:intensity P:peaks L:labels N:map({}) R:range({}) M:mic +/-:sens Q:quit ",
                     channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status, map_name, range_label
                 )
             } else {
                 format!(
-                    " {}{} | {} | {} | {} | ←/→ V:chan I:num O:color E:fx B:bloom S:scan H:phosphor []:intensity P:peaks L:labels N:map({}) M:mic +/-:sens Q:quit ",
+                    " {}{} | {} | {} | {} | ←/→ V:chan I:num U:archive O:color E:fx B:bloom S:scan H:phosphor []:intensity P:peaks L:labels N:map({}) M:mic +/-:sens Q:quit ",
                     channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status, map_name
                 )
             }
@@ -1140,11 +1140,12 @@ impl Application {
             let auto_label = if self.ray3d_auto_rotate { "ON" } else { "OFF" };
             let rot_speed = self.ray3d_rotation_speed_y;
             format!(
-                " {}{}({}) | {} | {} | {} | W:mode G/H:step({:.0}°) T/Y:thick({:.3}) J/K:rot({:.1}) R:auto({}) Up/Down:bright ←/→ V:chan I:num O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
+                " {}{}({}) | {} | {} | {} | W:mode G/H:step({:.0}°) T/Y:thick({:.3}) J/K:rot({:.1}) R:auto({}) Up/Down:bright ←/→ V:chan I:num U:archive O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
                 channel_prefix, visualizer_name, mode_name, color_scheme_name, mic_status, fx_status, step_deg, tol, rot_speed, auto_label
             )
         } else if self.visualizer_mode == VisualizerMode::ObjViewer {
-            let (model_name, line_px, dot_px) = if let Some(viz) = (&*self.visualizer as &dyn std::any::Any)
+            let (model_name, line_px, dot_px) = if let Some(viz) = (&*self.visualizer
+                as &dyn std::any::Any)
                 .downcast_ref::<crate::visualization::ObjViewerVisualizer>()
             {
                 let (lp, dp) = viz.wire_px().unwrap_or((1, 2));
@@ -1152,14 +1153,38 @@ impl Application {
             } else {
                 ("Unknown", 1, 2)
             };
-            let auto_label = if self.model_viewer_auto_rotate { "ON" } else { "OFF" };
+            let auto_label = if self.model_viewer_auto_rotate {
+                "ON"
+            } else {
+                "OFF"
+            };
             format!(
-                " {}{} | {} | {} | {} | Model: {} | W:mode A/D:yaw J/K:pitch ,/.:roll G/H:line({}px) T/Y:dot({}px) Z/X:zoom F:focus R:auto({}) Up/Down:switch ←/→ V:chan I:num O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
+                " {}{} | {} | {} | {} | Model: {} | W:mode A/D:yaw J/K:pitch ,/.:roll G/H:line({}px) T/Y:dot({}px) Z/X:zoom F:focus R:auto({}) Up/Down:switch ←/→ V:chan I:num U:archive O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
                 channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status, model_name, line_px, dot_px, auto_label
+            )
+        } else if self.visualizer_mode == VisualizerMode::Primitives {
+            format!(
+                " {}{} | {} | {} | {} | Bass:core pulse Mid:orbit Treble:glow | A/D:yaw J/K:pitch ,/.:roll Z/X:zoom R:auto | ←/→ V:chan I:num U:archive O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
+                channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status
+            )
+        } else if self.visualizer_mode == VisualizerMode::GridTunnel {
+            format!(
+                " {}{} | {} | {} | {} | Bass:pulse Mid:roll Treble:glow | A/D:twist J/K:speed ,/.:glow Z/X:zoom R:auto | ←/→ V:chan I:num U:archive O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
+                channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status
+            )
+        } else if self.visualizer_mode == VisualizerMode::GravityWell {
+            format!(
+                " {}{} | {} | {} | {} | Bass:well depth Mid:lens twist Treble:spark ring | dual-view plunge/orbit/swallow | ←/→ V:chan I:num U:archive O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
+                channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status
+            )
+        } else if self.visualizer_mode == VisualizerMode::Starfield {
+            format!(
+                " {}{} | {} | {} | {} | Bass:warp Mid:twist Treble:trails | A/D:twist J/K:speed ,/.:trails Z/X:fov R:auto | ←/→ V:chan I:num U:archive O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
+                channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status
             )
         } else {
             format!(
-                " {}{} | {} | {} | {} | ←/→ V:chan I:num O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
+                " {}{} | {} | {} | {} | ←/→ V:chan I:num U:archive O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
                 channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status
             )
         };
@@ -1170,6 +1195,22 @@ impl Application {
             let x = start_x + i;
             if x < grid.width() {
                 grid.set_cell(x, 0, ch);
+            }
+        }
+
+        if grid.height() > 1
+            && !matches!(
+                self.visualizer_mode,
+                VisualizerMode::Image | VisualizerMode::Video
+            )
+        {
+            let quality_text = quality_summary(self.live_quality, self.live_color_mode);
+            let quality_x = (grid.width().saturating_sub(quality_text.len())) / 2;
+            for (i, ch) in quality_text.chars().enumerate() {
+                let x = quality_x + i;
+                if x < grid.width() {
+                    grid.set_cell(x, 1, ch);
+                }
             }
         }
 
@@ -1190,20 +1231,50 @@ impl Application {
         }
     }
 
+    fn handle_live_quality_action(&mut self, action: QualityControlAction) {
+        if action == QualityControlAction::Reset {
+            self.live_quality = self.live_quality_defaults;
+            self.live_color_mode = self.live_color_mode_default;
+            tracing::info!("Live quality controls reset");
+            return;
+        }
+
+        apply_quality_action(action, &mut self.live_quality, &mut self.live_color_mode);
+        tracing::info!(
+            "{}",
+            quality_summary(self.live_quality, self.live_color_mode)
+        );
+    }
+
     /// Run the main application loop
-    fn run(mut self) -> Result<()> {
+    async fn run(mut self) -> Result<()> {
         tracing::info!("Starting main loop at {} FPS", self.target_fps);
 
         // Start audio capture
-        self.audio_device
-            .start_capture()
-            .context("Failed to start audio capture")?;
+        if let Err(error) = self.audio_device.start_capture() {
+            tracing::warn!(
+                error = %error,
+                "Failed to start audio capture; falling back to audio-off mode"
+            );
+            self.fallback_to_audio_off()?;
+            self.audio_device
+                .start_capture()
+                .context("Failed to start fallback silent audio capture")?;
+        }
 
         // Start audio output (playback) if enabled
-        if let Some(audio_output) = self.audio_output.as_mut() {
-            audio_output
-                .start_playback()
-                .context("Failed to start audio playback")?;
+        if let Some(mut audio_output) = self.audio_output.take() {
+            match audio_output.start_playback() {
+                Ok(()) => {
+                    self.audio_output = Some(audio_output);
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        error = %error,
+                        "Failed to start audio playback; continuing with playback off"
+                    );
+                }
+            }
         }
 
         // Calculate frame time
@@ -1225,6 +1296,69 @@ impl Application {
                 break;
             }
 
+            // Check for completed Internet Archive fetches
+            match self.archive_stream_rx.try_recv() {
+                Ok(Ok(stream)) => {
+                    self.is_loading_archive = false;
+                    let pending_channel = self.pending_archive_channel;
+                    let request_context = self.archive_request_context;
+                    tracing::info!(
+                        "Tuned {} stream: {} ({}) -> {}",
+                        pending_channel.name(),
+                        stream.title,
+                        stream.identifier,
+                        stream.stream_url
+                    );
+                    self.last_archive_identifiers
+                        .insert(pending_channel, stream.identifier.clone());
+
+                    if self.visualizer_mode == pending_channel.visualizer_mode() {
+                        if let Err(e) =
+                            self.try_load_current_channel_path(stream.stream_url.as_str())
+                        {
+                            tracing::warn!(
+                                "Failed to update {} channel status: {}",
+                                pending_channel.name(),
+                                e
+                            );
+                        }
+                    }
+
+                    if request_context.requires_active_channel_match()
+                        && self.visualizer_mode != pending_channel.visualizer_mode()
+                    {
+                        tracing::info!(
+                            "Skipping {} autoplay because the user left that archive channel before tuning completed",
+                            pending_channel.name(),
+                        );
+                        if let Some(active_channel) =
+                            ArchiveChannelKind::from_visualizer_mode(self.visualizer_mode)
+                        {
+                            self.request_archive_stream_for(
+                                active_channel,
+                                ArchiveRequestContext::RotationMode,
+                            );
+                        }
+                        continue;
+                    }
+
+                    if let Err(e) = self.play_video_stream(stream.stream_url.as_str()) {
+                        tracing::error!("Failed to play Internet Archive stream: {}", e);
+                    }
+                }
+                Ok(Err(e)) => {
+                    self.is_loading_archive = false;
+                    tracing::error!("Failed to fetch Internet Archive video: {}", e);
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                    // No message yet
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    // Should not happen
+                    tracing::error!("Internet Archive stream channel disconnected.");
+                }
+            }
+
             // Check for keyboard/paste input
             if event::poll(Duration::from_millis(0)).unwrap_or(false) {
                 if let Ok(ev) = event::read() {
@@ -1232,7 +1366,7 @@ impl Application {
                         Event::Paste(_s) => {
                             // Image/Video inline path input temporarily disabled; ignore paste
                         }
-                        Event::Key(KeyEvent { code, .. }) => {
+                        Event::Key(KeyEvent { code, kind, .. }) => {
                             // When file prompt is active, handle editing without debounce
                             if self.file_prompt_active {
                                 match code {
@@ -1282,21 +1416,30 @@ impl Application {
                                 // Normal key handling with debounce
                                 let now = Instant::now();
                                 let time_since_last_press = now.duration_since(self.last_key_press);
-                                let is_quit_key = matches!(
+                                let is_quit_key = is_quit_key(code);
+                                let is_navigation_key = is_channel_navigation_key(code);
+                                if should_process_key_event(
                                     code,
-                                    KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc
-                                );
-                                if is_quit_key
-                                    || time_since_last_press.as_millis()
-                                        >= self.key_debounce_ms as u128
-                                {
-                                    if !is_quit_key {
+                                    kind,
+                                    time_since_last_press,
+                                    self.key_debounce_ms,
+                                ) {
+                                    if !is_quit_key && !is_navigation_key {
                                         self.last_key_press = now;
+                                    }
+                                    if let Some(action) = quality_control_action_from_key(code) {
+                                        self.handle_live_quality_action(action);
+                                        continue;
                                     }
                                     match code {
                                         KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
                                             tracing::info!("Quit key pressed");
                                             break;
+                                        }
+                                        KeyCode::Char('u') | KeyCode::Char('U') => {
+                                            self.request_archive_stream(
+                                                ArchiveRequestContext::ManualHotkey,
+                                            );
                                         }
                                         // Enter: no-op (image/video inline path input disabled temporarily)
                                         KeyCode::Enter => {}
@@ -1316,8 +1459,10 @@ impl Application {
                                             if self.visualizer_mode == VisualizerMode::Raycaster3D {
                                                 // Increase wireframe grid step (sparser)
                                                 let step_prev = self.ray3d_wire_step_rad;
-                                                self.ray3d_wire_step_rad = (self.ray3d_wire_step_rad + (2.0_f32.to_radians()))
-                                                    .min(45.0_f32.to_radians());
+                                                self.ray3d_wire_step_rad = (self
+                                                    .ray3d_wire_step_rad
+                                                    + (2.0_f32.to_radians()))
+                                                .min(45.0_f32.to_radians());
                                                 if let crate::visualization::ray_tracer::RenderMode::Wireframe { .. } = self.ray3d_mode {
                                                     self.ray3d_mode = crate::visualization::ray_tracer::RenderMode::Wireframe {
                                                         step_rad: self.ray3d_wire_step_rad,
@@ -1330,7 +1475,9 @@ impl Application {
                                                     self.ray3d_wire_step_rad.to_degrees(),
                                                     step_prev.to_degrees()
                                                 );
-                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::ObjViewer
+                                            {
                                                 if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
                                                     .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
                                                 {
@@ -1399,7 +1546,9 @@ impl Application {
                                                     "Raycaster 3D mode toggled: {}",
                                                     mode_name
                                                 );
-                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::ObjViewer
+                                            {
                                                 if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
                                                     .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
                                                 {
@@ -1417,7 +1566,9 @@ impl Application {
                                                     "Raycaster 3D brightness boost: +{:.2}",
                                                     self.ray3d_brightness_boost
                                                 );
-                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::ObjViewer
+                                            {
                                                 // Next model
                                                 if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
                                                     .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
@@ -1436,7 +1587,9 @@ impl Application {
                                                     "Raycaster 3D brightness boost: +{:.2}",
                                                     self.ray3d_brightness_boost
                                                 );
-                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::ObjViewer
+                                            {
                                                 // Previous model
                                                 if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
                                                     .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
@@ -1450,8 +1603,10 @@ impl Application {
                                             if self.visualizer_mode == VisualizerMode::Raycaster3D {
                                                 // Decrease wireframe step (denser grid)
                                                 let step_prev = self.ray3d_wire_step_rad;
-                                                self.ray3d_wire_step_rad = (self.ray3d_wire_step_rad - (2.0_f32.to_radians()))
-                                                    .max(2.0_f32.to_radians());
+                                                self.ray3d_wire_step_rad = (self
+                                                    .ray3d_wire_step_rad
+                                                    - (2.0_f32.to_radians()))
+                                                .max(2.0_f32.to_radians());
                                                 if let crate::visualization::ray_tracer::RenderMode::Wireframe { .. } = self.ray3d_mode {
                                                     self.ray3d_mode = crate::visualization::ray_tracer::RenderMode::Wireframe {
                                                         step_rad: self.ray3d_wire_step_rad,
@@ -1464,7 +1619,9 @@ impl Application {
                                                     self.ray3d_wire_step_rad.to_degrees(),
                                                     step_prev.to_degrees()
                                                 );
-                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::ObjViewer
+                                            {
                                                 if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
                                                     .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
                                                 {
@@ -1477,7 +1634,9 @@ impl Application {
                                                         step_prev.to_degrees()
                                                     );
                                                 }
-                                            } else if self.visualizer_mode == VisualizerMode::Oscilloscope {
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::Oscilloscope
+                                            {
                                                 self.osc_show_grid = !self.osc_show_grid;
                                                 self.recreate_visualizer();
                                                 tracing::info!(
@@ -1487,15 +1646,22 @@ impl Application {
                                             }
                                         }
                                         KeyCode::Char('f') | KeyCode::Char('F') => {
-                                            if self.visualizer_mode == VisualizerMode::Oscilloscope {
-                                                self.osc_waveform_mode = match self.osc_waveform_mode {
+                                            if self.visualizer_mode == VisualizerMode::Oscilloscope
+                                            {
+                                                self.osc_waveform_mode = match self
+                                                    .osc_waveform_mode
+                                                {
                                                     WaveformMode::Line => WaveformMode::Filled,
-                                                    WaveformMode::Filled => WaveformMode::LineAndFill,
+                                                    WaveformMode::Filled => {
+                                                        WaveformMode::LineAndFill
+                                                    }
                                                     WaveformMode::LineAndFill => WaveformMode::Line,
                                                 };
                                                 self.recreate_visualizer();
                                                 tracing::info!("Toggled oscilloscope fill mode");
-                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::ObjViewer
+                                            {
                                                 if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
                                                     .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
                                                 {
@@ -1568,7 +1734,9 @@ impl Application {
                                                     self.ray3d_wire_tol_rad,
                                                     tol_prev
                                                 );
-                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::ObjViewer
+                                            {
                                                 if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
                                                     .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
                                                 {
@@ -1581,9 +1749,15 @@ impl Application {
                                                         tol_prev
                                                     );
                                                 }
-                                            } else if self.visualizer_mode == VisualizerMode::Oscilloscope {
-                                                self.osc_trigger_slope = match self.osc_trigger_slope {
-                                                    TriggerSlope::Positive => TriggerSlope::Negative,
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::Oscilloscope
+                                            {
+                                                self.osc_trigger_slope = match self
+                                                    .osc_trigger_slope
+                                                {
+                                                    TriggerSlope::Positive => {
+                                                        TriggerSlope::Negative
+                                                    }
                                                     TriggerSlope::Negative => TriggerSlope::Both,
                                                     TriggerSlope::Both => TriggerSlope::Positive,
                                                 };
@@ -1595,7 +1769,8 @@ impl Application {
                                             if self.visualizer_mode == VisualizerMode::Raycaster3D {
                                                 // Increase tolerance (thicker lines)
                                                 let tol_prev = self.ray3d_wire_tol_rad;
-                                                self.ray3d_wire_tol_rad = (self.ray3d_wire_tol_rad + 0.005).min(0.15);
+                                                self.ray3d_wire_tol_rad =
+                                                    (self.ray3d_wire_tol_rad + 0.005).min(0.15);
                                                 if let crate::visualization::ray_tracer::RenderMode::Wireframe { .. } = self.ray3d_mode {
                                                     self.ray3d_mode = crate::visualization::ray_tracer::RenderMode::Wireframe {
                                                         step_rad: self.ray3d_wire_step_rad,
@@ -1608,7 +1783,9 @@ impl Application {
                                                     self.ray3d_wire_tol_rad,
                                                     tol_prev
                                                 );
-                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::ObjViewer
+                                            {
                                                 if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
                                                     .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
                                                 {
@@ -1634,13 +1811,42 @@ impl Application {
                                                     viz.set_rotation_speed_y(self.ray3d_rotation_speed_y);
                                                 }
                                                 tracing::info!("Raycaster 3D rotation speed: {:.2} rad/s (was {:.2})", self.ray3d_rotation_speed_y, prev);
-                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::ObjViewer
+                                            {
                                                 if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
                                                     .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
                                                 {
                                                     let step = 5.0_f32.to_radians();
                                                     viz.pitch_up(step);
                                                     tracing::info!("OBJ Viewer: pitch up ({:.1}°)", 5.0);
+                                                }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::Primitives
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::PrimitivesVisualizer>()
+                                                {
+                                                    viz.pitch_up(5.0_f32.to_radians());
+                                                    tracing::info!("Primitives: pitch up (5.0°)");
+                                                }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::GridTunnel
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::GridTunnelVisualizer>()
+                                                {
+                                                    let bias = viz.speed_down();
+                                                    tracing::info!("Grid Tunnel speed bias: {:+.3}", bias);
+                                                }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::Starfield
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::StarfieldVisualizer>()
+                                                {
+                                                    let bias = viz.speed_down();
+                                                    tracing::info!("Starfield speed bias: {:+.3}", bias);
                                                 }
                                             }
                                         }
@@ -1655,13 +1861,42 @@ impl Application {
                                                     viz.set_rotation_speed_y(self.ray3d_rotation_speed_y);
                                                 }
                                                 tracing::info!("Raycaster 3D rotation speed: {:.2} rad/s (was {:.2})", self.ray3d_rotation_speed_y, prev);
-                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::ObjViewer
+                                            {
                                                 if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
                                                     .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
                                                 {
                                                     let step = 5.0_f32.to_radians();
                                                     viz.pitch_down(step);
                                                     tracing::info!("OBJ Viewer: pitch down ({:.1}°)", 5.0);
+                                                }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::Primitives
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::PrimitivesVisualizer>()
+                                                {
+                                                    viz.pitch_down(5.0_f32.to_radians());
+                                                    tracing::info!("Primitives: pitch down (5.0°)");
+                                                }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::GridTunnel
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::GridTunnelVisualizer>()
+                                                {
+                                                    let bias = viz.speed_up();
+                                                    tracing::info!("Grid Tunnel speed bias: {:+.3}", bias);
+                                                }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::Starfield
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::StarfieldVisualizer>()
+                                                {
+                                                    let bias = viz.speed_up();
+                                                    tracing::info!("Starfield speed bias: {:+.3}", bias);
                                                 }
                                             }
                                         }
@@ -1682,8 +1917,11 @@ impl Application {
                                                         "OFF"
                                                     }
                                                 );
-                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
-                                                self.model_viewer_auto_rotate = !self.model_viewer_auto_rotate;
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::ObjViewer
+                                            {
+                                                self.model_viewer_auto_rotate =
+                                                    !self.model_viewer_auto_rotate;
                                                 if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
                                                     .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
                                                 {
@@ -1691,8 +1929,48 @@ impl Application {
                                                 }
                                                 tracing::info!(
                                                     "OBJ Viewer auto-rotate: {}",
-                                                    if self.model_viewer_auto_rotate { "ON" } else { "OFF" }
+                                                    if self.model_viewer_auto_rotate {
+                                                        "ON"
+                                                    } else {
+                                                        "OFF"
+                                                    }
                                                 );
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::Primitives
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::PrimitivesVisualizer>()
+                                                {
+                                                    let enabled = viz.toggle_auto_rotate();
+                                                    tracing::info!(
+                                                        "Primitives auto-rotate: {}",
+                                                        if enabled { "ON" } else { "OFF" }
+                                                    );
+                                                }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::GridTunnel
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::GridTunnelVisualizer>()
+                                                {
+                                                    let enabled = viz.toggle_auto_roll();
+                                                    tracing::info!(
+                                                        "Grid Tunnel auto-roll: {}",
+                                                        if enabled { "ON" } else { "OFF" }
+                                                    );
+                                                }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::Starfield
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::StarfieldVisualizer>()
+                                                {
+                                                    let enabled = viz.toggle_auto_rotate();
+                                                    tracing::info!(
+                                                        "Starfield auto-twist: {}",
+                                                        if enabled { "ON" } else { "OFF" }
+                                                    );
+                                                }
                                             } else if self.visualizer_mode
                                                 == VisualizerMode::Spectrum
                                                 && matches!(
@@ -1724,6 +2002,33 @@ impl Application {
                                                     viz.yaw_left(step);
                                                     tracing::info!("OBJ Viewer: yaw left ({:.1}°)", 5.0);
                                                 }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::Primitives
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::PrimitivesVisualizer>()
+                                                {
+                                                    viz.yaw_left(5.0_f32.to_radians());
+                                                    tracing::info!("Primitives: yaw left (5.0°)");
+                                                }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::GridTunnel
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::GridTunnelVisualizer>()
+                                                {
+                                                    viz.roll_left(5.0_f32.to_radians());
+                                                    tracing::info!("Grid Tunnel: twist left");
+                                                }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::Starfield
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::StarfieldVisualizer>()
+                                                {
+                                                    viz.rotate_left(5.0_f32.to_radians());
+                                                    tracing::info!("Starfield: twist left");
+                                                }
                                             }
                                         }
                                         KeyCode::Char('d') | KeyCode::Char('D') => {
@@ -1734,6 +2039,33 @@ impl Application {
                                                     let step = 5.0_f32.to_radians();
                                                     viz.yaw_right(step);
                                                     tracing::info!("OBJ Viewer: yaw right ({:.1}°)", 5.0);
+                                                }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::Primitives
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::PrimitivesVisualizer>()
+                                                {
+                                                    viz.yaw_right(5.0_f32.to_radians());
+                                                    tracing::info!("Primitives: yaw right (5.0°)");
+                                                }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::GridTunnel
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::GridTunnelVisualizer>()
+                                                {
+                                                    viz.roll_right(5.0_f32.to_radians());
+                                                    tracing::info!("Grid Tunnel: twist right");
+                                                }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::Starfield
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::StarfieldVisualizer>()
+                                                {
+                                                    viz.rotate_right(5.0_f32.to_radians());
+                                                    tracing::info!("Starfield: twist right");
                                                 }
                                             }
                                         }
@@ -1746,6 +2078,33 @@ impl Application {
                                                     viz.roll_ccw(step);
                                                     tracing::info!("OBJ Viewer: roll CCW ({:.1}°)", 5.0);
                                                 }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::Primitives
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::PrimitivesVisualizer>()
+                                                {
+                                                    viz.roll_ccw(5.0_f32.to_radians());
+                                                    tracing::info!("Primitives: roll CCW (5.0°)");
+                                                }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::GridTunnel
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::GridTunnelVisualizer>()
+                                                {
+                                                    let bias = viz.glow_down();
+                                                    tracing::info!("Grid Tunnel glow bias: {:+.2}", bias);
+                                                }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::Starfield
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::StarfieldVisualizer>()
+                                                {
+                                                    let gain = viz.trails_down();
+                                                    tracing::info!("Starfield trail gain: {:.2}", gain);
+                                                }
                                             }
                                         }
                                         KeyCode::Char('.') => {
@@ -1757,18 +2116,76 @@ impl Application {
                                                     viz.roll_cw(step);
                                                     tracing::info!("OBJ Viewer: roll CW ({:.1}°)", 5.0);
                                                 }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::Primitives
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::PrimitivesVisualizer>()
+                                                {
+                                                    viz.roll_cw(5.0_f32.to_radians());
+                                                    tracing::info!("Primitives: roll CW (5.0°)");
+                                                }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::GridTunnel
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::GridTunnelVisualizer>()
+                                                {
+                                                    let bias = viz.glow_up();
+                                                    tracing::info!("Grid Tunnel glow bias: {:+.2}", bias);
+                                                }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::Starfield
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::StarfieldVisualizer>()
+                                                {
+                                                    let gain = viz.trails_up();
+                                                    tracing::info!("Starfield trail gain: {:.2}", gain);
+                                                }
                                             }
                                         }
 
                                         KeyCode::Char('z') | KeyCode::Char('Z') => {
-                                            if self.visualizer_mode == VisualizerMode::XYOscilloscope {
+                                            if self.visualizer_mode
+                                                == VisualizerMode::XYOscilloscope
+                                            {
                                                 tracing::info!("XY Oscilloscope zoom control (use +/- for sensitivity)");
-                                            } else if self.visualizer_mode == VisualizerMode::ObjViewer {
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::ObjViewer
+                                            {
                                                 if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
                                                     .downcast_mut::<crate::visualization::ObjViewerVisualizer>()
                                                 {
                                                     viz.zoom_in();
                                                     tracing::info!("OBJ Viewer: zoom in");
+                                                }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::Primitives
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::PrimitivesVisualizer>()
+                                                {
+                                                    viz.zoom_in();
+                                                    tracing::info!("Primitives: zoom in");
+                                                }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::GridTunnel
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::GridTunnelVisualizer>()
+                                                {
+                                                    let zoom = viz.zoom_in();
+                                                    tracing::info!("Grid Tunnel zoom: {:.2}", zoom);
+                                                }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::Starfield
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::StarfieldVisualizer>()
+                                                {
+                                                    let zoom = viz.zoom_in();
+                                                    tracing::info!("Starfield FOV scale: {:.2}", zoom);
                                                 }
                                             }
                                         }
@@ -1779,6 +2196,33 @@ impl Application {
                                                 {
                                                     viz.zoom_out();
                                                     tracing::info!("OBJ Viewer: zoom out");
+                                                }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::Primitives
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::PrimitivesVisualizer>()
+                                                {
+                                                    viz.zoom_out();
+                                                    tracing::info!("Primitives: zoom out");
+                                                }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::GridTunnel
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::GridTunnelVisualizer>()
+                                                {
+                                                    let zoom = viz.zoom_out();
+                                                    tracing::info!("Grid Tunnel zoom: {:.2}", zoom);
+                                                }
+                                            } else if self.visualizer_mode
+                                                == VisualizerMode::Starfield
+                                            {
+                                                if let Some(viz) = (&mut *self.visualizer as &mut dyn std::any::Any)
+                                                    .downcast_mut::<crate::visualization::StarfieldVisualizer>()
+                                                {
+                                                    let zoom = viz.zoom_out();
+                                                    tracing::info!("Starfield FOV scale: {:.2}", zoom);
                                                 }
                                             }
                                         }
@@ -1856,13 +2300,17 @@ impl Application {
             // 5. Apply post-processing effects
             self.effect_pipeline.apply(&mut grid, &audio_params);
 
-            // 6. All visualizers now use Braille rendering directly!
+            // 6. Apply app-wide braille quality controls for parity with image/video paths
+            self.live_postprocess
+                .apply(&mut grid, self.live_quality, self.live_color_mode);
+
+            // 7. All visualizers now use Braille rendering directly!
             // No need to apply character set mapping - Braille gives 8× resolution
 
-            // 7. Add UI overlay (character set name and controls)
+            // 8. Add UI overlay (character set name and controls)
             self.add_ui_overlay(&mut grid);
 
-            // 8. Update terminal display
+            // 9. Update terminal display
             self.renderer
                 .render(&grid)
                 .context("Failed to render frame")?;
@@ -1925,7 +2373,7 @@ impl Application {
 
             // Sleep to maintain target FPS
             if let Some(sleep_time) = frame_duration.checked_sub(frame_elapsed) {
-                std::thread::sleep(sleep_time);
+                tokio::time::sleep(sleep_time).await;
             } else {
                 // Frame took longer than target - log at trace level
                 tracing::trace!(
@@ -1963,7 +2411,6 @@ impl Application {
 
         Ok(())
     }
-
     /// Run in test mode with test patterns
     fn run_test_mode(mut self) -> Result<()> {
         tracing::info!("Running in TEST MODE - rendering test patterns");
@@ -2060,27 +2507,35 @@ impl Application {
 fn init_logging(verbose: bool, debug: bool) -> Result<()> {
     use tracing_subscriber::{fmt, EnvFilter};
 
-    // Determine log level
+    // Determine log level - during visualization, suppress all logs to avoid
+    // corrupting the terminal display. Only show logs when not in TUI mode.
+    // Since we're always in TUI mode when visualizing, use "off" for normal runs.
     let filter = if debug {
-        EnvFilter::new("crabmusic=trace,debug")
+        // Debug mode: log to file instead (future enhancement)
+        // For now, completely suppress to prevent terminal corruption
+        EnvFilter::new("off")
     } else if verbose {
-        EnvFilter::new("crabmusic=debug,info")
+        // Verbose mode: also suppress during TUI
+        EnvFilter::new("off")
     } else {
-        EnvFilter::new("crabmusic=info")
+        // Normal mode: no logging during visualization
+        EnvFilter::new("off")
     };
 
     // Configure logging format
-    // Write to stderr instead of stdout to avoid interference with terminal UI
-    // and disable ANSI codes when in alternate screen mode
+    // IMPORTANT: Writing to stderr while in alternate screen mode causes
+    // visual corruption (artifacts, stacking frames). We disable logging
+    // entirely during visualization. For debugging, run with --test mode
+    // or redirect logs to a file.
     fmt()
         .with_env_filter(filter)
         .with_target(false)
         .with_thread_ids(false)
         .with_file(false)
         .with_line_number(false)
-        .with_timer(fmt::time::uptime())  // Show time since start
-        .with_writer(std::io::stderr)  // Write to stderr instead of stdout
-        .with_ansi(false)  // Disable ANSI codes to avoid terminal conflicts
+        .with_timer(fmt::time::uptime())
+        .with_writer(std::io::sink)  // Write to sink (discard all output)
+        .with_ansi(false)
         .with_level(true)
         .init();
 
@@ -2194,4 +2649,269 @@ fn list_audio_devices() -> Result<()> {
     println!("For system audio capture, look for devices marked [LOOPBACK]");
 
     Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let args = Args::parse();
+
+    // Initialize logging
+    init_logging(args.verbose, args.debug)?;
+
+    // Print version info
+    if args.verbose {
+        print_version_info();
+    }
+
+    // List devices if requested
+    if args.list_devices {
+        list_audio_devices()?;
+        return Ok(());
+    }
+
+    // Load configuration
+    let config = AppConfig::load_or_default(&args.config)?;
+
+    // Play video if requested
+    if let Some(video_path) = &args.video {
+        let prepared = video::prepare_video_input(video_path)
+            .with_context(|| format!("Failed to prepare video input: {video_path}"))?;
+        if let Some(label) = &prepared.display_label {
+            tracing::info!("{label}");
+        }
+        return video::run_video_playback_with_config(&prepared.playback_target, &config.rendering);
+    }
+
+    // Setup shutdown handler
+    setup_shutdown_handler()?;
+
+    // Create application
+    let app = Application::new(config, &args)?;
+
+    // Run application
+    if args.test {
+        app.run_test_mode()?;
+    } else {
+        app.run().await?;
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        is_channel_navigation_key, runtime_audio_flags, should_process_key_event, AudioRuntimeFlags,
+    };
+    use super::{ArchiveChannelKind, ArchiveRequestContext, VisualizerMode};
+    use crossterm::event::{KeyCode, KeyEventKind};
+    use std::time::Duration;
+
+    #[test]
+    fn archive_modes_are_in_visualizer_rotation() {
+        assert_eq!(
+            VisualizerMode::Video.next(),
+            VisualizerMode::InternetArchive
+        );
+        assert_eq!(
+            VisualizerMode::GridTunnel.next(),
+            VisualizerMode::GravityWell
+        );
+        assert_eq!(
+            VisualizerMode::GravityWell.next(),
+            VisualizerMode::WaveformTunnel
+        );
+        assert_eq!(
+            VisualizerMode::WaveformTunnel.prev(),
+            VisualizerMode::GravityWell
+        );
+        assert_eq!(
+            VisualizerMode::InternetArchive.next(),
+            VisualizerMode::ArchiveCooking
+        );
+        assert_eq!(
+            VisualizerMode::ArchiveCooking.next(),
+            VisualizerMode::ArchivePublicAccess
+        );
+        assert_eq!(
+            VisualizerMode::ArchivePublicAccess.next(),
+            VisualizerMode::ArchiveIndustrial
+        );
+        assert_eq!(
+            VisualizerMode::ArchiveIndustrial.next(),
+            VisualizerMode::ArchiveEducational
+        );
+        assert_eq!(
+            VisualizerMode::ArchiveEducational.next(),
+            VisualizerMode::ArchiveLocalNews
+        );
+        assert_eq!(
+            VisualizerMode::ArchiveLocalNews.next(),
+            VisualizerMode::SineWave
+        );
+        assert_eq!(
+            VisualizerMode::ArchiveCooking.prev(),
+            VisualizerMode::InternetArchive
+        );
+        assert_eq!(
+            VisualizerMode::ArchivePublicAccess.prev(),
+            VisualizerMode::ArchiveCooking
+        );
+        assert_eq!(
+            VisualizerMode::ArchiveIndustrial.prev(),
+            VisualizerMode::ArchivePublicAccess
+        );
+        assert_eq!(
+            VisualizerMode::ArchiveEducational.prev(),
+            VisualizerMode::ArchiveIndustrial
+        );
+        assert_eq!(
+            VisualizerMode::ArchiveLocalNews.prev(),
+            VisualizerMode::ArchiveEducational
+        );
+        assert_eq!(
+            VisualizerMode::SineWave.prev(),
+            VisualizerMode::ArchiveLocalNews
+        );
+        assert_eq!(VisualizerMode::InternetArchive.name(), "Archive TV");
+        assert_eq!(VisualizerMode::ArchiveCooking.name(), "Archive Cooking");
+        assert_eq!(
+            VisualizerMode::ArchivePublicAccess.name(),
+            "Archive Public Access"
+        );
+        assert_eq!(
+            VisualizerMode::ArchiveIndustrial.name(),
+            "Archive Industrial Films"
+        );
+        assert_eq!(
+            VisualizerMode::ArchiveEducational.name(),
+            "Archive Educational"
+        );
+        assert_eq!(
+            VisualizerMode::ArchiveLocalNews.name(),
+            "Archive Local News"
+        );
+        assert_eq!(VisualizerMode::GravityWell.name(), "Gravity Well");
+        assert_eq!(VisualizerMode::count(), 22);
+    }
+
+    #[test]
+    fn archive_channel_kind_maps_to_archive_modes() {
+        assert_eq!(
+            ArchiveChannelKind::from_visualizer_mode(VisualizerMode::InternetArchive),
+            Some(ArchiveChannelKind::Tv)
+        );
+        assert_eq!(
+            ArchiveChannelKind::from_visualizer_mode(VisualizerMode::ArchiveCooking),
+            Some(ArchiveChannelKind::Cooking)
+        );
+        assert_eq!(
+            ArchiveChannelKind::from_visualizer_mode(VisualizerMode::ArchivePublicAccess),
+            Some(ArchiveChannelKind::PublicAccess)
+        );
+        assert_eq!(
+            ArchiveChannelKind::from_visualizer_mode(VisualizerMode::ArchiveIndustrial),
+            Some(ArchiveChannelKind::Industrial)
+        );
+        assert_eq!(
+            ArchiveChannelKind::from_visualizer_mode(VisualizerMode::ArchiveEducational),
+            Some(ArchiveChannelKind::Educational)
+        );
+        assert_eq!(
+            ArchiveChannelKind::from_visualizer_mode(VisualizerMode::ArchiveLocalNews),
+            Some(ArchiveChannelKind::LocalNews)
+        );
+        assert_eq!(
+            ArchiveChannelKind::Tv.visualizer_mode(),
+            VisualizerMode::InternetArchive
+        );
+    }
+
+    #[test]
+    fn archive_autoplay_contexts_require_active_channel_match() {
+        assert!(!ArchiveRequestContext::ManualHotkey.requires_active_channel_match());
+        assert!(ArchiveRequestContext::RotationMode.requires_active_channel_match());
+        assert!(ArchiveRequestContext::PlaybackEnded.requires_active_channel_match());
+    }
+
+    #[test]
+    fn channel_navigation_keys_are_immediate_on_press() {
+        assert!(is_channel_navigation_key(KeyCode::Left));
+        assert!(is_channel_navigation_key(KeyCode::Right));
+        assert!(is_channel_navigation_key(KeyCode::Char('v')));
+
+        assert!(should_process_key_event(
+            KeyCode::Right,
+            KeyEventKind::Press,
+            Duration::from_millis(10),
+            200,
+        ));
+        assert!(should_process_key_event(
+            KeyCode::Char('V'),
+            KeyEventKind::Press,
+            Duration::from_millis(10),
+            200,
+        ));
+    }
+
+    #[test]
+    fn channel_navigation_repeat_and_release_are_ignored() {
+        assert!(!should_process_key_event(
+            KeyCode::Left,
+            KeyEventKind::Repeat,
+            Duration::from_millis(500),
+            200,
+        ));
+        assert!(!should_process_key_event(
+            KeyCode::Right,
+            KeyEventKind::Release,
+            Duration::from_millis(500),
+            200,
+        ));
+    }
+
+    #[test]
+    fn non_navigation_keys_still_respect_debounce() {
+        assert!(!should_process_key_event(
+            KeyCode::Char('o'),
+            KeyEventKind::Press,
+            Duration::from_millis(50),
+            200,
+        ));
+        assert!(should_process_key_event(
+            KeyCode::Char('o'),
+            KeyEventKind::Press,
+            Duration::from_millis(250),
+            200,
+        ));
+    }
+
+    #[test]
+    fn runtime_audio_flags_disable_audio_when_capture_is_unavailable() {
+        assert_eq!(
+            runtime_audio_flags(false, true),
+            AudioRuntimeFlags {
+                use_loopback: false,
+                microphone_enabled: false,
+            }
+        );
+    }
+
+    #[test]
+    fn runtime_audio_flags_preserve_requested_mode_when_capture_is_available() {
+        assert_eq!(
+            runtime_audio_flags(true, true),
+            AudioRuntimeFlags {
+                use_loopback: true,
+                microphone_enabled: false,
+            }
+        );
+        assert_eq!(
+            runtime_audio_flags(true, false),
+            AudioRuntimeFlags {
+                use_loopback: false,
+                microphone_enabled: true,
+            }
+        );
+    }
 }

@@ -29,6 +29,8 @@ struct BeatDetector {
     cooldown_seconds: f32,
     /// Last beat time
     last_beat_time: Option<Instant>,
+    /// Remaining cooldown when driven by audio-frame elapsed time
+    cooldown_remaining_seconds: f32,
 }
 
 impl BeatDetector {
@@ -44,7 +46,27 @@ impl BeatDetector {
             sensitivity,
             cooldown_seconds,
             last_beat_time: None,
+            cooldown_remaining_seconds: 0.0,
         }
+    }
+
+    fn detect_internal(&mut self, current_energy: f32) -> bool {
+        self.energy_history.push(current_energy);
+        if self.energy_history.len() > self.history_size {
+            self.energy_history.remove(0);
+        }
+
+        if self.energy_history.len() < 3 {
+            return false;
+        }
+
+        let history_avg = self.energy_history[..self.energy_history.len() - 1]
+            .iter()
+            .sum::<f32>()
+            / (self.energy_history.len() - 1) as f32;
+
+        let threshold = history_avg * (1.5 / self.sensitivity);
+        current_energy > threshold && current_energy > 0.1
     }
 
     /// Detect if a beat occurred based on current energy
@@ -63,29 +85,29 @@ impl BeatDetector {
             }
         }
 
-        // Add current energy to history
-        self.energy_history.push(current_energy);
-        if self.energy_history.len() > self.history_size {
-            self.energy_history.remove(0);
-        }
-
-        // Need at least 3 samples for comparison
-        if self.energy_history.len() < 3 {
-            return false;
-        }
-
-        // Calculate average energy of recent history (excluding current)
-        let history_avg = self.energy_history[..self.energy_history.len() - 1]
-            .iter()
-            .sum::<f32>()
-            / (self.energy_history.len() - 1) as f32;
-
-        // Detect beat if current energy is significantly higher than average
-        let threshold = history_avg * (1.5 / self.sensitivity);
-        let is_beat = current_energy > threshold && current_energy > 0.1;
+        let is_beat = self.detect_internal(current_energy);
 
         if is_beat {
             self.last_beat_time = Some(Instant::now());
+            self.cooldown_remaining_seconds = self.cooldown_seconds;
+        }
+
+        is_beat
+    }
+
+    fn detect_with_elapsed(&mut self, current_energy: f32, elapsed_seconds: f32) -> bool {
+        self.cooldown_remaining_seconds =
+            (self.cooldown_remaining_seconds - elapsed_seconds).max(0.0);
+
+        if self.cooldown_remaining_seconds > 0.0 {
+            return false;
+        }
+
+        let is_beat = self.detect_internal(current_energy);
+
+        if is_beat {
+            self.last_beat_time = Some(Instant::now());
+            self.cooldown_remaining_seconds = self.cooldown_seconds;
         }
 
         is_beat
@@ -133,6 +155,8 @@ struct SpectralFluxDetector {
     cooldown_seconds: f32,
     /// Last beat time
     last_beat_time: Option<Instant>,
+    /// Remaining cooldown when driven by audio-frame elapsed time
+    cooldown_remaining_seconds: f32,
 }
 
 impl SpectralFluxDetector {
@@ -150,6 +174,7 @@ impl SpectralFluxDetector {
             sensitivity,
             cooldown_seconds,
             last_beat_time: None,
+            cooldown_remaining_seconds: 0.0,
         }
     }
 
@@ -166,6 +191,32 @@ impl SpectralFluxDetector {
             .zip(self.prev_spectrum.iter())
             .map(|(curr, prev)| (curr - prev).max(0.0))
             .sum()
+    }
+
+    fn detect_internal(&mut self, spectrum: &[f32]) -> bool {
+        let flux = self.calculate_flux(spectrum);
+
+        self.flux_history.push(flux);
+        if self.flux_history.len() > self.history_size {
+            self.flux_history.remove(0);
+        }
+
+        if self.flux_history.len() < 3 {
+            self.prev_spectrum.copy_from_slice(spectrum);
+            return false;
+        }
+
+        let avg_flux = self.flux_history[..self.flux_history.len() - 1]
+            .iter()
+            .sum::<f32>()
+            / (self.flux_history.len() - 1) as f32;
+
+        let threshold = avg_flux * (1.5 / self.sensitivity);
+        let is_beat = flux > threshold && flux > 0.01;
+
+        self.prev_spectrum.copy_from_slice(spectrum);
+
+        is_beat
     }
 
     /// Detect beat based on spectral flux
@@ -185,36 +236,31 @@ impl SpectralFluxDetector {
             }
         }
 
-        // 2. Calculate flux
-        let flux = self.calculate_flux(spectrum);
+        let is_beat = self.detect_internal(spectrum);
 
-        // 3. Update history
-        self.flux_history.push(flux);
-        if self.flux_history.len() > self.history_size {
-            self.flux_history.remove(0);
+        if is_beat {
+            self.last_beat_time = Some(Instant::now());
+            self.cooldown_remaining_seconds = self.cooldown_seconds;
         }
 
-        // 4. Need at least 3 samples
-        if self.flux_history.len() < 3 {
+        is_beat
+    }
+
+    fn detect_with_elapsed(&mut self, spectrum: &[f32], elapsed_seconds: f32) -> bool {
+        self.cooldown_remaining_seconds =
+            (self.cooldown_remaining_seconds - elapsed_seconds).max(0.0);
+
+        if self.cooldown_remaining_seconds > 0.0 {
             self.prev_spectrum.copy_from_slice(spectrum);
             return false;
         }
 
-        // 5. Calculate average flux (excluding current)
-        let avg_flux = self.flux_history[..self.flux_history.len() - 1]
-            .iter()
-            .sum::<f32>()
-            / (self.flux_history.len() - 1) as f32;
+        let is_beat = self.detect_internal(spectrum);
 
-        // 6. Detect onset when flux exceeds threshold
-        let threshold = avg_flux * (1.5 / self.sensitivity);
-        let is_beat = flux > threshold && flux > 0.01;
-
-        // 7. Update state
         if is_beat {
             self.last_beat_time = Some(Instant::now());
+            self.cooldown_remaining_seconds = self.cooldown_seconds;
         }
-        self.prev_spectrum.copy_from_slice(spectrum);
 
         is_beat
     }
@@ -396,6 +442,12 @@ pub struct DspProcessor {
     scratch_buffer: Vec<Complex<f32>>,
     /// Energy-based beat detection state
     beat_detector: BeatDetector,
+    /// Bass band beat detector
+    beat_detector_bass: BeatDetector,
+    /// Mid band beat detector
+    beat_detector_mid: BeatDetector,
+    /// Treble band beat detector
+    beat_detector_treble: BeatDetector,
     /// Spectral flux beat detection state
     flux_detector: SpectralFluxDetector,
     /// Tempo detection and BPM estimation state
@@ -432,6 +484,9 @@ impl DspProcessor {
         let hann_window = Self::generate_hann_window(window_size);
         let scratch_buffer = vec![Complex::new(0.0, 0.0); window_size];
         let beat_detector = BeatDetector::new(1.0, 0.1); // Normal sensitivity, 100ms cooldown
+        let beat_detector_bass = BeatDetector::new(1.0, 0.15); // Bass needs slightly longer cooldown
+        let beat_detector_mid = BeatDetector::new(1.2, 0.1); // Mid can be more sensitive
+        let beat_detector_treble = BeatDetector::new(1.5, 0.05); // Treble can be very fast
         let flux_detector = SpectralFluxDetector::new(1.0, 0.1, window_size / 2); // Normal sensitivity, 100ms cooldown, spectrum size
         let tempo_detector = TempoDetector::new(60.0, 180.0); // 60-180 BPM range
 
@@ -442,6 +497,9 @@ impl DspProcessor {
             hann_window,
             scratch_buffer,
             beat_detector,
+            beat_detector_bass,
+            beat_detector_mid,
+            beat_detector_treble,
             flux_detector,
             tempo_detector,
         })
@@ -466,6 +524,21 @@ impl DspProcessor {
         // Configure beat detectors
         self.beat_detector.set_sensitivity(config.sensitivity);
         self.beat_detector.set_cooldown(config.cooldown_seconds);
+
+        // Configure band-specific detectors (inherit base config for now)
+        self.beat_detector_bass.set_sensitivity(config.sensitivity);
+        self.beat_detector_bass
+            .set_cooldown(config.cooldown_seconds * 1.5); // Bass needs more cooldown
+
+        self.beat_detector_mid
+            .set_sensitivity(config.sensitivity * 1.2);
+        self.beat_detector_mid.set_cooldown(config.cooldown_seconds);
+
+        self.beat_detector_treble
+            .set_sensitivity(config.sensitivity * 1.5);
+        self.beat_detector_treble
+            .set_cooldown(config.cooldown_seconds * 0.5); // Treble can be faster
+
         self.flux_detector.set_sensitivity(config.sensitivity);
         self.flux_detector.set_cooldown(config.cooldown_seconds);
 
@@ -592,6 +665,12 @@ impl DspProcessor {
     /// assert!(params.bass >= 0.0 && params.bass <= 1.0);
     /// ```
     pub fn process(&mut self, buffer: &AudioBuffer) -> AudioParameters {
+        let frame_duration_seconds = if buffer.channels > 0 {
+            buffer.samples.len() as f32 / (buffer.channels as f32 * buffer.sample_rate as f32)
+        } else {
+            0.0
+        };
+
         // 1. Get FFT spectrum
         let spectrum = self.process_buffer(buffer);
 
@@ -603,29 +682,45 @@ impl DspProcessor {
         // 3. Calculate overall amplitude (RMS)
         let amplitude = self.calculate_rms(&buffer.samples);
 
-        // 4. Detect beat using energy-based onset detection
-        let beat_energy = self.beat_detector.detect(amplitude);
+        // 4. Detect beat using energy-based onset detection (overall)
+        let beat_energy = self
+            .beat_detector
+            .detect_with_elapsed(amplitude, frame_duration_seconds);
 
         // 5. Detect beat using spectral flux (harmonic onset detection)
-        let beat_flux = self.flux_detector.detect(&spectrum);
+        let beat_flux = self
+            .flux_detector
+            .detect_with_elapsed(&spectrum, frame_duration_seconds);
 
-        // 6. Hybrid beat detection: combine both methods
+        // 6. Multi-band beat detection
+        // We use the extracted band energy for this
+        let beat_bass = self
+            .beat_detector_bass
+            .detect_with_elapsed(bass, frame_duration_seconds);
+        let beat_mid = self
+            .beat_detector_mid
+            .detect_with_elapsed(mid, frame_duration_seconds);
+        let beat_treble = self
+            .beat_detector_treble
+            .detect_with_elapsed(treble, frame_duration_seconds);
+
+        // 7. Hybrid beat detection: combine both methods
         // This catches both percussive (energy) and harmonic (flux) onsets
         let beat = beat_energy || beat_flux;
 
-        // 7. Update tempo detector if beat occurred
+        // 8. Update tempo detector if beat occurred
         if beat {
             self.tempo_detector.register_beat(Instant::now());
         }
 
-        // 8. Get tempo estimate
+        // 9. Get tempo estimate
         let bpm = self.tempo_detector.bpm();
         let tempo_confidence = self.tempo_detector.confidence();
 
-        // 9. Extract waveform for oscilloscope visualization
+        // 10. Extract waveform for oscilloscope visualization
         let waveform = self.downsample_for_waveform(buffer, 512);
 
-        // 10. Extract stereo waveforms for XY oscilloscope (Lissajous curves)
+        // 11. Extract stereo waveforms for XY oscilloscope (Lissajous curves)
         let (waveform_left, waveform_right) = self.downsample_stereo_waveforms(buffer, 512);
 
         AudioParameters {
@@ -635,6 +730,9 @@ impl DspProcessor {
             amplitude,
             beat,             // Hybrid: energy OR flux
             beat_flux,        // Flux-only (for debugging/visualization)
+            beat_bass,        // Bass band beat
+            beat_mid,         // Mid band beat
+            beat_treble,      // Treble band beat
             bpm,              // Estimated tempo in BPM
             tempo_confidence, // Confidence in tempo estimate
             spectrum,         // Include full spectrum for advanced visualizers
@@ -901,6 +999,15 @@ pub struct AudioParameters {
     /// useful for analyzing harmonic onset detection performance.
     pub beat_flux: bool,
 
+    /// Beat detected in bass band
+    pub beat_bass: bool,
+
+    /// Beat detected in mid band
+    pub beat_mid: bool,
+
+    /// Beat detected in treble band
+    pub beat_treble: bool,
+
     /// Estimated tempo in BPM (Beats Per Minute)
     ///
     /// Range: typically 60-180 BPM for most music.
@@ -911,6 +1018,7 @@ pub struct AudioParameters {
     /// # Examples
     ///
     /// ```
+    /// # let params = crabmusic::dsp::AudioParameters::default();
     /// if params.tempo_confidence > 0.7 {
     ///     // High confidence - use BPM for tempo-synced effects
     ///     let pulse_period = 60.0 / params.bpm; // seconds per beat
@@ -979,6 +1087,9 @@ impl Default for AudioParameters {
             amplitude: 0.0,
             beat: false,
             beat_flux: false,
+            beat_bass: false,
+            beat_mid: false,
+            beat_treble: false,
             bpm: 120.0,            // Default tempo
             tempo_confidence: 0.0, // No confidence initially
             spectrum: Vec::new(),
@@ -1271,6 +1382,7 @@ mod tests {
         assert_eq!(detector.cooldown_seconds, 0.1);
         assert_eq!(detector.history_size, 10);
         assert!(detector.last_beat_time.is_none());
+        assert_eq!(detector.cooldown_remaining_seconds, 0.0);
         assert_eq!(detector.energy_history.len(), 0);
     }
 

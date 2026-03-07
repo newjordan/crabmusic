@@ -4,8 +4,14 @@
 // Allow dead code for scaffolding - will be used in CONFIG-001
 #![allow(dead_code)]
 
+use crate::braille_quality::{
+    BrailleQualitySettings, DitherMode, QualityPreset, CONTRAST_PRESETS, EXPOSURE_PRESETS,
+    GAMMA_PRESETS, TEMPORAL_BLEND_PRESETS, TEMPORAL_HYSTERESIS_PRESETS,
+};
 use crate::error::ConfigError;
-use serde::{Deserialize, Serialize};
+use serde::de::{self, Visitor};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt;
 
 /// Main application configuration
 ///
@@ -28,6 +34,10 @@ pub struct AppConfig {
     /// Rendering configuration
     #[serde(default)]
     pub rendering: RenderingConfig,
+
+    /// Internet Archive random video configuration
+    #[serde(default)]
+    pub internet_archive: InternetArchiveConfig,
 }
 
 /// Audio capture configuration
@@ -53,10 +63,103 @@ pub struct AudioConfig {
     #[serde(default)]
     pub output_device_name: Option<String>,
 
-    /// Prefer system audio loopback (WASAPI) when available
-    /// Windows: defaults to true; other platforms: false
-    #[serde(default = "default_use_loopback")]
-    pub use_loopback: bool,
+    /// Loopback capture preference: true, false, or auto
+    #[serde(default)]
+    pub use_loopback: LoopbackMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoopbackMode {
+    Auto,
+    Enabled,
+    Disabled,
+}
+
+impl Default for LoopbackMode {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+impl LoopbackMode {
+    fn resolve(self) -> bool {
+        match self {
+            Self::Auto => platform_supports_loopback(),
+            Self::Enabled => true,
+            Self::Disabled => false,
+        }
+    }
+
+    fn normalize_for_platform(&mut self) {
+        if matches!(self, Self::Enabled) && !platform_supports_loopback() {
+            tracing::warn!(
+                "audio.use_loopback=true is not supported on this OS; disabling loopback and using normal input capture instead"
+            );
+            *self = Self::Disabled;
+        }
+    }
+}
+
+impl Serialize for LoopbackMode {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Auto => serializer.serialize_str("auto"),
+            Self::Enabled => serializer.serialize_bool(true),
+            Self::Disabled => serializer.serialize_bool(false),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for LoopbackMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct LoopbackModeVisitor;
+
+        impl Visitor<'_> for LoopbackModeVisitor {
+            type Value = LoopbackMode;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a boolean or the string 'auto'")
+            }
+
+            fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(if value {
+                    LoopbackMode::Enabled
+                } else {
+                    LoopbackMode::Disabled
+                })
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                match value.trim().to_ascii_lowercase().as_str() {
+                    "auto" => Ok(LoopbackMode::Auto),
+                    "true" => Ok(LoopbackMode::Enabled),
+                    "false" => Ok(LoopbackMode::Disabled),
+                    _ => Err(E::custom("expected true, false, or auto")),
+                }
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                self.visit_str(&value)
+            }
+        }
+
+        deserializer.deserialize_any(LoopbackModeVisitor)
+    }
 }
 
 /// DSP processing configuration
@@ -165,9 +268,169 @@ pub struct RenderingConfig {
     /// Minimum terminal height
     #[serde(default = "default_min_height")]
     pub min_height: u16,
+
+    /// Default braille quality settings for the main live visualizer app
+    #[serde(default)]
+    pub braille_live: LiveBrailleConfig,
+
+    /// Default braille quality settings for still images
+    #[serde(default)]
+    pub braille_image: ImageBrailleConfig,
+
+    /// Default braille quality settings for video playback
+    #[serde(default)]
+    pub braille_video: VideoBrailleConfig,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrailleColorMode {
+    Off,
+    Grayscale,
+    Full,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LiveBrailleConfig {
+    #[serde(default = "default_live_braille_preset")]
+    pub preset: Option<QualityPreset>,
+
+    #[serde(default)]
+    pub dither_mode: Option<DitherMode>,
+
+    #[serde(default)]
+    pub gamma_preset: Option<usize>,
+
+    #[serde(default)]
+    pub contrast_preset: Option<usize>,
+
+    #[serde(default)]
+    pub exposure_preset: Option<usize>,
+
+    #[serde(default = "default_live_color_mode")]
+    pub color_mode: BrailleColorMode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageBrailleConfig {
+    #[serde(default = "default_image_braille_preset")]
+    pub preset: Option<QualityPreset>,
+
+    #[serde(default)]
+    pub dither_mode: Option<DitherMode>,
+
+    #[serde(default)]
+    pub gamma_preset: Option<usize>,
+
+    #[serde(default)]
+    pub contrast_preset: Option<usize>,
+
+    #[serde(default)]
+    pub exposure_preset: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VideoBrailleConfig {
+    #[serde(default = "default_video_braille_preset")]
+    pub preset: Option<QualityPreset>,
+
+    #[serde(default)]
+    pub dither_mode: Option<DitherMode>,
+
+    #[serde(default)]
+    pub gamma_preset: Option<usize>,
+
+    #[serde(default)]
+    pub contrast_preset: Option<usize>,
+
+    #[serde(default)]
+    pub exposure_preset: Option<usize>,
+
+    #[serde(default = "default_video_temporal_blend_preset")]
+    pub temporal_blend_preset: usize,
+
+    #[serde(default = "default_video_temporal_hysteresis_preset")]
+    pub temporal_hysteresis_preset: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InternetArchiveConfig {
+    #[serde(default = "default_internet_archive_tv_queries")]
+    pub tv_queries: Vec<String>,
+
+    #[serde(default = "default_internet_archive_cooking_queries")]
+    pub cooking_queries: Vec<String>,
+
+    #[serde(default = "default_internet_archive_public_access_queries")]
+    pub public_access_queries: Vec<String>,
+
+    #[serde(default = "default_internet_archive_industrial_queries")]
+    pub industrial_queries: Vec<String>,
+
+    #[serde(default = "default_internet_archive_educational_queries")]
+    pub educational_queries: Vec<String>,
+
+    #[serde(default = "default_internet_archive_local_news_queries")]
+    pub local_news_queries: Vec<String>,
+
+    #[serde(default = "default_internet_archive_rows_per_page")]
+    pub rows_per_page: usize,
+
+    #[serde(default = "default_internet_archive_max_pages")]
+    pub max_pages: usize,
 }
 
 // Default value functions
+fn default_internet_archive_tv_queries() -> Vec<String> {
+    vec![
+        "mediatype:movies AND collection:prelinger".to_string(),
+        "mediatype:movies AND collection:classic_tv".to_string(),
+    ]
+}
+
+fn default_internet_archive_cooking_queries() -> Vec<String> {
+    vec![
+        "mediatype:movies AND collection:classic_tv AND (title:(cooking OR kitchen OR recipe) OR subject:(cooking OR kitchen OR recipe))".to_string(),
+        "mediatype:movies AND (title:(cooking OR kitchen OR recipe) OR subject:(cooking OR kitchen OR recipe))".to_string(),
+    ]
+}
+
+fn default_internet_archive_public_access_queries() -> Vec<String> {
+    vec![
+        "mediatype:movies AND collection:classic_tv AND (title:(\"public access\" OR telethon) OR subject:(\"public access\" OR telethon))".to_string(),
+        "mediatype:movies AND (title:(telethon) OR subject:(telethon))".to_string(),
+    ]
+}
+
+fn default_internet_archive_industrial_queries() -> Vec<String> {
+    vec![
+        "mediatype:movies AND collection:prelinger AND (subject:(industrial OR training) OR title:(industrial OR training))".to_string(),
+        "mediatype:movies AND (subject:(industrial OR training) OR title:(industrial OR training))".to_string(),
+    ]
+}
+
+fn default_internet_archive_educational_queries() -> Vec<String> {
+    vec![
+        "mediatype:movies AND collection:prelinger AND (subject:(educational OR classroom OR school) OR title:(educational OR classroom OR school))".to_string(),
+        "mediatype:movies AND (subject:(educational OR classroom OR school) OR title:(educational OR classroom OR school))".to_string(),
+    ]
+}
+
+fn default_internet_archive_local_news_queries() -> Vec<String> {
+    vec![
+        "mediatype:movies AND (title:(\"local news\" OR newscast) OR subject:(\"local news\" OR newscast))".to_string(),
+        "mediatype:movies AND collection:classic_tv AND (title:(\"local news\" OR newscast) OR subject:(\"local news\" OR newscast))".to_string(),
+    ]
+}
+
+fn default_internet_archive_rows_per_page() -> usize {
+    50
+}
+
+fn default_internet_archive_max_pages() -> usize {
+    20
+}
+
 fn default_sample_rate() -> u32 {
     44100
 }
@@ -214,15 +477,8 @@ fn default_tempo_history_size() -> usize {
 fn default_visualizer_type() -> String {
     "sine_wave".to_string()
 }
-fn default_use_loopback() -> bool {
-    #[cfg(windows)]
-    {
-        true
-    }
-    #[cfg(not(windows))]
-    {
-        false
-    }
+fn platform_supports_loopback() -> bool {
+    cfg!(windows)
 }
 
 fn default_character_set() -> String {
@@ -250,6 +506,30 @@ fn default_min_height() -> u16 {
     12
 }
 
+fn default_image_braille_preset() -> Option<QualityPreset> {
+    Some(QualityPreset::Cinema)
+}
+
+fn default_video_braille_preset() -> Option<QualityPreset> {
+    Some(QualityPreset::Motion)
+}
+
+fn default_live_braille_preset() -> Option<QualityPreset> {
+    Some(QualityPreset::Motion)
+}
+
+fn default_live_color_mode() -> BrailleColorMode {
+    BrailleColorMode::Full
+}
+
+fn default_video_temporal_blend_preset() -> usize {
+    2
+}
+
+fn default_video_temporal_hysteresis_preset() -> usize {
+    2
+}
+
 impl Default for AudioConfig {
     fn default() -> Self {
         Self {
@@ -258,8 +538,18 @@ impl Default for AudioConfig {
             buffer_capacity: default_buffer_capacity(),
             device_name: None,
             output_device_name: None,
-            use_loopback: default_use_loopback(),
+            use_loopback: LoopbackMode::Auto,
         }
+    }
+}
+
+impl AudioConfig {
+    fn normalize_for_platform(&mut self) {
+        self.use_loopback.normalize_for_platform();
+    }
+
+    pub fn resolved_use_loopback(&self) -> bool {
+        self.use_loopback.resolve()
     }
 }
 
@@ -316,11 +606,267 @@ impl Default for RenderingConfig {
             target_fps: default_fps(),
             min_width: default_min_width(),
             min_height: default_min_height(),
+            braille_live: LiveBrailleConfig::default(),
+            braille_image: ImageBrailleConfig::default(),
+            braille_video: VideoBrailleConfig::default(),
         }
     }
 }
 
+impl Default for LiveBrailleConfig {
+    fn default() -> Self {
+        Self {
+            preset: default_live_braille_preset(),
+            dither_mode: None,
+            gamma_preset: None,
+            contrast_preset: None,
+            exposure_preset: None,
+            color_mode: default_live_color_mode(),
+        }
+    }
+}
+
+impl Default for ImageBrailleConfig {
+    fn default() -> Self {
+        Self {
+            preset: default_image_braille_preset(),
+            dither_mode: None,
+            gamma_preset: None,
+            contrast_preset: None,
+            exposure_preset: None,
+        }
+    }
+}
+
+impl Default for VideoBrailleConfig {
+    fn default() -> Self {
+        Self {
+            preset: default_video_braille_preset(),
+            dither_mode: None,
+            gamma_preset: None,
+            contrast_preset: None,
+            exposure_preset: None,
+            temporal_blend_preset: default_video_temporal_blend_preset(),
+            temporal_hysteresis_preset: default_video_temporal_hysteresis_preset(),
+        }
+    }
+}
+
+impl Default for InternetArchiveConfig {
+    fn default() -> Self {
+        Self {
+            tv_queries: default_internet_archive_tv_queries(),
+            cooking_queries: default_internet_archive_cooking_queries(),
+            public_access_queries: default_internet_archive_public_access_queries(),
+            industrial_queries: default_internet_archive_industrial_queries(),
+            educational_queries: default_internet_archive_educational_queries(),
+            local_news_queries: default_internet_archive_local_news_queries(),
+            rows_per_page: default_internet_archive_rows_per_page(),
+            max_pages: default_internet_archive_max_pages(),
+        }
+    }
+}
+
+fn validate_archive_queries(field: &str, queries: &[String]) -> Result<(), ConfigError> {
+    if queries.is_empty() {
+        return Err(ConfigError::InvalidValue {
+            field: field.to_string(),
+            reason: "must contain at least one query".to_string(),
+        });
+    }
+
+    if queries.iter().any(|query| query.trim().is_empty()) {
+        return Err(ConfigError::InvalidValue {
+            field: field.to_string(),
+            reason: "queries must not be empty".to_string(),
+        });
+    }
+
+    Ok(())
+}
+
+fn validate_optional_preset_index(
+    field: &str,
+    value: Option<usize>,
+    preset_count: usize,
+) -> Result<(), ConfigError> {
+    if let Some(index) = value {
+        if index >= preset_count {
+            return Err(ConfigError::InvalidValue {
+                field: field.to_string(),
+                reason: format!("must be between 0 and {}", preset_count.saturating_sub(1)),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn resolve_braille_quality(
+    fallback_preset: QualityPreset,
+    preset: Option<QualityPreset>,
+    dither_mode: Option<DitherMode>,
+    gamma_preset: Option<usize>,
+    contrast_preset: Option<usize>,
+    exposure_preset: Option<usize>,
+) -> BrailleQualitySettings {
+    let base_preset = preset.unwrap_or(fallback_preset);
+    BrailleQualitySettings::from_preset(base_preset).with_overrides(
+        dither_mode,
+        gamma_preset,
+        contrast_preset,
+        exposure_preset,
+    )
+}
+
+impl ImageBrailleConfig {
+    pub fn quality_settings(&self) -> BrailleQualitySettings {
+        resolve_braille_quality(
+            QualityPreset::Cinema,
+            self.preset,
+            self.dither_mode,
+            self.gamma_preset,
+            self.contrast_preset,
+            self.exposure_preset,
+        )
+    }
+
+    fn validate(&self, base_field: &str) -> Result<(), ConfigError> {
+        validate_optional_preset_index(
+            &format!("{base_field}.gamma_preset"),
+            self.gamma_preset,
+            GAMMA_PRESETS.len(),
+        )?;
+        validate_optional_preset_index(
+            &format!("{base_field}.contrast_preset"),
+            self.contrast_preset,
+            CONTRAST_PRESETS.len(),
+        )?;
+        validate_optional_preset_index(
+            &format!("{base_field}.exposure_preset"),
+            self.exposure_preset,
+            EXPOSURE_PRESETS.len(),
+        )?;
+        Ok(())
+    }
+}
+
+impl VideoBrailleConfig {
+    pub fn quality_settings(&self) -> BrailleQualitySettings {
+        resolve_braille_quality(
+            QualityPreset::Motion,
+            self.preset,
+            self.dither_mode,
+            self.gamma_preset,
+            self.contrast_preset,
+            self.exposure_preset,
+        )
+    }
+
+    fn validate(&self, base_field: &str) -> Result<(), ConfigError> {
+        validate_optional_preset_index(
+            &format!("{base_field}.gamma_preset"),
+            self.gamma_preset,
+            GAMMA_PRESETS.len(),
+        )?;
+        validate_optional_preset_index(
+            &format!("{base_field}.contrast_preset"),
+            self.contrast_preset,
+            CONTRAST_PRESETS.len(),
+        )?;
+        validate_optional_preset_index(
+            &format!("{base_field}.exposure_preset"),
+            self.exposure_preset,
+            EXPOSURE_PRESETS.len(),
+        )?;
+        if self.temporal_blend_preset >= TEMPORAL_BLEND_PRESETS.len() {
+            return Err(ConfigError::InvalidValue {
+                field: format!("{base_field}.temporal_blend_preset"),
+                reason: format!(
+                    "must be between 0 and {}",
+                    TEMPORAL_BLEND_PRESETS.len().saturating_sub(1)
+                ),
+            });
+        }
+        if self.temporal_hysteresis_preset >= TEMPORAL_HYSTERESIS_PRESETS.len() {
+            return Err(ConfigError::InvalidValue {
+                field: format!("{base_field}.temporal_hysteresis_preset"),
+                reason: format!(
+                    "must be between 0 and {}",
+                    TEMPORAL_HYSTERESIS_PRESETS.len().saturating_sub(1)
+                ),
+            });
+        }
+        Ok(())
+    }
+}
+
+impl LiveBrailleConfig {
+    pub fn quality_settings(&self) -> BrailleQualitySettings {
+        resolve_braille_quality(
+            QualityPreset::Motion,
+            self.preset,
+            self.dither_mode,
+            self.gamma_preset,
+            self.contrast_preset,
+            self.exposure_preset,
+        )
+    }
+
+    fn validate(&self, base_field: &str) -> Result<(), ConfigError> {
+        validate_optional_preset_index(
+            &format!("{base_field}.gamma_preset"),
+            self.gamma_preset,
+            GAMMA_PRESETS.len(),
+        )?;
+        validate_optional_preset_index(
+            &format!("{base_field}.contrast_preset"),
+            self.contrast_preset,
+            CONTRAST_PRESETS.len(),
+        )?;
+        validate_optional_preset_index(
+            &format!("{base_field}.exposure_preset"),
+            self.exposure_preset,
+            EXPOSURE_PRESETS.len(),
+        )?;
+        Ok(())
+    }
+}
+
+impl RenderingConfig {
+    pub fn live_braille_quality(&self) -> BrailleQualitySettings {
+        self.braille_live.quality_settings()
+    }
+
+    pub fn live_color_mode(&self) -> BrailleColorMode {
+        self.braille_live.color_mode
+    }
+
+    pub fn image_braille_quality(&self) -> BrailleQualitySettings {
+        self.braille_image.quality_settings()
+    }
+
+    pub fn video_braille_quality(&self) -> BrailleQualitySettings {
+        self.braille_video.quality_settings()
+    }
+
+    pub fn video_temporal_blend_preset(&self) -> usize {
+        self.braille_video
+            .temporal_blend_preset
+            .min(TEMPORAL_BLEND_PRESETS.len().saturating_sub(1))
+    }
+
+    pub fn video_temporal_hysteresis_preset(&self) -> usize {
+        self.braille_video
+            .temporal_hysteresis_preset
+            .min(TEMPORAL_HYSTERESIS_PRESETS.len().saturating_sub(1))
+    }
+}
+
 impl AppConfig {
+    fn normalize_for_platform(&mut self) {
+        self.audio.normalize_for_platform();
+    }
+
     /// Load configuration from a YAML file
     ///
     /// # Arguments
@@ -346,8 +892,10 @@ impl AppConfig {
         })?;
 
         // Parse YAML
-        let config: Self = serde_yaml::from_str(&contents)
+        let mut config: Self = serde_yaml::from_str(&contents)
             .map_err(|e| ConfigError::InvalidFormat(format!("Failed to parse YAML: {}", e)))?;
+
+        config.normalize_for_platform();
 
         // Validate configuration
         config.validate()?;
@@ -370,7 +918,9 @@ impl AppConfig {
 
         if !Path::new(path).exists() {
             tracing::info!("Config file {} not found, using defaults", path);
-            return Ok(Self::default());
+            let mut config = Self::default();
+            config.normalize_for_platform();
+            return Ok(config);
         }
 
         Self::load(path)
@@ -412,6 +962,7 @@ impl AppConfig {
             dsp: DspConfig::default(),
             visualization: VisualizationConfig::default(),
             rendering: RenderingConfig::default(),
+            internet_archive: InternetArchiveConfig::default(),
         }
     }
 
@@ -577,6 +1128,55 @@ impl AppConfig {
             });
         }
 
+        self.rendering
+            .braille_live
+            .validate("rendering.braille_live")?;
+        self.rendering
+            .braille_image
+            .validate("rendering.braille_image")?;
+        self.rendering
+            .braille_video
+            .validate("rendering.braille_video")?;
+
+        validate_archive_queries(
+            "internet_archive.tv_queries",
+            &self.internet_archive.tv_queries,
+        )?;
+        validate_archive_queries(
+            "internet_archive.cooking_queries",
+            &self.internet_archive.cooking_queries,
+        )?;
+        validate_archive_queries(
+            "internet_archive.public_access_queries",
+            &self.internet_archive.public_access_queries,
+        )?;
+        validate_archive_queries(
+            "internet_archive.industrial_queries",
+            &self.internet_archive.industrial_queries,
+        )?;
+        validate_archive_queries(
+            "internet_archive.educational_queries",
+            &self.internet_archive.educational_queries,
+        )?;
+        validate_archive_queries(
+            "internet_archive.local_news_queries",
+            &self.internet_archive.local_news_queries,
+        )?;
+
+        if self.internet_archive.rows_per_page == 0 || self.internet_archive.rows_per_page > 100 {
+            return Err(ConfigError::InvalidValue {
+                field: "internet_archive.rows_per_page".to_string(),
+                reason: "must be between 1 and 100".to_string(),
+            });
+        }
+
+        if self.internet_archive.max_pages == 0 || self.internet_archive.max_pages > 100 {
+            return Err(ConfigError::InvalidValue {
+                field: "internet_archive.max_pages".to_string(),
+                reason: "must be between 1 and 100".to_string(),
+            });
+        }
+
         Ok(())
     }
 }
@@ -707,6 +1307,43 @@ mod tests {
         assert_eq!(config.channels, 2);
         assert_eq!(config.buffer_capacity, 8192);
         assert!(config.device_name.is_none());
+        assert_eq!(config.use_loopback, LoopbackMode::Auto);
+        assert_eq!(config.resolved_use_loopback(), cfg!(windows));
+    }
+
+    #[test]
+    fn test_audio_loopback_normalizes_to_current_platform() {
+        let mut config = AudioConfig::default();
+        config.use_loopback = LoopbackMode::Enabled;
+
+        config.normalize_for_platform();
+
+        assert_eq!(config.resolved_use_loopback(), cfg!(windows));
+        if cfg!(windows) {
+            assert_eq!(config.use_loopback, LoopbackMode::Enabled);
+        } else {
+            assert_eq!(config.use_loopback, LoopbackMode::Disabled);
+        }
+    }
+
+    #[test]
+    fn test_loopback_mode_deserializes_auto_and_bools() {
+        assert_eq!(
+            serde_yaml::from_str::<LoopbackMode>("auto").unwrap(),
+            LoopbackMode::Auto
+        );
+        assert_eq!(
+            serde_yaml::from_str::<LoopbackMode>("true").unwrap(),
+            LoopbackMode::Enabled
+        );
+        assert_eq!(
+            serde_yaml::from_str::<LoopbackMode>("false").unwrap(),
+            LoopbackMode::Disabled
+        );
+        assert_eq!(
+            serde_yaml::from_str::<LoopbackMode>("\"AUTO\"").unwrap(),
+            LoopbackMode::Auto
+        );
     }
 
     #[test]
@@ -742,6 +1379,64 @@ mod tests {
         assert_eq!(config.target_fps, 60);
         assert_eq!(config.min_width, 40);
         assert_eq!(config.min_height, 12);
+        assert_eq!(
+            config.live_braille_quality().active_preset,
+            Some(QualityPreset::Motion)
+        );
+        assert_eq!(config.live_color_mode(), BrailleColorMode::Full);
+        assert_eq!(
+            config.image_braille_quality().active_preset,
+            Some(QualityPreset::Cinema)
+        );
+        assert_eq!(
+            config.video_braille_quality().active_preset,
+            Some(QualityPreset::Motion)
+        );
+        assert_eq!(config.video_temporal_blend_preset(), 2);
+        assert_eq!(config.video_temporal_hysteresis_preset(), 2);
+    }
+
+    #[test]
+    fn test_braille_quality_config_override_behavior() {
+        let config = ImageBrailleConfig {
+            preset: Some(QualityPreset::Cinema),
+            dither_mode: Some(DitherMode::Atkinson),
+            gamma_preset: None,
+            contrast_preset: None,
+            exposure_preset: None,
+        };
+
+        let quality = config.quality_settings();
+        assert_eq!(quality.active_preset, None);
+        assert_eq!(quality.dither_mode, DitherMode::Atkinson);
+
+        let matching = VideoBrailleConfig {
+            preset: Some(QualityPreset::Motion),
+            dither_mode: Some(DitherMode::Bayer4x4),
+            gamma_preset: Some(1),
+            contrast_preset: Some(1),
+            exposure_preset: Some(1),
+            temporal_blend_preset: 2,
+            temporal_hysteresis_preset: 2,
+        };
+
+        assert_eq!(
+            matching.quality_settings().active_preset,
+            Some(QualityPreset::Motion)
+        );
+    }
+
+    #[test]
+    fn test_default_internet_archive_config() {
+        let config = InternetArchiveConfig::default();
+        assert!(!config.tv_queries.is_empty());
+        assert!(!config.cooking_queries.is_empty());
+        assert!(!config.public_access_queries.is_empty());
+        assert!(!config.industrial_queries.is_empty());
+        assert!(!config.educational_queries.is_empty());
+        assert!(!config.local_news_queries.is_empty());
+        assert_eq!(config.rows_per_page, 50);
+        assert_eq!(config.max_pages, 20);
     }
 
     #[test]
@@ -835,6 +1530,88 @@ mod tests {
         assert!(config.validate().is_err());
 
         config.rendering.min_height = 5;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_invalid_braille_rendering_config() {
+        let mut config = AppConfig::default();
+        config.rendering.braille_image.gamma_preset = Some(GAMMA_PRESETS.len());
+        assert!(config.validate().is_err());
+
+        let mut config = AppConfig::default();
+        config.rendering.braille_video.temporal_blend_preset = TEMPORAL_BLEND_PRESETS.len();
+        assert!(config.validate().is_err());
+
+        let mut config = AppConfig::default();
+        config.rendering.braille_video.temporal_hysteresis_preset =
+            TEMPORAL_HYSTERESIS_PRESETS.len();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_load_braille_rendering_yaml() {
+        let yaml_content = r#"
+rendering:
+  braille_live:
+    preset: newsprint
+    color_mode: grayscale
+    dither_mode: bayer8x8
+  braille_image:
+    preset: newsprint
+    dither_mode: atkinson
+    contrast_preset: 3
+  braille_video:
+    preset: planet_killer
+    gamma_preset: 0
+    exposure_preset: 3
+    temporal_blend_preset: 4
+    temporal_hysteresis_preset: 3
+"#;
+
+        let config: AppConfig = serde_yaml::from_str(yaml_content).unwrap();
+        assert!(config.validate().is_ok());
+        assert_eq!(config.rendering.live_braille_quality().active_preset, None);
+        assert_eq!(
+            config.rendering.live_braille_quality().dither_mode,
+            DitherMode::Bayer8x8
+        );
+        assert_eq!(
+            config.rendering.live_color_mode(),
+            BrailleColorMode::Grayscale
+        );
+        assert_eq!(
+            config.rendering.braille_image.preset,
+            Some(QualityPreset::Newsprint)
+        );
+        assert_eq!(config.rendering.braille_video.temporal_blend_preset, 4);
+        assert_eq!(config.rendering.braille_video.temporal_hysteresis_preset, 3);
+        assert_eq!(
+            config.rendering.video_braille_quality().dither_mode,
+            DitherMode::Atkinson
+        );
+    }
+
+    #[test]
+    fn test_validate_invalid_internet_archive_config() {
+        let mut config = AppConfig::default();
+        config.internet_archive.tv_queries.clear();
+        assert!(config.validate().is_err());
+
+        let mut config = AppConfig::default();
+        config.internet_archive.public_access_queries = vec![" ".to_string()];
+        assert!(config.validate().is_err());
+
+        let mut config = AppConfig::default();
+        config.internet_archive.local_news_queries.clear();
+        assert!(config.validate().is_err());
+
+        let mut config = AppConfig::default();
+        config.internet_archive.rows_per_page = 0;
+        assert!(config.validate().is_err());
+
+        let mut config = AppConfig::default();
+        config.internet_archive.max_pages = 0;
         assert!(config.validate().is_err());
     }
 
@@ -996,6 +1773,114 @@ rendering:
     }
 
     #[test]
+    fn test_load_normalizes_unsupported_loopback_setting() {
+        use std::fs;
+        use std::io::Write;
+
+        let temp_file = "test_config_loopback_platform.yaml";
+        let yaml_content = r#"
+audio:
+  sample_rate: 44100
+  channels: 2
+  buffer_capacity: 8192
+  use_loopback: true
+dsp:
+  fft_size: 1024
+  smoothing: 0.05
+  bass_range: [20.0, 250.0]
+  mid_range: [250.0, 4000.0]
+  treble_range: [4000.0, 20000.0]
+visualization:
+  visualizer_type: sine_wave
+  character_set: smooth64
+  sine_wave:
+    amplitude: 1.0
+    frequency: 1.0
+    phase: 0.0
+    thickness: 3
+    smoothing: 0.15
+rendering:
+  target_fps: 60
+  min_width: 40
+  min_height: 12
+internet_archive:
+  tv_queries: ["mediatype:movies AND collection:prelinger"]
+  cooking_queries: ["mediatype:movies AND subject:(cooking)"]
+  public_access_queries: ["mediatype:movies AND title:(telethon)"]
+  industrial_queries: ["mediatype:movies AND subject:(industrial)"]
+  educational_queries: ["mediatype:movies AND subject:(educational)"]
+  local_news_queries: ["mediatype:movies AND title:(\"local news\")"]
+  rows_per_page: 50
+  max_pages: 20
+"#;
+
+        let mut file = fs::File::create(temp_file).unwrap();
+        file.write_all(yaml_content.as_bytes()).unwrap();
+
+        let config = AppConfig::load(temp_file).unwrap();
+        assert_eq!(config.audio.resolved_use_loopback(), cfg!(windows));
+        if cfg!(windows) {
+            assert_eq!(config.audio.use_loopback, LoopbackMode::Enabled);
+        } else {
+            assert_eq!(config.audio.use_loopback, LoopbackMode::Disabled);
+        }
+
+        fs::remove_file(temp_file).ok();
+    }
+
+    #[test]
+    fn test_load_preserves_auto_loopback_setting() {
+        use std::fs;
+        use std::io::Write;
+
+        let temp_file = "test_config_loopback_auto.yaml";
+        let yaml_content = r#"
+audio:
+  sample_rate: 44100
+  channels: 2
+  buffer_capacity: 8192
+  use_loopback: auto
+dsp:
+  fft_size: 1024
+  smoothing: 0.05
+  bass_range: [20.0, 250.0]
+  mid_range: [250.0, 4000.0]
+  treble_range: [4000.0, 20000.0]
+visualization:
+  visualizer_type: sine_wave
+  character_set: smooth64
+  sine_wave:
+    amplitude: 1.0
+    frequency: 1.0
+    phase: 0.0
+    thickness: 3
+    smoothing: 0.15
+rendering:
+  target_fps: 60
+  min_width: 40
+  min_height: 12
+internet_archive:
+  tv_queries: ["mediatype:movies AND collection:prelinger"]
+  cooking_queries: ["mediatype:movies AND subject:(cooking)"]
+  public_access_queries: ["mediatype:movies AND title:(telethon)"]
+  industrial_queries: ["mediatype:movies AND subject:(industrial)"]
+  educational_queries: ["mediatype:movies AND subject:(educational)"]
+  local_news_queries: ["mediatype:movies AND title:(\"local news\")"]
+  rows_per_page: 50
+  max_pages: 20
+"#;
+
+        let mut file = fs::File::create(temp_file).unwrap();
+        file.write_all(yaml_content.as_bytes()).unwrap();
+
+        let config = AppConfig::load(temp_file).unwrap();
+        assert_eq!(config.audio.use_loopback, LoopbackMode::Auto);
+        assert_eq!(config.audio.resolved_use_loopback(), cfg!(windows));
+
+        fs::remove_file(temp_file).ok();
+    }
+
+    #[test]
     fn test_save_config() {
         use std::fs;
 
@@ -1013,6 +1898,8 @@ rendering:
         let loaded = loaded.unwrap();
         assert_eq!(loaded.audio.sample_rate, config.audio.sample_rate);
         assert_eq!(loaded.dsp.fft_size, config.dsp.fft_size);
+        let saved = fs::read_to_string(temp_file).unwrap();
+        assert!(saved.contains("use_loopback: auto"));
 
         // Cleanup
         fs::remove_file(temp_file).ok();

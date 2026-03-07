@@ -82,15 +82,14 @@ impl TerminalRenderer {
         let mut stdout = io::stdout();
 
         // Check terminal size (minimum 40x12 for basic functionality)
-        let (width, height) =
-            crossterm::terminal::size().map_err(|_| RenderError::InitializationFailed)?;
+        let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
 
-        if width < 40 || height < 12 {
-            return Err(RenderError::TerminalTooSmall {
-                min_width: 40,
-                min_height: 12,
-            });
-        }
+        // if width < 40 || height < 12 {
+        //     return Err(RenderError::TerminalTooSmall {
+        //         min_width: 40,
+        //         min_height: 12,
+        //     });
+        // }
 
         // Enter raw mode
         enable_raw_mode().map_err(|_| RenderError::InitializationFailed)?;
@@ -141,17 +140,28 @@ impl TerminalRenderer {
         self.terminal
             .draw(|frame| {
                 let area = frame.size();
+                let term_width = area.width as usize;
+                let term_height = area.height as usize;
 
                 // Convert GridBuffer to Ratatui Lines with color support
-                let lines: Vec<Line> = (0..grid.height())
+                // Ensure we fill the entire terminal to prevent artifacts
+                let lines: Vec<Line> = (0..term_height)
                     .map(|y| {
                         let mut spans = Vec::new();
                         let mut current_color: Option<ratatui::style::Color> = None;
                         let mut current_text = String::new();
 
-                        for x in 0..grid.width() {
-                            let cell = grid.get_cell(x, y);
-                            let cell_color = cell.foreground_color.map(|c| c.to_ratatui_color());
+                        for x in 0..term_width {
+                            // Get cell from grid, or use space if out of bounds
+                            let (ch, cell_color) = if y < grid.height() && x < grid.width() {
+                                let cell = grid.get_cell(x, y);
+                                (
+                                    cell.character,
+                                    cell.foreground_color.map(|c| c.to_ratatui_color()),
+                                )
+                            } else {
+                                (' ', None)
+                            };
 
                             // If color changed, flush current span and start new one
                             if cell_color != current_color {
@@ -170,7 +180,7 @@ impl TerminalRenderer {
                                 current_color = cell_color;
                             }
 
-                            current_text.push(cell.character);
+                            current_text.push(ch);
                         }
 
                         // Flush remaining text
@@ -203,16 +213,26 @@ impl TerminalRenderer {
         self.terminal
             .draw(|frame| {
                 let area = frame.size();
+                let term_width = area.width as usize;
+                let term_height = area.height as usize;
 
-                let lines: Vec<Line> = (0..grid.height())
+                // Ensure we fill the entire terminal to prevent artifacts
+                let lines: Vec<Line> = (0..term_height)
                     .map(|y| {
                         let mut spans = Vec::new();
                         let mut current_color: Option<ratatui::style::Color> = None;
                         let mut current_text = String::new();
 
-                        for x in 0..grid.width() {
-                            let char = grid.get_char(x, y);
-                            let color = grid.get_color(x, y).map(|c| c.to_ratatui_color());
+                        for x in 0..term_width {
+                            // Get cell from grid, or use space if out of bounds
+                            let (ch, color) = if y < grid.height() && x < grid.width() {
+                                (
+                                    grid.get_char(x, y),
+                                    grid.get_color(x, y).map(|c| c.to_ratatui_color()),
+                                )
+                            } else {
+                                (' ', None)
+                            };
 
                             if color != current_color {
                                 if !current_text.is_empty() {
@@ -229,7 +249,7 @@ impl TerminalRenderer {
                                 }
                                 current_color = color;
                             }
-                            current_text.push(char);
+                            current_text.push(ch);
                         }
 
                         if !current_text.is_empty() {

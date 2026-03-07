@@ -46,6 +46,9 @@ visualization:
 
 # Rendering settings
 rendering:
+  # Target frame rate
+  target_fps: 60
+
   # Character set: ascii, unicode, blocks
   character_set: unicode
   
@@ -55,6 +58,33 @@ rendering:
   # Minimum terminal size
   min_width: 80
   min_height: 24
+
+  # Startup braille-quality defaults for the main live audio visualizer app
+  braille_live:
+    preset: motion
+    color_mode: full
+    # dither_mode: bayer4x4
+    # gamma_preset: 1
+    # contrast_preset: 1
+    # exposure_preset: 1
+
+  # Startup braille-quality defaults for still images
+  braille_image:
+    preset: cinema
+    # dither_mode: atkinson
+    # gamma_preset: 1
+    # contrast_preset: 1
+    # exposure_preset: 1
+
+  # Startup braille-quality defaults for video playback
+  braille_video:
+    preset: motion
+    temporal_blend_preset: 2
+    temporal_hysteresis_preset: 2
+    # dither_mode: bayer4x4
+    # gamma_preset: 1
+    # contrast_preset: 1
+    # exposure_preset: 1
 
 # Logging settings
 logging:

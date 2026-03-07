@@ -36,7 +36,11 @@ impl TriangleMesh {
     /// Create a mesh from raw triangle data
     pub fn from_triangles(triangles: Vec<Triangle>) -> Self {
         let (aabb_min, aabb_max) = Self::compute_aabb(&triangles);
-        Self { triangles, aabb_min, aabb_max }
+        Self {
+            triangles,
+            aabb_min,
+            aabb_max,
+        }
     }
 
     /// Create a mesh from glTF-loaded data
@@ -66,7 +70,10 @@ impl TriangleMesh {
             let i2 = chunk[2] as usize;
 
             // Bounds guard against malformed indices
-            if i0 >= data.positions.len() || i1 >= data.positions.len() || i2 >= data.positions.len() {
+            if i0 >= data.positions.len()
+                || i1 >= data.positions.len()
+                || i2 >= data.positions.len()
+            {
                 continue;
             }
 
@@ -91,7 +98,11 @@ impl TriangleMesh {
         }
 
         let (aabb_min, aabb_max) = Self::compute_aabb(&triangles);
-        Self { triangles, aabb_min, aabb_max }
+        Self {
+            triangles,
+            aabb_min,
+            aabb_max,
+        }
     }
 
     /// Compute axis-aligned bounding box for a list of triangles
@@ -104,19 +115,37 @@ impl TriangleMesh {
         for t in tris {
             let pts = [t.v0, t.v1, t.v2];
             for p in &pts {
-                if p.x < min.x { min.x = p.x; }
-                if p.y < min.y { min.y = p.y; }
-                if p.z < min.z { min.z = p.z; }
-                if p.x > max.x { max.x = p.x; }
-                if p.y > max.y { max.y = p.y; }
-                if p.z > max.z { max.z = p.z; }
+                if p.x < min.x {
+                    min.x = p.x;
+                }
+                if p.y < min.y {
+                    min.y = p.y;
+                }
+                if p.z < min.z {
+                    min.z = p.z;
+                }
+                if p.x > max.x {
+                    max.x = p.x;
+                }
+                if p.y > max.y {
+                    max.y = p.y;
+                }
+                if p.z > max.z {
+                    max.z = p.z;
+                }
             }
         }
         (min, max)
     }
 
     #[inline]
-    fn ray_intersects_aabb(ray: &Ray, mut t_min: f32, mut t_max: f32, aabb_min: &Vector3, aabb_max: &Vector3) -> bool {
+    fn ray_intersects_aabb(
+        ray: &Ray,
+        mut t_min: f32,
+        mut t_max: f32,
+        aabb_min: &Vector3,
+        aabb_max: &Vector3,
+    ) -> bool {
         // Slab method
         for i in 0..3 {
             let (origin, dir, min_b, max_b) = match i {
@@ -126,16 +155,22 @@ impl TriangleMesh {
             };
             if dir.abs() < 1e-8 {
                 // Ray parallel to slab; if origin outside, no hit
-                if origin < min_b || origin > max_b { return false; }
+                if origin < min_b || origin > max_b {
+                    return false;
+                }
                 continue;
             }
             let inv_d = 1.0 / dir;
             let mut t0 = (min_b - origin) * inv_d;
             let mut t1 = (max_b - origin) * inv_d;
-            if inv_d < 0.0 { std::mem::swap(&mut t0, &mut t1); }
+            if inv_d < 0.0 {
+                std::mem::swap(&mut t0, &mut t1);
+            }
             t_min = t_min.max(t0);
             t_max = t_max.min(t1);
-            if t_max < t_min { return false; }
+            if t_max < t_min {
+                return false;
+            }
         }
         true
     }
@@ -199,8 +234,8 @@ impl Hittable for TriangleMesh {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::math::Vector3;
+    use super::*;
 
     #[test]
     fn test_empty_mesh() {

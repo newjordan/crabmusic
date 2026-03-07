@@ -78,7 +78,7 @@ pub fn color_brightness(color: Color) -> f32 {
 /// # Examples
 ///
 /// ```
-/// use crabmusic::effects::bloom::BloomEffect;
+/// use crabmusic::effects::{bloom::BloomEffect, Effect};
 ///
 /// // Create bloom with 0.7 threshold and radius 2
 /// let mut effect = BloomEffect::new(0.7, 2);

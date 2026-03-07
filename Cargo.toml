@@ -43,13 +43,15 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Async runtime (optional, for config hot-reload)
-tokio = { version = "1.35", features = ["fs", "time"], optional = true }
+tokio = { version = "1.35", features = ["fs", "time", "rt-multi-thread", "macros"], optional = true }
 ctrlc = "3.5.1"
 notify = { version = "7.0.0", features = ["serde"] }
 ffmpeg-next = { version = "8.0.0", optional = true }
 image = { version = "0.25.6", optional = true }
 reqwest = { version = "0.12.24", features = ["blocking"] }
 serde_json = "1.0.145"
+rustube = "0.6.0"
+url = "2.5.0"
 
 # Windows WASAPI for native loopback capture
 [target.'cfg(windows)'.dependencies]
@@ -70,11 +72,35 @@ strip = true            # Strip symbols
 panic = "abort"         # Smaller binary, faster panic
 
 [features]
-default = ["image"]
+default = ["image", "video", "tokio"]
 hot-reload = ["tokio"]
 video = ["ffmpeg-next", "image"]
 ffmpeg-next = ["dep:ffmpeg-next"]
 image = ["dep:image"]
+tokio = ["dep:tokio"]
+legacy-sacred-geometry-demos = []
+model-browser-demo = []
+internal-raytracer-dev = []
+
+[[example]]
+name = "flower_of_life_demo"
+required-features = ["legacy-sacred-geometry-demos"]
+
+[[example]]
+name = "mandala_demo"
+required-features = ["legacy-sacred-geometry-demos"]
+
+[[example]]
+name = "sacred_geometry_demo"
+required-features = ["legacy-sacred-geometry-demos"]
+
+[[example]]
+name = "model_browser"
+required-features = ["model-browser-demo"]
+
+[[test]]
+name = "gltf_loading_test"
+required-features = ["internal-raytracer-dev"]
 
 [[bench]]
 name = "fft_benchmark"
@@ -87,4 +113,3 @@ harness = false
 [[bench]]
 name = "ring_buffer_benchmark"
 harness = false
-

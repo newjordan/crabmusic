@@ -240,6 +240,16 @@ impl SpectrumVisualizer {
         self.peak_velocities.resize(self.config.bar_count, 0.0);
     }
 
+    /// Enable or disable peak hold indicators
+    pub fn set_peak_hold(&mut self, enabled: bool) {
+        self.config.peak_hold_enabled = enabled;
+    }
+
+    /// Enable or disable frequency labels
+    pub fn set_show_labels(&mut self, enabled: bool) {
+        self.config.show_labels = enabled;
+    }
+
     /// Map bar index to frequency range using logarithmic scaling
     ///
     /// Human hearing is logarithmic - an octave from 100-200 Hz sounds the same

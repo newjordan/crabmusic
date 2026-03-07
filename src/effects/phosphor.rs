@@ -16,7 +16,7 @@ use crate::visualization::{Color, GridBuffer};
 /// # Examples
 ///
 /// ```
-/// use crabmusic::effects::phosphor::PhosphorGlowEffect;
+/// use crabmusic::effects::{phosphor::PhosphorGlowEffect, Effect};
 ///
 /// // Create phosphor with 0.3 decay rate and 0.7 intensity
 /// let mut effect = PhosphorGlowEffect::new(0.3, 0.7);

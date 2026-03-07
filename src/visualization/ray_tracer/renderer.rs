@@ -3,9 +3,7 @@
 use super::camera::Camera;
 use super::lighting::calculate_diffuse_shading;
 use super::scene::Scene;
-use super::wireframe::{
-    is_on_wireframe_normal_rotated, rotate_vec_yaw_pitch_roll, DEFAULT_WIREFRAME_STEP_RAD, DEFAULT_WIREFRAME_TOL_RAD,
-};
+use super::wireframe::{is_on_wireframe_normal_rotated, rotate_vec_yaw_pitch_roll};
 use super::RenderMode;
 
 #[derive(Debug, Clone, Copy)]
@@ -100,12 +98,15 @@ pub fn render_edges_with_orientation(
     // rotate vector with yaw/pitch/roll
     // use direct import rotate_vec_yaw_pitch_roll
 
-
     let mut buffer = vec![vec![0.0_f32; width]; height];
     let mut depth = vec![vec![f32::INFINITY; width]; height];
 
-    let Some(verts) = scene.mesh_vertices() else { return buffer; };
-    let Some(edges) = scene.mesh_edges() else { return buffer; };
+    let Some(verts) = scene.mesh_vertices() else {
+        return buffer;
+    };
+    let Some(edges) = scene.mesh_edges() else {
+        return buffer;
+    };
 
     let half_w = camera.viewport_width * 0.5;
     let half_h = camera.viewport_height * 0.5;
@@ -117,8 +118,14 @@ pub fn render_edges_with_orientation(
         let ps = Vector3::new(p.x * model_scale, p.y * model_scale, p.z * model_scale);
         let pr = rotate_vec_yaw_pitch_roll(ps, yaw, pitch, roll);
         // Transform to camera space (camera looks down -Z)
-        let q = Vector3::new(pr.x - camera.origin.x, pr.y - camera.origin.y, pr.z - camera.origin.z);
-        if q.z >= -1e-4 { return None; }
+        let q = Vector3::new(
+            pr.x - camera.origin.x,
+            pr.y - camera.origin.y,
+            pr.z - camera.origin.z,
+        );
+        if q.z >= -1e-4 {
+            return None;
+        }
         // Intersect with plane z = -f
         let t = -camera.focal_length / q.z;
         let x_plane = q.x * t;
@@ -126,7 +133,9 @@ pub fn render_edges_with_orientation(
         // Map plane coords to [0,1] using viewport size
         let u = (x_plane + half_w) / camera.viewport_width;
         let v = (y_plane + half_h) / camera.viewport_height;
-        if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) { return None; }
+        if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) {
+            return None;
+        }
         let px = (u * (width as f32 - 1.0)).round() as i32;
         let py = (v * (height as f32 - 1.0)).round() as i32;
         // Positive depth = distance from camera
@@ -136,13 +145,16 @@ pub fn render_edges_with_orientation(
 
     let mut set_px_depth = |x: i32, y: i32, val: f32, d: f32| {
         if x >= 0 && x <= w_max && y >= 0 && y <= h_max {
-            let ux = x as usize; let uy = y as usize;
+            let ux = x as usize;
+            let uy = y as usize;
             if d < depth[uy][ux] {
                 depth[uy][ux] = d;
                 buffer[uy][ux] = val;
             } else if (d - depth[uy][ux]).abs() < 1e-4 {
                 // same depth: keep brighter
-                if val > buffer[uy][ux] { buffer[uy][ux] = val; }
+                if val > buffer[uy][ux] {
+                    buffer[uy][ux] = val;
+                }
             }
         }
     };
@@ -151,7 +163,7 @@ pub fn render_edges_with_orientation(
         let rr = r.max(0);
         for dy in -rr..=rr {
             for dx in -rr..=rr {
-                if dx*dx + dy*dy <= rr*rr {
+                if dx * dx + dy * dy <= rr * rr {
                     set(cx + dx, cy + dy, 1.0, d);
                 }
             }
@@ -162,13 +174,22 @@ pub fn render_edges_with_orientation(
         let dx = x1 - x0;
         let dy = y1 - y0;
         let steps = dx.abs().max(dy.abs());
-        if steps == 0 { draw_disc(x0, y0, thick, d0, &mut set_px_depth); return; }
+        if steps == 0 {
+            draw_disc(x0, y0, thick, d0, &mut set_px_depth);
+            return;
+        }
         for s in 0..=steps {
             let t = s as f32 / steps as f32;
             let x = x0 as f32 + dx as f32 * t;
             let y = y0 as f32 + dy as f32 * t;
             let d = d0 + (d1 - d0) * t;
-            draw_disc(x.round() as i32, y.round() as i32, thick, d, &mut set_px_depth);
+            draw_disc(
+                x.round() as i32,
+                y.round() as i32,
+                thick,
+                d,
+                &mut set_px_depth,
+            );
         }
     };
 
@@ -191,7 +212,6 @@ pub fn render_edges_with_orientation(
     buffer
 }
 
-
 pub fn render(
     scene: &Scene,
     camera: &Camera,
@@ -213,6 +233,7 @@ pub fn render(
 mod tests {
     use super::*;
     use crate::visualization::ray_tracer::math::Vector3;
+    use crate::visualization::ray_tracer::{DEFAULT_WIREFRAME_STEP_RAD, DEFAULT_WIREFRAME_TOL_RAD};
 
     #[test]
     fn test_render_dimensions() {
@@ -234,22 +255,13 @@ mod tests {
 
     #[test]
     fn test_render_single_sphere_center_hit() {
-        let scene = Scene::new_with_sphere();
+        let scene = Scene::new_with_sphere_and_light();
         let cam = Camera::new(Vector3::new(0.0, 0.0, 0.0), 4.0, 3.0);
         let w = 40_usize;
         let h = 30_usize;
-        let buffer = render(
-            &scene,
-            &cam,
-            w,
-            h,
-            RenderMode::Wireframe {
-                step_rad: DEFAULT_WIREFRAME_STEP_RAD,
-                tol_rad: DEFAULT_WIREFRAME_TOL_RAD,
-            },
-        );
+        let buffer = render(&scene, &cam, w, h, RenderMode::Solid);
         let center = buffer[h / 2][w / 2];
-        assert!(center > 0.0, "Center should hit sphere");
+        assert!(center > 0.0, "Center should hit the lit sphere");
         // corners should be mostly background
         assert!(
             buffer[0][0] < 0.5

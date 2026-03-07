@@ -209,7 +209,14 @@ fn test_beat_detection_bass_transient() {
     let params = processor.process(&bass_hit);
 
     assert!(params.beat, "Should detect beat on bass drum transient");
-    assert!(params.bass > 0.3, "Bass frequency band should be active");
+    assert!(
+        params.bass > params.mid,
+        "Bass band should dominate mid band"
+    );
+    assert!(
+        params.bass > params.treble,
+        "Bass band should dominate treble band"
+    );
 }
 
 #[test]

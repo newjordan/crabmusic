@@ -24,6 +24,7 @@
 
 // Public modules
 pub mod audio;
+pub mod braille_quality;
 pub mod config;
 pub mod dsp;
 pub mod effects;

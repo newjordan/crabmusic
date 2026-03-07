@@ -41,7 +41,7 @@ impl PassthroughEffect {
     /// # Examples
     ///
     /// ```
-    /// use crabmusic::effects::passthrough::PassthroughEffect;
+    /// use crabmusic::effects::{passthrough::PassthroughEffect, Effect};
     ///
     /// let effect = PassthroughEffect::new();
     /// assert!(effect.is_enabled());

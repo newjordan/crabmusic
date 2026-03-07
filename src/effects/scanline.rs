@@ -16,7 +16,7 @@ use crate::visualization::{Color, GridBuffer};
 /// # Examples
 ///
 /// ```
-/// use crabmusic::effects::scanline::ScanlineEffect;
+/// use crabmusic::effects::{scanline::ScanlineEffect, Effect};
 ///
 /// // Create scanlines every 2 rows with 50% intensity
 /// let mut effect = ScanlineEffect::new(2);

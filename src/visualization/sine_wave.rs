@@ -48,9 +48,13 @@ impl Default for SineWaveConfig {
 ///
 /// ```
 /// use crabmusic::visualization::{SineWaveVisualizer, SineWaveConfig, Visualizer, GridBuffer};
+/// use crabmusic::visualization::character_sets::{get_character_set, CharacterSetType};
 /// use crabmusic::dsp::AudioParameters;
 ///
-/// let mut viz = SineWaveVisualizer::new(SineWaveConfig::default());
+/// let mut viz = SineWaveVisualizer::new(
+///     SineWaveConfig::default(),
+///     get_character_set(CharacterSetType::Basic),
+/// );
 /// let mut grid = GridBuffer::new(80, 24);
 /// let params = AudioParameters::default();
 ///
@@ -95,8 +99,12 @@ impl SineWaveVisualizer {
     ///
     /// ```
     /// use crabmusic::visualization::{SineWaveVisualizer, SineWaveConfig, Visualizer};
+    /// use crabmusic::visualization::character_sets::{get_character_set, CharacterSetType};
     ///
-    /// let viz = SineWaveVisualizer::new(SineWaveConfig::default());
+    /// let viz = SineWaveVisualizer::new(
+    ///     SineWaveConfig::default(),
+    ///     get_character_set(CharacterSetType::Basic),
+    /// );
     /// assert_eq!(viz.name(), "Sine Wave");
     /// ```
     pub fn new(config: SineWaveConfig, charset: CharacterSet) -> Self {
@@ -343,6 +351,9 @@ mod tests {
             amplitude: 0.4,
             beat: false,
             beat_flux: false,
+            beat_bass: false,
+            beat_mid: false,
+            beat_treble: false,
             bpm: 120.0,
             tempo_confidence: 0.0,
             spectrum: vec![],

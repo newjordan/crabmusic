@@ -34,39 +34,73 @@ impl Transform3DControls {
     }
 
     #[inline]
-    pub fn set_auto_rotate(&mut self, enable: bool) { self.auto_rotate = enable; }
+    pub fn set_auto_rotate(&mut self, enable: bool) {
+        self.auto_rotate = enable;
+    }
 
     #[inline]
-    pub fn yaw_left(&mut self, step: f32) { self.yaw -= step; self.wrap_angles(); }
+    pub fn yaw_left(&mut self, step: f32) {
+        self.yaw -= step;
+        self.wrap_angles();
+    }
     #[inline]
-    pub fn yaw_right(&mut self, step: f32) { self.yaw += step; self.wrap_angles(); }
+    pub fn yaw_right(&mut self, step: f32) {
+        self.yaw += step;
+        self.wrap_angles();
+    }
     #[inline]
-    pub fn pitch_up(&mut self, step: f32) { self.pitch += step; self.wrap_angles(); }
+    pub fn pitch_up(&mut self, step: f32) {
+        self.pitch += step;
+        self.wrap_angles();
+    }
     #[inline]
-    pub fn pitch_down(&mut self, step: f32) { self.pitch -= step; self.wrap_angles(); }
+    pub fn pitch_down(&mut self, step: f32) {
+        self.pitch -= step;
+        self.wrap_angles();
+    }
     #[inline]
-    pub fn roll_ccw(&mut self, step: f32) { self.roll += step; self.wrap_angles(); }
+    pub fn roll_ccw(&mut self, step: f32) {
+        self.roll += step;
+        self.wrap_angles();
+    }
     #[inline]
-    pub fn roll_cw(&mut self, step: f32) { self.roll -= step; self.wrap_angles(); }
+    pub fn roll_cw(&mut self, step: f32) {
+        self.roll -= step;
+        self.wrap_angles();
+    }
 
     #[inline]
-    pub fn zoom_in(&mut self) { self.scale = (self.scale * 1.2).min(20.0); }
+    pub fn zoom_in(&mut self) {
+        self.scale = (self.scale * 1.2).min(20.0);
+    }
     #[inline]
-    pub fn zoom_out(&mut self) { self.scale = (self.scale / 1.2).max(0.05); }
+    pub fn zoom_out(&mut self) {
+        self.scale = (self.scale / 1.2).max(0.05);
+    }
 
     #[inline]
-    pub fn set_scale(&mut self, s: f32) { self.scale = s.clamp(0.05, 20.0); }
+    pub fn set_scale(&mut self, s: f32) {
+        self.scale = s.clamp(0.05, 20.0);
+    }
 
     #[inline]
-    pub fn reset_orientation(&mut self) { self.yaw = 0.0; self.pitch = 0.0; self.roll = 0.0; }
+    pub fn reset_orientation(&mut self) {
+        self.yaw = 0.0;
+        self.pitch = 0.0;
+        self.roll = 0.0;
+    }
 
     #[inline]
     fn wrap_angles(&mut self) {
         // Keep angles in [-pi, pi] for numerical stability
         let wrap = |a: f32| -> f32 {
             let mut t = a;
-            while t > PI { t -= 2.0 * PI; }
-            while t < -PI { t += 2.0 * PI; }
+            while t > PI {
+                t -= 2.0 * PI;
+            }
+            while t < -PI {
+                t += 2.0 * PI;
+            }
             t
         };
         self.yaw = wrap(self.yaw);
@@ -74,4 +108,3 @@ impl Transform3DControls {
         self.roll = wrap(self.roll);
     }
 }
-

@@ -46,7 +46,7 @@ impl GridOverlayEffect {
     /// # Examples
     ///
     /// ```
-    /// use crabmusic::effects::grid_overlay::GridOverlayEffect;
+    /// use crabmusic::effects::{grid_overlay::GridOverlayEffect, Effect};
     ///
     /// let effect = GridOverlayEffect::new(10);
     /// assert!(effect.is_enabled());

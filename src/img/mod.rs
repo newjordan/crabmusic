@@ -9,57 +9,26 @@ use crossterm::event::{
     self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind,
 };
 use crossterm::execute;
-use std::io::stdout;
+use std::{cell::Cell, io::stdout};
 
+use crate::braille_quality::{self, BrailleQualitySettings};
+use crate::config::RenderingConfig;
 use crate::rendering::TerminalRenderer;
-use crate::video::blit_luma_to_braille;
+use crate::runtime_controls::{
+    apply_quality_action, quality_control_action_from_key, ColorMode, QualityControlAction,
+};
 use crate::visualization::braille::BrailleGrid;
 use crate::visualization::{Color, GridBuffer};
 
 #[cfg(feature = "image")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ColorMode {
-    Off,
-    Grayscale,
-    Full,
+thread_local! {
+    static IMAGE_QUALITY_SETTINGS: Cell<BrailleQualitySettings> =
+        Cell::new(BrailleQualitySettings::image_default());
 }
 
 #[cfg(feature = "image")]
 fn otsu_threshold(luma: &[u8]) -> u8 {
-    let mut hist = [0u32; 256];
-    for &v in luma {
-        hist[v as usize] += 1;
-    }
-    let total: u32 = luma.len() as u32;
-    let mut sum_all: u64 = 0;
-    for i in 0..256 {
-        sum_all += (i as u64) * (hist[i] as u64);
-    }
-
-    let mut sum_b: u64 = 0;
-    let mut w_b: u32 = 0;
-    let mut max_var: f64 = -1.0;
-    let mut threshold: u8 = 128;
-
-    for t in 0..256 {
-        w_b += hist[t] as u32;
-        if w_b == 0 {
-            continue;
-        }
-        let w_f = total - w_b;
-        if w_f == 0 {
-            break;
-        }
-        sum_b += (t as u64) * (hist[t] as u64);
-        let m_b = sum_b as f64 / w_b as f64;
-        let m_f = (sum_all - sum_b) as f64 / w_f as f64;
-        let var_between = (w_b as f64) * (w_f as f64) * (m_b - m_f).powi(2);
-        if var_between > max_var {
-            max_var = var_between;
-            threshold = t as u8;
-        }
-    }
-    threshold
+    braille_quality::otsu_threshold(luma)
 }
 
 #[cfg(feature = "image")]
@@ -114,7 +83,7 @@ fn prepare_rgb_dot_sized(
     dot_h: u32,
     letterbox: bool,
 ) -> image::RgbImage {
-    use image::{imageops, DynamicImage, GenericImageView, RgbImage};
+    use image::{imageops, GenericImageView, RgbImage};
     if !letterbox {
         return imageops::resize(&img.to_rgb8(), dot_w, dot_h, imageops::FilterType::Triangle);
     }
@@ -150,14 +119,34 @@ fn prepare_rgb_dot_sized(
 }
 
 #[cfg(feature = "image")]
-fn fill_braille_from_luma(braille: &mut BrailleGrid, luma: &image::GrayImage, threshold: u8) {
+fn image_quality_settings() -> BrailleQualitySettings {
+    IMAGE_QUALITY_SETTINGS.with(Cell::get)
+}
+
+#[cfg(feature = "image")]
+fn set_image_quality_settings(settings: BrailleQualitySettings) {
+    IMAGE_QUALITY_SETTINGS.with(|cell| cell.set(settings));
+}
+
+#[cfg(feature = "image")]
+fn apply_image_rendering_config(rendering: &RenderingConfig) {
+    set_image_quality_settings(rendering.image_braille_quality());
+}
+
+#[cfg(feature = "image")]
+fn fill_braille_from_luma(
+    braille: &mut BrailleGrid,
+    luma: &image::GrayImage,
+    threshold: u8,
+    quality: BrailleQualitySettings,
+) {
     braille.clear();
-    // If dimensions match dot dims, blit is effectively 1:1
-    blit_luma_to_braille(
+    braille_quality::blit_luma_to_braille_with_quality(
         luma.as_raw(),
         luma.width() as usize,
         luma.height() as usize,
         threshold,
+        quality,
         braille,
     );
 }
@@ -259,6 +248,7 @@ fn render_morph_frame(
     color_mode: ColorMode,
 ) -> u8 {
     use image::{GrayImage, RgbImage};
+    let quality = image_quality_settings();
 
     let dot_w = braille.dot_width() as u32;
     let dot_h = braille.dot_height() as u32;
@@ -290,14 +280,17 @@ fn render_morph_frame(
     }
 
     // Determine threshold for braille dotting
+    let toned_raw = braille_quality::apply_tone_curve(luma_blend.as_raw(), quality);
+    let toned_blend =
+        GrayImage::from_raw(dot_w, dot_h, toned_raw).unwrap_or_else(|| luma_blend.clone());
     let used_threshold = if auto_thresh {
-        otsu_threshold(luma_blend.as_raw())
+        otsu_threshold(toned_blend.as_raw())
     } else {
         manual_threshold
     };
 
     // Fill braille from blended luma
-    fill_braille_from_luma(braille, &luma_blend, used_threshold);
+    fill_braille_from_luma(braille, &luma_blend, used_threshold, quality);
 
     // Optional RGB blend for colorized output
     let rgb_opt = if matches!(color_mode, ColorMode::Full) {
@@ -333,7 +326,7 @@ fn render_morph_frame(
         None
     };
 
-    copy_braille_to_grid(grid, braille, &luma_blend, color_mode, rgb_opt.as_ref());
+    copy_braille_to_grid(grid, braille, &toned_blend, color_mode, rgb_opt.as_ref());
     used_threshold
 }
 
@@ -347,22 +340,152 @@ fn render_with_state(
     letterbox: bool,
     color_mode: ColorMode,
 ) -> u8 {
+    let quality = image_quality_settings();
     let dot_w = braille.dot_width() as u32;
     let dot_h = braille.dot_height() as u32;
     let luma = prepare_luma_dot_sized(img, dot_w, dot_h, letterbox);
+    let toned_raw = braille_quality::apply_tone_curve(luma.as_raw(), quality);
+    let toned_luma =
+        image::GrayImage::from_raw(dot_w, dot_h, toned_raw).unwrap_or_else(|| luma.clone());
     let used_threshold = if auto_threshold {
-        otsu_threshold(luma.as_raw())
+        otsu_threshold(toned_luma.as_raw())
     } else {
         threshold
     };
-    fill_braille_from_luma(braille, &luma, used_threshold);
+    fill_braille_from_luma(braille, &luma, used_threshold, quality);
     let rgb_opt = if matches!(color_mode, ColorMode::Full) {
         Some(prepare_rgb_dot_sized(img, dot_w, dot_h, letterbox))
     } else {
         None
     };
-    copy_braille_to_grid(grid, braille, &luma, color_mode, rgb_opt.as_ref());
+    copy_braille_to_grid(grid, braille, &toned_luma, color_mode, rgb_opt.as_ref());
     used_threshold
+}
+
+#[cfg(feature = "image")]
+fn rerender_active_scene(
+    current_img: Option<&image::DynamicImage>,
+    morph_other_img: Option<&image::DynamicImage>,
+    morph_mode: bool,
+    braille: &mut BrailleGrid,
+    grid: &mut GridBuffer,
+    morph_t: f32,
+    used_threshold: u8,
+    manual_threshold: u8,
+    auto_thresh: bool,
+    letterbox: bool,
+    color_mode: ColorMode,
+) -> u8 {
+    if morph_mode {
+        if let (Some(img_a), Some(img_b)) = (current_img, morph_other_img) {
+            return render_morph_frame(
+                img_a,
+                img_b,
+                braille,
+                grid,
+                morph_t,
+                manual_threshold,
+                auto_thresh,
+                letterbox,
+                color_mode,
+            );
+        }
+    } else if let Some(img) = current_img {
+        return render_with_state(
+            img,
+            braille,
+            grid,
+            manual_threshold,
+            auto_thresh,
+            letterbox,
+            color_mode,
+        );
+    }
+    used_threshold
+}
+
+#[cfg(feature = "image")]
+fn update_image_quality_and_rerender<F: FnOnce(&mut BrailleQualitySettings)>(
+    update: F,
+    current_img: Option<&image::DynamicImage>,
+    morph_other_img: Option<&image::DynamicImage>,
+    morph_mode: bool,
+    braille: &mut BrailleGrid,
+    grid: &mut GridBuffer,
+    morph_t: f32,
+    used_threshold: u8,
+    manual_threshold: u8,
+    auto_thresh: bool,
+    letterbox: bool,
+    color_mode: ColorMode,
+) -> u8 {
+    let mut quality = image_quality_settings();
+    update(&mut quality);
+    set_image_quality_settings(quality);
+    rerender_active_scene(
+        current_img,
+        morph_other_img,
+        morph_mode,
+        braille,
+        grid,
+        morph_t,
+        used_threshold,
+        manual_threshold,
+        auto_thresh,
+        letterbox,
+        color_mode,
+    )
+}
+
+#[cfg(feature = "image")]
+fn handle_shared_quality_action(
+    action: QualityControlAction,
+    color_mode: &mut ColorMode,
+    current_img: Option<&image::DynamicImage>,
+    morph_other_img: Option<&image::DynamicImage>,
+    morph_mode: bool,
+    braille: &mut BrailleGrid,
+    grid: &mut GridBuffer,
+    morph_t: f32,
+    used_threshold: u8,
+    manual_threshold: u8,
+    auto_thresh: bool,
+    letterbox: bool,
+) -> u8 {
+    if action == QualityControlAction::Reset {
+        *color_mode = ColorMode::Off;
+        set_image_quality_settings(BrailleQualitySettings::image_default());
+        return rerender_active_scene(
+            current_img,
+            morph_other_img,
+            morph_mode,
+            braille,
+            grid,
+            morph_t,
+            used_threshold,
+            manual_threshold,
+            auto_thresh,
+            letterbox,
+            *color_mode,
+        );
+    }
+
+    let mut quality = image_quality_settings();
+    apply_quality_action(action, &mut quality, color_mode);
+    set_image_quality_settings(quality);
+    rerender_active_scene(
+        current_img,
+        morph_other_img,
+        morph_mode,
+        braille,
+        grid,
+        morph_t,
+        used_threshold,
+        manual_threshold,
+        auto_thresh,
+        letterbox,
+        *color_mode,
+    )
 }
 
 #[cfg(feature = "image")]
@@ -375,6 +498,7 @@ fn draw_status(
     color_mode: ColorMode,
     typed: &str,
 ) {
+    let quality = image_quality_settings();
     let name = path_opt
         .and_then(|p| std::path::Path::new(p).file_name().and_then(|s| s.to_str()))
         .unwrap_or("<none>");
@@ -384,10 +508,15 @@ fn draw_status(
         ColorMode::Full => "FULL",
     };
     let status = format!(
-        "File: {} | +/- thr={} | a auto={} | l letterbox={} | c color={} | x max | s save | q quit",
+        "File: {} | +/- thr={} | a auto={} | F1-7 quality | p {} | d {} | g {:.2} | v {:.2} | z {:.2} | l letterbox={} | c color={} | x max | s save | q quit",
         name,
         used_threshold,
         if auto_thresh { "ON" } else { "OFF" },
+        quality.preset_label(),
+        quality.dither_mode.short_name(),
+        quality.gamma(),
+        quality.contrast(),
+        quality.exposure(),
         if letterbox { "ON" } else { "OFF" },
         color_str,
     );
@@ -426,6 +555,21 @@ pub fn render_image(
     morph_second: Option<&str>,
     morph_duration_override: Option<u64>,
 ) -> Result<()> {
+    render_image_with_config(
+        path,
+        morph_second,
+        morph_duration_override,
+        &RenderingConfig::default(),
+    )
+}
+
+#[cfg(feature = "image")]
+pub fn render_image_with_config(
+    path: &str,
+    morph_second: Option<&str>,
+    morph_duration_override: Option<u64>,
+    rendering: &RenderingConfig,
+) -> Result<()> {
     use image::DynamicImage;
 
     let img = image::open(path).with_context(|| format!("open image {}", path))?;
@@ -440,6 +584,7 @@ pub fn render_image(
     // Enable bracketed paste for consistency (we also accept paste to switch images)
     let mut out = stdout();
     let _ = execute!(out, EnableBracketedPaste);
+    apply_image_rendering_config(rendering);
 
     // State
     let mut typed = String::new();
@@ -651,28 +796,30 @@ pub fn render_image(
                     grid = GridBuffer::new(w_cells, h_cells);
                     braille = BrailleGrid::new(w_cells, h_cells);
                     if morph_mode {
-                        if let (Some(ref img_a), Some(ref img_b)) =
-                            (current_img.as_ref(), morph_other_img.as_ref())
-                        {
-                            grid.clear();
-                            used_threshold = render_morph_frame(
-                                img_a,
-                                img_b,
-                                &mut braille,
-                                &mut grid,
-                                morph_t,
-                                manual_threshold,
-                                auto_thresh,
-                                letterbox,
-                                color_mode,
-                            );
-                        }
-                    } else if let Some(ref img) = current_img {
                         grid.clear();
-                        used_threshold = render_with_state(
-                            img,
+                        used_threshold = rerender_active_scene(
+                            current_img.as_ref(),
+                            morph_other_img.as_ref(),
+                            morph_mode,
                             &mut braille,
                             &mut grid,
+                            morph_t,
+                            used_threshold,
+                            manual_threshold,
+                            auto_thresh,
+                            letterbox,
+                            color_mode,
+                        );
+                    } else if current_img.is_some() {
+                        grid.clear();
+                        used_threshold = rerender_active_scene(
+                            current_img.as_ref(),
+                            morph_other_img.as_ref(),
+                            morph_mode,
+                            &mut braille,
+                            &mut grid,
+                            morph_t,
+                            used_threshold,
                             manual_threshold,
                             auto_thresh,
                             letterbox,
@@ -701,6 +848,34 @@ pub fn render_image(
 
                 Event::Key(k) if k.kind == KeyEventKind::Press => {
                     match k.code {
+                        code if quality_control_action_from_key(code).is_some() => {
+                            if typed.is_empty() && current_img.is_some() {
+                                used_threshold = handle_shared_quality_action(
+                                    quality_control_action_from_key(code).unwrap(),
+                                    &mut color_mode,
+                                    current_img.as_ref(),
+                                    None,
+                                    false,
+                                    &mut braille,
+                                    &mut grid,
+                                    0.0,
+                                    used_threshold,
+                                    manual_threshold,
+                                    auto_thresh,
+                                    letterbox,
+                                );
+                                draw_status(
+                                    &mut grid,
+                                    current_path.as_deref(),
+                                    used_threshold,
+                                    auto_thresh,
+                                    letterbox,
+                                    color_mode,
+                                    &typed,
+                                );
+                                renderer.render(&grid)?;
+                            }
+                        }
                         KeyCode::Esc => {
                             if !typed.is_empty() || morph_prompting {
                                 morph_prompting = false;
@@ -758,10 +933,14 @@ pub fn render_image(
 
                                         if let Some(ref img) = current_img {
                                             grid.clear();
-                                            used_threshold = render_with_state(
-                                                img,
+                                            used_threshold = rerender_active_scene(
+                                                Some(img),
+                                                morph_other_img.as_ref(),
+                                                morph_mode,
                                                 &mut braille,
                                                 &mut grid,
+                                                morph_t,
+                                                used_threshold,
                                                 manual_threshold,
                                                 auto_thresh,
                                                 letterbox,
@@ -809,10 +988,14 @@ pub fn render_image(
                                 }
                                 if let Some(ref img) = current_img {
                                     grid.clear();
-                                    used_threshold = render_with_state(
-                                        img,
+                                    used_threshold = rerender_active_scene(
+                                        Some(img),
+                                        morph_other_img.as_ref(),
+                                        morph_mode,
                                         &mut braille,
                                         &mut grid,
+                                        morph_t,
+                                        used_threshold,
                                         manual_threshold,
                                         auto_thresh,
                                         letterbox,
@@ -840,10 +1023,14 @@ pub fn render_image(
                                 }
                                 if let Some(ref img) = current_img {
                                     grid.clear();
-                                    used_threshold = render_with_state(
-                                        img,
+                                    used_threshold = rerender_active_scene(
+                                        Some(img),
+                                        morph_other_img.as_ref(),
+                                        morph_mode,
                                         &mut braille,
                                         &mut grid,
+                                        morph_t,
+                                        used_threshold,
                                         manual_threshold,
                                         auto_thresh,
                                         letterbox,
@@ -869,10 +1056,14 @@ pub fn render_image(
                                 auto_thresh = !auto_thresh;
                                 if let Some(ref img) = current_img {
                                     grid.clear();
-                                    used_threshold = render_with_state(
-                                        img,
+                                    used_threshold = rerender_active_scene(
+                                        Some(img),
+                                        morph_other_img.as_ref(),
+                                        morph_mode,
                                         &mut braille,
                                         &mut grid,
+                                        morph_t,
+                                        used_threshold,
                                         manual_threshold,
                                         auto_thresh,
                                         letterbox,
@@ -899,10 +1090,14 @@ pub fn render_image(
                                 letterbox = !letterbox;
                                 if let Some(ref img) = current_img {
                                     grid.clear();
-                                    used_threshold = render_with_state(
-                                        img,
+                                    used_threshold = rerender_active_scene(
+                                        Some(img),
+                                        morph_other_img.as_ref(),
+                                        morph_mode,
                                         &mut braille,
                                         &mut grid,
+                                        morph_t,
+                                        used_threshold,
                                         manual_threshold,
                                         auto_thresh,
                                         letterbox,
@@ -932,10 +1127,14 @@ pub fn render_image(
                                 };
                                 if let Some(ref img) = current_img {
                                     grid.clear();
-                                    used_threshold = render_with_state(
-                                        img,
+                                    used_threshold = rerender_active_scene(
+                                        Some(img),
+                                        morph_other_img.as_ref(),
+                                        morph_mode,
                                         &mut braille,
                                         &mut grid,
+                                        morph_t,
+                                        used_threshold,
                                         manual_threshold,
                                         auto_thresh,
                                         letterbox,
@@ -944,6 +1143,192 @@ pub fn render_image(
                                 }
                             } else if let KeyCode::Char(c) = k.code {
                                 typed.push(c);
+                            }
+                            draw_status(
+                                &mut grid,
+                                current_path.as_deref(),
+                                used_threshold,
+                                auto_thresh,
+                                letterbox,
+                                color_mode,
+                                &typed,
+                            );
+                            renderer.render(&grid)?;
+                        }
+                        KeyCode::Char('d') | KeyCode::Char('D') => {
+                            if typed.is_empty() && current_img.is_some() {
+                                grid.clear();
+                                used_threshold = update_image_quality_and_rerender(
+                                    |quality| quality.cycle_dither(),
+                                    current_img.as_ref(),
+                                    None,
+                                    false,
+                                    &mut braille,
+                                    &mut grid,
+                                    0.0,
+                                    used_threshold,
+                                    manual_threshold,
+                                    auto_thresh,
+                                    letterbox,
+                                    color_mode,
+                                );
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
+                            draw_status(
+                                &mut grid,
+                                current_path.as_deref(),
+                                used_threshold,
+                                auto_thresh,
+                                letterbox,
+                                color_mode,
+                                &typed,
+                            );
+                            renderer.render(&grid)?;
+                        }
+                        KeyCode::Char('p') | KeyCode::Char('P') => {
+                            if typed.is_empty() && current_img.is_some() {
+                                grid.clear();
+                                used_threshold = update_image_quality_and_rerender(
+                                    |quality| quality.cycle_preset(),
+                                    current_img.as_ref(),
+                                    morph_other_img.as_ref(),
+                                    morph_mode,
+                                    &mut braille,
+                                    &mut grid,
+                                    morph_t,
+                                    used_threshold,
+                                    manual_threshold,
+                                    auto_thresh,
+                                    letterbox,
+                                    color_mode,
+                                );
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
+                            draw_status(
+                                &mut grid,
+                                current_path.as_deref(),
+                                used_threshold,
+                                auto_thresh,
+                                letterbox,
+                                color_mode,
+                                &typed,
+                            );
+                            renderer.render(&grid)?;
+                        }
+                        KeyCode::Char('g') | KeyCode::Char('G') => {
+                            if typed.is_empty() && current_img.is_some() {
+                                grid.clear();
+                                used_threshold = update_image_quality_and_rerender(
+                                    |quality| quality.cycle_gamma(),
+                                    current_img.as_ref(),
+                                    morph_other_img.as_ref(),
+                                    morph_mode,
+                                    &mut braille,
+                                    &mut grid,
+                                    morph_t,
+                                    used_threshold,
+                                    manual_threshold,
+                                    auto_thresh,
+                                    letterbox,
+                                    color_mode,
+                                );
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
+                            draw_status(
+                                &mut grid,
+                                current_path.as_deref(),
+                                used_threshold,
+                                auto_thresh,
+                                letterbox,
+                                color_mode,
+                                &typed,
+                            );
+                            renderer.render(&grid)?;
+                        }
+                        KeyCode::Char('v') | KeyCode::Char('V') => {
+                            if typed.is_empty() && current_img.is_some() {
+                                grid.clear();
+                                used_threshold = update_image_quality_and_rerender(
+                                    |quality| quality.cycle_contrast(),
+                                    current_img.as_ref(),
+                                    morph_other_img.as_ref(),
+                                    morph_mode,
+                                    &mut braille,
+                                    &mut grid,
+                                    morph_t,
+                                    used_threshold,
+                                    manual_threshold,
+                                    auto_thresh,
+                                    letterbox,
+                                    color_mode,
+                                );
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
+                            draw_status(
+                                &mut grid,
+                                current_path.as_deref(),
+                                used_threshold,
+                                auto_thresh,
+                                letterbox,
+                                color_mode,
+                                &typed,
+                            );
+                            renderer.render(&grid)?;
+                        }
+                        KeyCode::Char('z') | KeyCode::Char('Z') => {
+                            if typed.is_empty() && current_img.is_some() {
+                                grid.clear();
+                                used_threshold = update_image_quality_and_rerender(
+                                    |quality| quality.cycle_exposure(),
+                                    current_img.as_ref(),
+                                    morph_other_img.as_ref(),
+                                    morph_mode,
+                                    &mut braille,
+                                    &mut grid,
+                                    morph_t,
+                                    used_threshold,
+                                    manual_threshold,
+                                    auto_thresh,
+                                    letterbox,
+                                    color_mode,
+                                );
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
+                            draw_status(
+                                &mut grid,
+                                current_path.as_deref(),
+                                used_threshold,
+                                auto_thresh,
+                                letterbox,
+                                color_mode,
+                                &typed,
+                            );
+                            renderer.render(&grid)?;
+                        }
+                        KeyCode::Char('0') => {
+                            if typed.is_empty() && current_img.is_some() {
+                                grid.clear();
+                                used_threshold = update_image_quality_and_rerender(
+                                    |quality| *quality = BrailleQualitySettings::image_default(),
+                                    current_img.as_ref(),
+                                    morph_other_img.as_ref(),
+                                    morph_mode,
+                                    &mut braille,
+                                    &mut grid,
+                                    morph_t,
+                                    used_threshold,
+                                    manual_threshold,
+                                    auto_thresh,
+                                    letterbox,
+                                    color_mode,
+                                );
+                            } else {
+                                typed.push('0');
                             }
                             draw_status(
                                 &mut grid,
@@ -965,10 +1350,14 @@ pub fn render_image(
                                     morph_prompting = false;
                                     grid.clear();
                                     if let Some(ref img) = current_img {
-                                        used_threshold = render_with_state(
-                                            img,
+                                        used_threshold = rerender_active_scene(
+                                            Some(img),
+                                            morph_other_img.as_ref(),
+                                            false,
                                             &mut braille,
                                             &mut grid,
+                                            morph_t,
+                                            used_threshold,
                                             manual_threshold,
                                             auto_thresh,
                                             letterbox,
@@ -1107,10 +1496,14 @@ pub fn render_image(
                                 braille = BrailleGrid::new(w_cells, h_cells);
                                 if let Some(ref img) = current_img {
                                     grid.clear();
-                                    used_threshold = render_with_state(
-                                        img,
+                                    used_threshold = rerender_active_scene(
+                                        Some(img),
+                                        morph_other_img.as_ref(),
+                                        morph_mode,
                                         &mut braille,
                                         &mut grid,
+                                        morph_t,
+                                        used_threshold,
                                         manual_threshold,
                                         auto_thresh,
                                         letterbox,
@@ -1246,8 +1639,23 @@ pub fn render_image(_path: &str) -> Result<()> {
     anyhow::bail!("Image support requires building with `--features image`")
 }
 
+#[cfg(not(feature = "image"))]
+pub fn render_image_with_config(
+    _path: &str,
+    _morph_second: Option<&str>,
+    _morph_duration_override: Option<u64>,
+    _rendering: &RenderingConfig,
+) -> Result<()> {
+    anyhow::bail!("Image support requires building with `--features image`")
+}
+
 #[cfg(feature = "image")]
 pub fn drop_loop() -> Result<()> {
+    drop_loop_with_config(&RenderingConfig::default())
+}
+
+#[cfg(feature = "image")]
+pub fn drop_loop_with_config(rendering: &RenderingConfig) -> Result<()> {
     use image::DynamicImage;
 
     let mut renderer = TerminalRenderer::new()?;
@@ -1259,6 +1667,7 @@ pub fn drop_loop() -> Result<()> {
     // Try to enable bracketed paste (needed for Event::Paste in many terminals)
     let mut out = stdout();
     let _ = execute!(out, EnableBracketedPaste);
+    apply_image_rendering_config(rendering);
 
     // State
     let mut typed = String::new();
@@ -1299,10 +1708,14 @@ pub fn drop_loop() -> Result<()> {
                                 current_path = Some(candidate.clone());
                                 if let Some(ref img) = current_img {
                                     grid.clear();
-                                    used_threshold = render_with_state(
-                                        img,
+                                    used_threshold = rerender_active_scene(
+                                        Some(img),
+                                        None,
+                                        false,
                                         &mut braille,
                                         &mut grid,
+                                        0.0,
+                                        used_threshold,
                                         manual_threshold,
                                         auto_thresh,
                                         letterbox,
@@ -1334,10 +1747,14 @@ pub fn drop_loop() -> Result<()> {
                     braille = BrailleGrid::new(w_cells, h_cells);
                     if let Some(ref img) = current_img {
                         grid.clear();
-                        used_threshold = render_with_state(
-                            img,
+                        used_threshold = rerender_active_scene(
+                            Some(img),
+                            None,
+                            false,
                             &mut braille,
                             &mut grid,
+                            0.0,
+                            used_threshold,
                             manual_threshold,
                             auto_thresh,
                             letterbox,
@@ -1358,6 +1775,34 @@ pub fn drop_loop() -> Result<()> {
 
                 Event::Key(k) if k.kind == KeyEventKind::Press => {
                     match k.code {
+                        code if quality_control_action_from_key(code).is_some() => {
+                            if typed.is_empty() && current_img.is_some() {
+                                used_threshold = handle_shared_quality_action(
+                                    quality_control_action_from_key(code).unwrap(),
+                                    &mut color_mode,
+                                    current_img.as_ref(),
+                                    None,
+                                    false,
+                                    &mut braille,
+                                    &mut grid,
+                                    0.0,
+                                    used_threshold,
+                                    manual_threshold,
+                                    auto_thresh,
+                                    letterbox,
+                                );
+                                draw_status(
+                                    &mut grid,
+                                    current_path.as_deref(),
+                                    used_threshold,
+                                    auto_thresh,
+                                    letterbox,
+                                    color_mode,
+                                    &typed,
+                                );
+                                renderer.render(&grid)?;
+                            }
+                        }
                         KeyCode::Esc => {
                             if !typed.is_empty() {
                                 typed.clear();
@@ -1386,10 +1831,14 @@ pub fn drop_loop() -> Result<()> {
                                         current_path = Some(candidate.clone());
                                         if let Some(ref img) = current_img {
                                             grid.clear();
-                                            used_threshold = render_with_state(
-                                                img,
+                                            used_threshold = rerender_active_scene(
+                                                Some(img),
+                                                None,
+                                                false,
                                                 &mut braille,
                                                 &mut grid,
+                                                0.0,
+                                                used_threshold,
                                                 manual_threshold,
                                                 auto_thresh,
                                                 letterbox,
@@ -1438,10 +1887,14 @@ pub fn drop_loop() -> Result<()> {
                                 }
                                 if let Some(ref img) = current_img {
                                     grid.clear();
-                                    used_threshold = render_with_state(
-                                        img,
+                                    used_threshold = rerender_active_scene(
+                                        Some(img),
+                                        None,
+                                        false,
                                         &mut braille,
                                         &mut grid,
+                                        0.0,
+                                        used_threshold,
                                         manual_threshold,
                                         auto_thresh,
                                         letterbox,
@@ -1469,10 +1922,14 @@ pub fn drop_loop() -> Result<()> {
                                 }
                                 if let Some(ref img) = current_img {
                                     grid.clear();
-                                    used_threshold = render_with_state(
-                                        img,
+                                    used_threshold = rerender_active_scene(
+                                        Some(img),
+                                        None,
+                                        false,
                                         &mut braille,
                                         &mut grid,
+                                        0.0,
+                                        used_threshold,
                                         manual_threshold,
                                         auto_thresh,
                                         letterbox,
@@ -1498,10 +1955,14 @@ pub fn drop_loop() -> Result<()> {
                                 auto_thresh = !auto_thresh;
                                 if let Some(ref img) = current_img {
                                     grid.clear();
-                                    used_threshold = render_with_state(
-                                        img,
+                                    used_threshold = rerender_active_scene(
+                                        Some(img),
+                                        None,
+                                        false,
                                         &mut braille,
                                         &mut grid,
+                                        0.0,
+                                        used_threshold,
                                         manual_threshold,
                                         auto_thresh,
                                         letterbox,
@@ -1527,10 +1988,14 @@ pub fn drop_loop() -> Result<()> {
                                 letterbox = !letterbox;
                                 if let Some(ref img) = current_img {
                                     grid.clear();
-                                    used_threshold = render_with_state(
-                                        img,
+                                    used_threshold = rerender_active_scene(
+                                        Some(img),
+                                        None,
+                                        false,
                                         &mut braille,
                                         &mut grid,
+                                        0.0,
+                                        used_threshold,
                                         manual_threshold,
                                         auto_thresh,
                                         letterbox,
@@ -1563,10 +2028,14 @@ pub fn drop_loop() -> Result<()> {
                                 braille = BrailleGrid::new(w_cells, h_cells);
                                 if let Some(ref img) = current_img {
                                     grid.clear();
-                                    used_threshold = render_with_state(
-                                        img,
+                                    used_threshold = rerender_active_scene(
+                                        Some(img),
+                                        None,
+                                        false,
                                         &mut braille,
                                         &mut grid,
+                                        0.0,
+                                        used_threshold,
                                         manual_threshold,
                                         auto_thresh,
                                         letterbox,
@@ -1603,10 +2072,14 @@ pub fn drop_loop() -> Result<()> {
                                 };
                                 if let Some(ref img) = current_img {
                                     grid.clear();
-                                    used_threshold = render_with_state(
-                                        img,
+                                    used_threshold = rerender_active_scene(
+                                        Some(img),
+                                        None,
+                                        false,
                                         &mut braille,
                                         &mut grid,
+                                        0.0,
+                                        used_threshold,
                                         manual_threshold,
                                         auto_thresh,
                                         letterbox,
@@ -1615,6 +2088,192 @@ pub fn drop_loop() -> Result<()> {
                                 }
                             } else if let KeyCode::Char(c) = k.code {
                                 typed.push(c);
+                            }
+                            draw_status(
+                                &mut grid,
+                                current_path.as_deref(),
+                                used_threshold,
+                                auto_thresh,
+                                letterbox,
+                                color_mode,
+                                &typed,
+                            );
+                            renderer.render(&grid)?;
+                        }
+                        KeyCode::Char('d') | KeyCode::Char('D') => {
+                            if typed.is_empty() && current_img.is_some() {
+                                grid.clear();
+                                used_threshold = update_image_quality_and_rerender(
+                                    |quality| quality.cycle_dither(),
+                                    current_img.as_ref(),
+                                    None,
+                                    false,
+                                    &mut braille,
+                                    &mut grid,
+                                    0.0,
+                                    used_threshold,
+                                    manual_threshold,
+                                    auto_thresh,
+                                    letterbox,
+                                    color_mode,
+                                );
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
+                            draw_status(
+                                &mut grid,
+                                current_path.as_deref(),
+                                used_threshold,
+                                auto_thresh,
+                                letterbox,
+                                color_mode,
+                                &typed,
+                            );
+                            renderer.render(&grid)?;
+                        }
+                        KeyCode::Char('p') | KeyCode::Char('P') => {
+                            if typed.is_empty() && current_img.is_some() {
+                                grid.clear();
+                                used_threshold = update_image_quality_and_rerender(
+                                    |quality| quality.cycle_preset(),
+                                    current_img.as_ref(),
+                                    None,
+                                    false,
+                                    &mut braille,
+                                    &mut grid,
+                                    0.0,
+                                    used_threshold,
+                                    manual_threshold,
+                                    auto_thresh,
+                                    letterbox,
+                                    color_mode,
+                                );
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
+                            draw_status(
+                                &mut grid,
+                                current_path.as_deref(),
+                                used_threshold,
+                                auto_thresh,
+                                letterbox,
+                                color_mode,
+                                &typed,
+                            );
+                            renderer.render(&grid)?;
+                        }
+                        KeyCode::Char('g') | KeyCode::Char('G') => {
+                            if typed.is_empty() && current_img.is_some() {
+                                grid.clear();
+                                used_threshold = update_image_quality_and_rerender(
+                                    |quality| quality.cycle_gamma(),
+                                    current_img.as_ref(),
+                                    None,
+                                    false,
+                                    &mut braille,
+                                    &mut grid,
+                                    0.0,
+                                    used_threshold,
+                                    manual_threshold,
+                                    auto_thresh,
+                                    letterbox,
+                                    color_mode,
+                                );
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
+                            draw_status(
+                                &mut grid,
+                                current_path.as_deref(),
+                                used_threshold,
+                                auto_thresh,
+                                letterbox,
+                                color_mode,
+                                &typed,
+                            );
+                            renderer.render(&grid)?;
+                        }
+                        KeyCode::Char('v') | KeyCode::Char('V') => {
+                            if typed.is_empty() && current_img.is_some() {
+                                grid.clear();
+                                used_threshold = update_image_quality_and_rerender(
+                                    |quality| quality.cycle_contrast(),
+                                    current_img.as_ref(),
+                                    None,
+                                    false,
+                                    &mut braille,
+                                    &mut grid,
+                                    0.0,
+                                    used_threshold,
+                                    manual_threshold,
+                                    auto_thresh,
+                                    letterbox,
+                                    color_mode,
+                                );
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
+                            draw_status(
+                                &mut grid,
+                                current_path.as_deref(),
+                                used_threshold,
+                                auto_thresh,
+                                letterbox,
+                                color_mode,
+                                &typed,
+                            );
+                            renderer.render(&grid)?;
+                        }
+                        KeyCode::Char('z') | KeyCode::Char('Z') => {
+                            if typed.is_empty() && current_img.is_some() {
+                                grid.clear();
+                                used_threshold = update_image_quality_and_rerender(
+                                    |quality| quality.cycle_exposure(),
+                                    current_img.as_ref(),
+                                    None,
+                                    false,
+                                    &mut braille,
+                                    &mut grid,
+                                    0.0,
+                                    used_threshold,
+                                    manual_threshold,
+                                    auto_thresh,
+                                    letterbox,
+                                    color_mode,
+                                );
+                            } else if let KeyCode::Char(c) = k.code {
+                                typed.push(c);
+                            }
+                            draw_status(
+                                &mut grid,
+                                current_path.as_deref(),
+                                used_threshold,
+                                auto_thresh,
+                                letterbox,
+                                color_mode,
+                                &typed,
+                            );
+                            renderer.render(&grid)?;
+                        }
+                        KeyCode::Char('0') => {
+                            if typed.is_empty() && current_img.is_some() {
+                                grid.clear();
+                                used_threshold = update_image_quality_and_rerender(
+                                    |quality| *quality = BrailleQualitySettings::image_default(),
+                                    current_img.as_ref(),
+                                    None,
+                                    false,
+                                    &mut braille,
+                                    &mut grid,
+                                    0.0,
+                                    used_threshold,
+                                    manual_threshold,
+                                    auto_thresh,
+                                    letterbox,
+                                    color_mode,
+                                );
+                            } else {
+                                typed.push('0');
                             }
                             draw_status(
                                 &mut grid,
@@ -1684,5 +2343,10 @@ pub fn drop_loop() -> Result<()> {
 
 #[cfg(not(feature = "image"))]
 pub fn drop_loop() -> Result<()> {
+    anyhow::bail!("Image drag-and-drop requires building with `--features image`")
+}
+
+#[cfg(not(feature = "image"))]
+pub fn drop_loop_with_config(_rendering: &RenderingConfig) -> Result<()> {
     anyhow::bail!("Image drag-and-drop requires building with `--features image`")
 }

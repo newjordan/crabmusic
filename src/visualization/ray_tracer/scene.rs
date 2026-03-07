@@ -93,14 +93,30 @@ impl Scene {
         let positions = normalized_data.positions.clone();
         let mut edge_set: HashSet<(u32, u32)> = HashSet::new();
         for tri in normalized_data.indices.chunks(3) {
-            if tri.len() != 3 { continue; }
+            if tri.len() != 3 {
+                continue;
+            }
             let i0 = tri[0] as usize;
             let i1 = tri[1] as usize;
             let i2 = tri[2] as usize;
-            if i0 >= positions.len() || i1 >= positions.len() || i2 >= positions.len() { continue; }
-            let e01 = if tri[0] < tri[1] { (tri[0], tri[1]) } else { (tri[1], tri[0]) };
-            let e12 = if tri[1] < tri[2] { (tri[1], tri[2]) } else { (tri[2], tri[1]) };
-            let e20 = if tri[2] < tri[0] { (tri[2], tri[0]) } else { (tri[0], tri[2]) };
+            if i0 >= positions.len() || i1 >= positions.len() || i2 >= positions.len() {
+                continue;
+            }
+            let e01 = if tri[0] < tri[1] {
+                (tri[0], tri[1])
+            } else {
+                (tri[1], tri[0])
+            };
+            let e12 = if tri[1] < tri[2] {
+                (tri[1], tri[2])
+            } else {
+                (tri[2], tri[1])
+            };
+            let e20 = if tri[2] < tri[0] {
+                (tri[2], tri[0])
+            } else {
+                (tri[0], tri[2])
+            };
             edge_set.insert(e01);
             edge_set.insert(e12);
             edge_set.insert(e20);

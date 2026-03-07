@@ -161,6 +161,11 @@ impl OscilloscopeVisualizer {
         self.config.show_grid = !self.config.show_grid;
     }
 
+    /// Set reference grid visibility
+    pub fn set_show_grid(&mut self, enabled: bool) {
+        self.config.show_grid = enabled;
+    }
+
     /// Toggle through waveform fill modes
     pub fn toggle_fill_mode(&mut self) {
         self.config.waveform_mode = match self.config.waveform_mode {
@@ -498,15 +503,6 @@ impl Visualizer for OscilloscopeVisualizer {
         let height = grid.height();
         let center_y = height / 2;
 
-        // Draw simplified reference grid if enabled
-        if self.config.show_grid {
-            // Just center line with minimal markers
-            for x in (0..width).step_by(10) {
-                let color = Color::new(60, 60, 60); // Dim gray
-                grid.set_cell_with_color(x, center_y, '·', color);
-            }
-        }
-
         // Render waveform with different modes
         match self.config.waveform_mode {
             WaveformMode::Line => self.render_line(grid, width, height, center_y),
@@ -514,6 +510,14 @@ impl Visualizer for OscilloscopeVisualizer {
             WaveformMode::LineAndFill => {
                 self.render_filled(grid, width, height, center_y);
                 self.render_line(grid, width, height, center_y);
+            }
+        }
+
+        // Draw simplified reference grid after the waveform so markers remain visible.
+        if self.config.show_grid {
+            for x in (0..width).step_by(10) {
+                let color = Color::new(60, 60, 60); // Dim gray
+                grid.set_cell_with_color(x, center_y, '·', color);
             }
         }
     }

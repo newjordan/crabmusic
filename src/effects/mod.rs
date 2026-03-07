@@ -314,6 +314,51 @@ impl EffectPipeline {
     pub fn effect_names(&self) -> Vec<&str> {
         self.effects.iter().map(|e| e.name()).collect()
     }
+
+    /// Toggle the enabled state of the entire pipeline
+    pub fn toggle_enabled(&mut self) {
+        self.enabled = !self.enabled;
+    }
+
+    /// Toggle a specific effect by name
+    pub fn toggle_effect(&mut self, name: &str) {
+        if let Some(effect) = self.get_effect_mut(name) {
+            let current = effect.is_enabled();
+            effect.set_enabled(!current);
+        }
+    }
+
+    /// Increase intensity of a specific effect
+    pub fn increase_intensity(&mut self, name: &str) {
+        if let Some(effect) = self.get_effect_mut(name) {
+            let current = effect.intensity();
+            effect.set_intensity(current + 0.1);
+        }
+    }
+
+    /// Decrease intensity of a specific effect
+    pub fn decrease_intensity(&mut self, name: &str) {
+        if let Some(effect) = self.get_effect_mut(name) {
+            let current = effect.intensity();
+            effect.set_intensity(current - 0.1);
+        }
+    }
+
+    /// Increase intensity of all effects
+    pub fn increase_all_intensities(&mut self) {
+        for effect in &mut self.effects {
+            let current = effect.intensity();
+            effect.set_intensity(current + 0.1);
+        }
+    }
+
+    /// Decrease intensity of all effects
+    pub fn decrease_all_intensities(&mut self) {
+        for effect in &mut self.effects {
+            let current = effect.intensity();
+            effect.set_intensity(current - 0.1);
+        }
+    }
 }
 
 impl Default for EffectPipeline {

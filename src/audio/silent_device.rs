@@ -6,7 +6,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
-use tracing::{info, warn};
+use tracing::info;
+
+fn generate_silent_samples(sample_count: usize) -> Vec<f32> {
+    vec![0.0; sample_count]
+}
 
 /// Silent audio capture device
 ///
@@ -73,13 +77,8 @@ impl AudioCaptureDevice for SilentAudioDevice {
             let mut next_frame_time = Instant::now();
 
             while is_capturing.load(Ordering::Relaxed) {
-                // Create a buffer of silence
-                // We add a tiny bit of random noise so it's not absolute zero,
-                // which can sometimes cause issues with some DSP algorithms expecting non-zero input
-                // or just to make the visualizer look "alive" but idle.
-                let samples: Vec<f32> = (0..buffer_size * channels as usize)
-                    .map(|_| (rand::random::<f32>() - 0.5) * 0.001) // Very low noise floor
-                    .collect();
+                // Create a truly silent buffer so fallback/test mode preserves blank dark regions.
+                let samples = generate_silent_samples(buffer_size * channels as usize);
 
                 let buffer = AudioBuffer::with_samples(samples, sample_rate, channels);
                 ring_buffer.push(buffer);
@@ -102,11 +101,11 @@ impl AudioCaptureDevice for SilentAudioDevice {
 
     fn stop_capture(&mut self) -> Result<(), AudioError> {
         self.is_capturing.store(false, Ordering::Relaxed);
-        
+
         if let Some(handle) = self.generator_thread.take() {
             let _ = handle.join();
         }
-        
+
         info!("Silent audio generator stopped");
         Ok(())
     }
@@ -129,5 +128,16 @@ impl Drop for SilentAudioDevice {
         if self.is_capturing() {
             let _ = self.stop_capture();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::generate_silent_samples;
+
+    #[test]
+    fn generate_silent_samples_returns_all_zeroes() {
+        let samples = generate_silent_samples(8);
+        assert_eq!(samples, vec![0.0; 8]);
     }
 }

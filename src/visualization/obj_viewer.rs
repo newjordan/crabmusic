@@ -2,8 +2,11 @@
 
 use super::{lerp, BrailleGrid, Color, GridBuffer, Visualizer};
 use crate::dsp::AudioParameters;
-use crate::visualization::ray_tracer::{render_with_orientation, render_edges_with_orientation, Camera, RenderMode, Scene, WireframeRotation};
 use crate::visualization::controls::Transform3DControls;
+use crate::visualization::ray_tracer::{
+    render_edges_with_orientation, render_with_orientation, Camera, RenderMode, Scene,
+    WireframeRotation,
+};
 use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -29,7 +32,9 @@ pub struct ObjViewerVisualizer {
 }
 
 impl ObjViewerVisualizer {
-    pub fn new() -> Self { Self::new_with_model_index(0) }
+    pub fn new() -> Self {
+        Self::new_with_model_index(0)
+    }
 
     pub fn new_with_model_index(index: usize) -> Self {
         let camera = Camera::new(
@@ -40,7 +45,10 @@ impl ObjViewerVisualizer {
         let mut viz = Self {
             scene: None,
             camera,
-            mode: RenderMode::Wireframe { step_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_STEP_RAD, tol_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_TOL_RAD },
+            mode: RenderMode::Wireframe {
+                step_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_STEP_RAD,
+                tol_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_TOL_RAD,
+            },
             render_scale: 1.0,
             files: Vec::new(),
             current_index: 0,
@@ -50,7 +58,10 @@ impl ObjViewerVisualizer {
             last_time: Instant::now(),
             edge_line_px: 1,
             vertex_dot_px: 2,
-            transform: Transform3DControls { yaw_speed: 0.6, ..Default::default() },
+            transform: Transform3DControls {
+                yaw_speed: 0.6,
+                ..Default::default()
+            },
         };
         viz.refresh_file_list();
         viz.load_model(index);
@@ -66,14 +77,24 @@ impl ObjViewerVisualizer {
     }
 
     fn load_model(&mut self, index: usize) {
-        if self.files.is_empty() { self.refresh_file_list(); }
-        if self.files.is_empty() { return; }
+        if self.files.is_empty() {
+            self.refresh_file_list();
+        }
+        if self.files.is_empty() {
+            return;
+        }
         let idx = index % self.files.len();
         self.current_index = idx;
         let path = &self.files[idx];
-        self.display_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("(invalid)").to_string();
+        self.display_name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("(invalid)")
+            .to_string();
         match Scene::new_with_obj_model(path.to_str().unwrap()) {
-            Ok(scene) => { self.scene = Some(scene); }
+            Ok(scene) => {
+                self.scene = Some(scene);
+            }
             Err(e) => {
                 self.scene = None;
                 self.display_name = format!("{} (Load Failed)", self.display_name);
@@ -91,18 +112,29 @@ impl ObjViewerVisualizer {
 
     pub fn prev_model(&mut self) {
         if !self.files.is_empty() {
-            let prev = if self.current_index == 0 { self.files.len() - 1 } else { self.current_index - 1 };
+            let prev = if self.current_index == 0 {
+                self.files.len() - 1
+            } else {
+                self.current_index - 1
+            };
             self.load_model(prev);
         }
     }
 
-    pub fn model_name(&self) -> &str { &self.display_name }
+    pub fn model_name(&self) -> &str {
+        &self.display_name
+    }
 
-    pub fn set_auto_rotate(&mut self, enable: bool) { self.transform.set_auto_rotate(enable); }
+    pub fn set_auto_rotate(&mut self, enable: bool) {
+        self.transform.set_auto_rotate(enable);
+    }
 
     pub fn toggle_render_mode(&mut self) {
         self.mode = match self.mode {
-            RenderMode::Solid => RenderMode::Wireframe { step_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_STEP_RAD, tol_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_TOL_RAD },
+            RenderMode::Solid => RenderMode::Wireframe {
+                step_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_STEP_RAD,
+                tol_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_TOL_RAD,
+            },
             RenderMode::Wireframe { .. } => RenderMode::Solid,
         };
     }
@@ -124,7 +156,10 @@ impl ObjViewerVisualizer {
         let px = ((deg / 12.0).round() as i32).clamp(1, 6);
         self.edge_line_px = px;
         if let RenderMode::Solid = self.mode {
-            self.mode = RenderMode::Wireframe { step_rad, tol_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_TOL_RAD };
+            self.mode = RenderMode::Wireframe {
+                step_rad,
+                tol_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_TOL_RAD,
+            };
         }
     }
     pub fn set_wire_tol_rad(&mut self, tol_rad: f32) {
@@ -133,20 +168,33 @@ impl ObjViewerVisualizer {
         let px = ((deg / 9.0).round() as i32).clamp(1, 6);
         self.vertex_dot_px = px;
         if let RenderMode::Solid = self.mode {
-            self.mode = RenderMode::Wireframe { step_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_STEP_RAD, tol_rad };
+            self.mode = RenderMode::Wireframe {
+                step_rad: crate::visualization::ray_tracer::DEFAULT_WIREFRAME_STEP_RAD,
+                tol_rad,
+            };
         }
     }
     pub fn wire_px(&self) -> Option<(i32, i32)> {
-        match self.mode { RenderMode::Wireframe { .. } => Some((self.edge_line_px, self.vertex_dot_px)), _ => None }
+        match self.mode {
+            RenderMode::Wireframe { .. } => Some((self.edge_line_px, self.vertex_dot_px)),
+            _ => None,
+        }
     }
 
-    pub fn zoom_in(&mut self) { self.transform.zoom_in(); }
-    pub fn zoom_out(&mut self) { self.transform.zoom_out(); }
+    pub fn zoom_in(&mut self) {
+        self.transform.zoom_in();
+    }
+    pub fn zoom_out(&mut self) {
+        self.transform.zoom_out();
+    }
 
     pub fn focus_fit(&mut self) {
-
-        let Some(scene) = &self.scene else { return; };
-        let Some(verts) = scene.mesh_vertices() else { return; };
+        let Some(scene) = &self.scene else {
+            return;
+        };
+        let Some(verts) = scene.mesh_vertices() else {
+            return;
+        };
         // compute extents at scale=1 with current yaw/pitch=0 for stability
         use crate::visualization::ray_tracer::math::Vector3;
         use crate::visualization::ray_tracer::wireframe::rotate_vec_yaw_pitch_roll as rot;
@@ -155,9 +203,20 @@ impl ObjViewerVisualizer {
         let mut max_x = 1e-6f32;
         let mut max_y = 1e-6f32;
         for &p in verts.iter() {
-            let pr = rot(p, self.transform.yaw, self.transform.pitch, self.transform.roll);
-            let q = Vector3::new(pr.x - self.camera.origin.x, pr.y - self.camera.origin.y, pr.z - self.camera.origin.z);
-            if q.z >= -1e-3 { continue; }
+            let pr = rot(
+                p,
+                self.transform.yaw,
+                self.transform.pitch,
+                self.transform.roll,
+            );
+            let q = Vector3::new(
+                pr.x - self.camera.origin.x,
+                pr.y - self.camera.origin.y,
+                pr.z - self.camera.origin.z,
+            );
+            if q.z >= -1e-3 {
+                continue;
+            }
             let t = -self.camera.focal_length / q.z;
             let x_plane = q.x * t;
             let y_plane = q.y * t;
@@ -172,26 +231,39 @@ impl ObjViewerVisualizer {
         }
     }
     // Rotation helpers for keys (step in radians)
-    pub fn yaw_left(&mut self, step: f32)  { self.transform.yaw_left(step); }
-    pub fn yaw_right(&mut self, step: f32) { self.transform.yaw_right(step); }
-    pub fn pitch_up(&mut self, step: f32)  { self.transform.pitch_up(step); }
-    pub fn pitch_down(&mut self, step: f32){ self.transform.pitch_down(step); }
-    pub fn roll_ccw(&mut self, step: f32)  { self.transform.roll_ccw(step); }
-    pub fn roll_cw(&mut self, step: f32)   { self.transform.roll_cw(step); }
-
-
+    pub fn yaw_left(&mut self, step: f32) {
+        self.transform.yaw_left(step);
+    }
+    pub fn yaw_right(&mut self, step: f32) {
+        self.transform.yaw_right(step);
+    }
+    pub fn pitch_up(&mut self, step: f32) {
+        self.transform.pitch_up(step);
+    }
+    pub fn pitch_down(&mut self, step: f32) {
+        self.transform.pitch_down(step);
+    }
+    pub fn roll_ccw(&mut self, step: f32) {
+        self.transform.roll_ccw(step);
+    }
+    pub fn roll_cw(&mut self, step: f32) {
+        self.transform.roll_cw(step);
+    }
 }
 
-
 impl Visualizer for ObjViewerVisualizer {
-    fn name(&self) -> &str { "OBJ Viewer" }
+    fn name(&self) -> &str {
+        "OBJ Viewer"
+    }
 
     fn update(&mut self, params: &AudioParameters) {
         // Smooth light
         let target = 0.3 + params.amplitude.clamp(0.0, 1.0) * 0.7;
         self.light_intensity = lerp(self.light_intensity, target, self.smoothing);
         if let Some(ref mut scene) = self.scene {
-            for l in &mut scene.lights { l.intensity = self.light_intensity; }
+            for l in &mut scene.lights {
+                l.intensity = self.light_intensity;
+            }
         }
 
         // Time-based rotation
@@ -204,7 +276,11 @@ impl Visualizer for ObjViewerVisualizer {
     fn render(&self, grid: &mut GridBuffer) {
         let Some(ref scene) = self.scene else {
             // empty
-            for y in 0..grid.height() { for x in 0..grid.width() { grid.set_cell(x, y, ' '); } }
+            for y in 0..grid.height() {
+                for x in 0..grid.width() {
+                    grid.set_cell(x, y, ' ');
+                }
+            }
             return;
         };
 
@@ -214,30 +290,30 @@ impl Visualizer for ObjViewerVisualizer {
         let w = ((full_w as f32) * s).max(1.0) as usize;
         let h = ((full_h as f32) * s).max(1.0) as usize;
         let buffer = match self.mode {
-            RenderMode::Wireframe { .. } => {
-                render_edges_with_orientation(
-                    scene,
-                    &self.camera,
-                    w,
-                    h,
-                    self.transform.yaw,
-                    self.transform.pitch,
-                    self.transform.roll,
-                    self.transform.scale,
-                    self.vertex_dot_px,
-                    self.edge_line_px,
-                )
-            }
-            RenderMode::Solid => {
-                render_with_orientation(
-                    scene,
-                    &self.camera,
-                    w,
-                    h,
-                    self.mode,
-                    WireframeRotation { yaw: self.transform.yaw, pitch: self.transform.pitch, roll: self.transform.roll },
-                )
-            }
+            RenderMode::Wireframe { .. } => render_edges_with_orientation(
+                scene,
+                &self.camera,
+                w,
+                h,
+                self.transform.yaw,
+                self.transform.pitch,
+                self.transform.roll,
+                self.transform.scale,
+                self.vertex_dot_px,
+                self.edge_line_px,
+            ),
+            RenderMode::Solid => render_with_orientation(
+                scene,
+                &self.camera,
+                w,
+                h,
+                self.mode,
+                WireframeRotation {
+                    yaw: self.transform.yaw,
+                    pitch: self.transform.pitch,
+                    roll: self.transform.roll,
+                },
+            ),
         };
 
         let mut braille = BrailleGrid::new(grid.width(), grid.height());
@@ -245,18 +321,36 @@ impl Visualizer for ObjViewerVisualizer {
         for py in 0..h {
             for px in 0..w {
                 let v = buffer[py][px].clamp(0.0, 1.0);
-                if v <= 0.05 { continue; }
-                let sx = if w > 1 { (((px as f32) * ((full_w - 1) as f32) / ((w - 1) as f32)).round() as usize).min(full_w - 1) } else { 0 };
-                let sy = if h > 1 { (((py as f32) * ((full_h - 1) as f32) / ((h - 1) as f32)).round() as usize).min(full_h - 1) } else { 0 };
-                let cx = sx / 2; let cy = sy / 4; let idx = cy * grid.width() + cx;
+                if v <= 0.05 {
+                    continue;
+                }
+                let sx = if w > 1 {
+                    (((px as f32) * ((full_w - 1) as f32) / ((w - 1) as f32)).round() as usize)
+                        .min(full_w - 1)
+                } else {
+                    0
+                };
+                let sy = if h > 1 {
+                    (((py as f32) * ((full_h - 1) as f32) / ((h - 1) as f32)).round() as usize)
+                        .min(full_h - 1)
+                } else {
+                    0
+                };
+                let cx = sx / 2;
+                let cy = sy / 4;
+                let idx = cy * grid.width() + cx;
                 braille.set_dot(sx, sy);
-                if v > cell_max[idx] { cell_max[idx] = v; }
+                if v > cell_max[idx] {
+                    cell_max[idx] = v;
+                }
             }
         }
         for y in 0..grid.height() {
             for x in 0..grid.width() {
                 let ch = braille.get_char(x, y);
-                if ch == ' ' { grid.set_cell(x, y, ' '); } else {
+                if ch == ' ' {
+                    grid.set_cell(x, y, ' ');
+                } else {
                     let v = cell_max[y * grid.width() + x];
                     let g = (32.0 + (v * 223.0)) as u8;
                     grid.set_cell_with_color(x, y, ch, Color::new(0, g, 0));
@@ -275,7 +369,9 @@ fn scan_obj_files() -> Vec<PathBuf> {
                 let p = e.path();
                 if p.is_file() {
                     if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
-                        if ext.eq_ignore_ascii_case("obj") { out.push(p); }
+                        if ext.eq_ignore_ascii_case("obj") {
+                            out.push(p);
+                        }
                     }
                 }
             }
@@ -284,4 +380,3 @@ fn scan_obj_files() -> Vec<PathBuf> {
     out.sort();
     out
 }
-

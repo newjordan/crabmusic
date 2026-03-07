@@ -81,6 +81,32 @@ impl CharacterSet {
     pub fn is_empty(&self) -> bool {
         self.characters.is_empty()
     }
+
+    /// Get a character set by name (case-insensitive)
+    ///
+    /// Returns None if no character set with the given name exists.
+    pub fn from_name(name: &str) -> Option<Self> {
+        let name = name.to_lowercase();
+        match name.as_str() {
+            "basic" => Some(get_character_set(CharacterSetType::Basic)),
+            "extended" => Some(get_character_set(CharacterSetType::Extended)),
+            "blocks" => Some(get_character_set(CharacterSetType::Blocks)),
+            "shading" => Some(get_character_set(CharacterSetType::Shading)),
+            "dots" => Some(get_character_set(CharacterSetType::Dots)),
+            "lines" => Some(get_character_set(CharacterSetType::Lines)),
+            "braille" => Some(get_character_set(CharacterSetType::Braille)),
+            "smooth64" | "smooth 64" => Some(get_character_set(CharacterSetType::Smooth64)),
+            "smooth128" | "smooth 128" => Some(get_character_set(CharacterSetType::Smooth128)),
+            "smooth256" | "smooth 256" => Some(get_character_set(CharacterSetType::Smooth256)),
+            _ => None,
+        }
+    }
+}
+
+impl Default for CharacterSet {
+    fn default() -> Self {
+        get_character_set(CharacterSetType::Basic)
+    }
 }
 
 /// Get a predefined character set by type

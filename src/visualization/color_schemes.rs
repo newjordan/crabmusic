@@ -163,6 +163,20 @@ impl ColorScheme {
     pub fn scheme_type(&self) -> ColorSchemeType {
         self.scheme_type
     }
+
+    /// Cycle to the next color scheme
+    pub fn next(&self) -> Self {
+        let all = ColorSchemeType::all();
+        let current_idx = all.iter().position(|&t| t == self.scheme_type).unwrap_or(0);
+        let next_idx = (current_idx + 1) % all.len();
+        Self::new(all[next_idx])
+    }
+}
+
+impl Default for ColorScheme {
+    fn default() -> Self {
+        Self::new(ColorSchemeType::Monochrome)
+    }
 }
 
 #[cfg(test)]

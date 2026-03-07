@@ -6,36 +6,48 @@
 pub mod braille;
 pub mod character_sets;
 pub mod color_schemes;
+pub mod controls;
+pub mod gravity_well;
+pub mod grid_tunnel;
 mod image_channel;
-mod obj_viewer;
 mod night_night;
+mod obj_viewer;
 mod oscilloscope;
 pub mod ray_tracer;
 mod raycaster3d;
 mod sine_wave;
 pub mod spectrogram;
 mod spectrum;
+pub mod starfield;
 mod terrain_landscape;
 mod video_channel;
 pub mod waveform_tunnel;
 mod xy_oscilloscope;
-pub mod controls;
 
 // Re-export visualizers for external use
 pub use braille::BrailleGrid;
+#[allow(unused_imports)]
+pub use controls::Transform3DControls;
+pub use gravity_well::GravityWellVisualizer;
+pub use grid_tunnel::GridTunnelVisualizer;
 pub use image_channel::ImageChannelVisualizer;
-pub use obj_viewer::ObjViewerVisualizer;
 pub use night_night::NightNightVisualizer;
+pub use obj_viewer::ObjViewerVisualizer;
 pub use oscilloscope::{OscilloscopeConfig, OscilloscopeVisualizer, TriggerSlope, WaveformMode};
 pub use raycaster3d::Raycaster3DVisualizer;
+#[allow(unused_imports)]
 pub use sine_wave::{SineWaveConfig, SineWaveVisualizer};
 pub use spectrogram::{ScrollDirection, SpectrogramVisualizer};
 pub use spectrum::{SpectrumConfig, SpectrumMapping, SpectrumVisualizer};
+pub use starfield::StarfieldVisualizer;
 pub use terrain_landscape::TerrainLandscapeVisualizer;
 pub use video_channel::VideoChannelVisualizer;
 pub use waveform_tunnel::WaveformTunnelVisualizer;
+#[allow(unused_imports)]
 pub use xy_oscilloscope::{XYDisplayMode, XYOscilloscopeConfig, XYOscilloscopeVisualizer};
-pub use controls::Transform3DControls;
+pub mod primitives;
+#[allow(unused_imports)]
+pub use primitives::PrimitivesVisualizer;
 
 use crate::dsp::AudioParameters;
 
@@ -790,6 +802,9 @@ mod tests {
             amplitude: 0.4,
             beat: false,
             beat_flux: false,
+            beat_bass: false,
+            beat_mid: false,
+            beat_treble: false,
             bpm: 120.0,
             tempo_confidence: 0.0,
             spectrum: vec![],

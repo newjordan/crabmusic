@@ -4,19 +4,19 @@ audio:
   buffer_capacity: 8192
   device_name: null
   output_device_name: null
-  use_loopback: false
+  use_loopback: auto
 dsp:
   fft_size: 1024
   smoothing: 0.05
   bass_range:
-  - 20.0
-  - 250.0
+    - 20.0
+    - 250.0
   mid_range:
-  - 250.0
-  - 4000.0
+    - 250.0
+    - 4000.0
   treble_range:
-  - 4000.0
-  - 20000.0
+    - 4000.0
+    - 20000.0
   beat_detection:
     sensitivity: 1.0
     cooldown_seconds: 0.1
@@ -36,3 +36,36 @@ rendering:
   target_fps: 60
   min_width: 40
   min_height: 12
+  braille_image:
+    preset: cinema
+  braille_video:
+    preset: motion
+    temporal_blend_preset: 2
+    temporal_hysteresis_preset: 2
+
+# Internet Archive oddball TV configuration
+internet_archive:
+  # Press 'u' during playback to retune the current archive channel.
+  # Archive channels auto-advance to a new show when playback reaches EOF.
+  # The channel rotation now includes Archive TV, Archive Cooking,
+  # and Archive Public Access.
+  tv_queries:
+    - "mediatype:movies AND collection:prelinger"
+    - "mediatype:movies AND collection:classic_tv"
+  cooking_queries:
+    - "mediatype:movies AND collection:classic_tv AND (title:(cooking OR kitchen OR recipe) OR subject:(cooking OR kitchen OR recipe))"
+    - "mediatype:movies AND (title:(cooking OR kitchen OR recipe) OR subject:(cooking OR kitchen OR recipe))"
+  public_access_queries:
+    - "mediatype:movies AND collection:classic_tv AND (title:(\"public access\" OR telethon) OR subject:(\"public access\" OR telethon))"
+    - "mediatype:movies AND (title:(telethon) OR subject:(telethon))"
+  industrial_queries:
+    - "mediatype:movies AND collection:prelinger AND (subject:(industrial OR training) OR title:(industrial OR training))"
+    - "mediatype:movies AND (subject:(industrial OR training) OR title:(industrial OR training))"
+  educational_queries:
+    - "mediatype:movies AND collection:prelinger AND (subject:(educational OR classroom OR school) OR title:(educational OR classroom OR school))"
+    - "mediatype:movies AND (subject:(educational OR classroom OR school) OR title:(educational OR classroom OR school))"
+  local_news_queries:
+    - "mediatype:movies AND (title:(\"local news\" OR newscast) OR subject:(\"local news\" OR newscast))"
+    - "mediatype:movies AND collection:classic_tv AND (title:(\"local news\" OR newscast) OR subject:(\"local news\" OR newscast))"
+  rows_per_page: 50
+  max_pages: 20

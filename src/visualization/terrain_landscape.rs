@@ -1,19 +1,18 @@
 // Green Grid Landscape - Procedural moving landscape with audio reactivity
 // Renders a retro wireframe terrain and flies forward over it
 
-use super::{lerp, BrailleGrid, GridBuffer, Visualizer, Color};
+use super::{lerp, BrailleGrid, Color, GridBuffer, Visualizer};
 use crate::dsp::AudioParameters;
 use crate::visualization::color_schemes::ColorScheme;
 
 use std::time::Instant;
 
-
 pub struct TerrainLandscapeVisualizer {
     // Visual tuning
     grid_cols: usize,
     grid_rows: usize,
-    spacing_x: f32,   // world units between columns
-    spacing_z: f32,   // world units between rows (depth)
+    spacing_x: f32, // world units between columns
+    spacing_z: f32, // world units between rows (depth)
 
     // Road & Sun ambience
     road_half_width: f32,
@@ -24,8 +23,8 @@ pub struct TerrainLandscapeVisualizer {
     far_plane: f32,
 
     // Motion
-    scroll_z: f32,    // world units progressed forward
-    base_speed: f32,  // world units per frame
+    scroll_z: f32,   // world units progressed forward
+    base_speed: f32, // world units per frame
 
     // Height shaping
     base_height: f32,
@@ -41,7 +40,7 @@ pub struct TerrainLandscapeVisualizer {
     // Precomputed x positions (world units, centered) and marching row buffer
     xs_base: Vec<f32>,
     height_rows: Vec<Vec<f32>>, // rows x cols heights (world y relative)
-    profile_z: f32,              // noise-space z cursor for generating new rows
+    profile_z: f32,             // noise-space z cursor for generating new rows
 
     // Theme
     _color_scheme: ColorScheme,
@@ -152,13 +151,19 @@ impl TerrainLandscapeVisualizer {
         row
     }
     fn smooth_row_cols(row: &mut [f32]) {
-        if row.len() < 3 { return; }
+        if row.len() < 3 {
+            return;
+        }
         let mut tmp = row.to_vec();
         for i in 0..row.len() {
-            let l = if i>0 { row[i-1] } else { row[i] };
+            let l = if i > 0 { row[i - 1] } else { row[i] };
             let c = row[i];
-            let r = if i+1<row.len() { row[i+1] } else { row[i] };
-            tmp[i] = (l + 2.0*c + r) * 0.25; // simple [1,2,1]/4 kernel
+            let r = if i + 1 < row.len() {
+                row[i + 1]
+            } else {
+                row[i]
+            };
+            tmp[i] = (l + 2.0 * c + r) * 0.25; // simple [1,2,1]/4 kernel
         }
         row.copy_from_slice(&tmp);
     }
@@ -169,23 +174,31 @@ impl TerrainLandscapeVisualizer {
             Self::smooth_row_cols(r);
         }
         // Smooth across rows for each column
-        if self.height_rows.len() < 3 { return; }
+        if self.height_rows.len() < 3 {
+            return;
+        }
         let rows = self.height_rows.len();
         let cols = self.grid_cols;
         let src = self.height_rows.clone();
         for j in 0..rows {
             for i in 0..cols {
-                let a = if j>0 { src[j-1][i] } else { src[j][i] };
+                let a = if j > 0 { src[j - 1][i] } else { src[j][i] };
                 let b = src[j][i];
-                let c = if j+1<rows { src[j+1][i] } else { src[j][i] };
-                self.height_rows[j][i] = (a + 2.0*b + c) * 0.25;
+                let c = if j + 1 < rows {
+                    src[j + 1][i]
+                } else {
+                    src[j][i]
+                };
+                self.height_rows[j][i] = (a + 2.0 * b + c) * 0.25;
             }
         }
     }
 
     fn smooth_tail_rows(&mut self, tail_rows: usize) {
         let rows = self.height_rows.len();
-        if rows == 0 { return; }
+        if rows == 0 {
+            return;
+        }
         let start = rows.saturating_sub(tail_rows);
         // Smooth columns per row in tail
         for j in start..rows {
@@ -197,20 +210,34 @@ impl TerrainLandscapeVisualizer {
             let src = self.height_rows.clone();
             for j in start..rows {
                 for i in 0..cols {
-                    let a = if j>start { src[j-1][i] } else { src[j][i] };
+                    let a = if j > start { src[j - 1][i] } else { src[j][i] };
                     let b = src[j][i];
-                    let c = if j+1<rows { src[j+1][i] } else { src[j][i] };
-                    self.height_rows[j][i] = (a + 2.0*b + c) * 0.25;
+                    let c = if j + 1 < rows {
+                        src[j + 1][i]
+                    } else {
+                        src[j][i]
+                    };
+                    self.height_rows[j][i] = (a + 2.0 * b + c) * 0.25;
                 }
             }
         }
     }
 
-
-
     #[inline]
-    fn project(&self, focal_len: f32, horizon_y: f32, x: f32, y: f32, z: f32, cx: f32, dot_w: usize, dot_h: usize) -> Option<(usize, usize)> {
-        if z <= self.near_plane || z > self.far_plane { return None; }
+    fn project(
+        &self,
+        focal_len: f32,
+        horizon_y: f32,
+        x: f32,
+        y: f32,
+        z: f32,
+        cx: f32,
+        dot_w: usize,
+        dot_h: usize,
+    ) -> Option<(usize, usize)> {
+        if z <= self.near_plane || z > self.far_plane {
+            return None;
+        }
         let f = focal_len;
         let sx = cx + f * x / z;
         let sy = horizon_y - f * y / z;
@@ -266,7 +293,9 @@ impl Visualizer for TerrainLandscapeVisualizer {
         let fov_scale = 0.55; // 0.45..0.70 looks good
         let horizon_ratio = 0.40; // fraction of height from top
         let mut focal = (dot_w as f32) * fov_scale;
-        if focal < 80.0 { focal = 80.0; }
+        if focal < 80.0 {
+            focal = 80.0;
+        }
 
         let horizon_y = (dot_h as f32) * horizon_ratio;
 
@@ -280,7 +309,9 @@ impl Visualizer for TerrainLandscapeVisualizer {
         let j_ref = ((rows as f32) * 0.33) as usize;
         let z_ref = self.near_plane + (j_ref as f32) * self.spacing_z;
         let mut scale_s = (((dot_w as f32 - 1.0) - cx) * z_ref) / (focal * base_x_max);
-        if !scale_s.is_finite() || scale_s <= 0.0 { scale_s = 1.0; }
+        if !scale_s.is_finite() || scale_s <= 0.0 {
+            scale_s = 1.0;
+        }
 
         // Push X sampling slightly off-screen so edge segments keep deformation
         let edge_pad = 0.12; // 12% offscreen
@@ -294,7 +325,9 @@ impl Visualizer for TerrainLandscapeVisualizer {
         for j in 0..rows {
             // camera-space depth
             let z_cam = self.near_plane + (j as f32) * self.spacing_z;
-            if z_cam > self.far_plane { continue; }
+            if z_cam > self.far_plane {
+                continue;
+            }
 
             let z_world = self.scroll_z + z_cam;
 
@@ -341,44 +374,64 @@ impl Visualizer for TerrainLandscapeVisualizer {
         let elapsed = self.start_time.elapsed().as_secs_f32();
         // Keep HUD fully green
         let hud_cyan = Color::new(0, 220, 0);
-        let hud_dim  = Color::new(0, 150, 0);
+        let hud_dim = Color::new(0, 150, 0);
         let cy = ((dot_h as f32) * 0.52).clamp(0.0, (dot_h - 1) as f32) as usize;
         // Minimal center reticle: three disconnected green lines forming a triangle
         let tri_s = ((dot_h as f32) * 0.035).max(2.0) as i32;
-        let ax = cx as i32;             let ay = cy as i32 - tri_s;
-        let bx = cx as i32 - tri_s;     let by = cy as i32 + tri_s;
-        let cxv = cx as i32 + tri_s;    let cyv = cy as i32 + tri_s;
+        let ax = cx as i32;
+        let ay = cy as i32 - tri_s;
+        let bx = cx as i32 - tri_s;
+        let by = cy as i32 + tri_s;
+        let cxv = cx as i32 + tri_s;
+        let cyv = cy as i32 + tri_s;
         // Shorten each side toward its center to leave small gaps at the corners
         let gap = (tri_s as f32 * 0.38).max(1.0);
         // AB shortened
         let (dxab, dyab) = ((bx - ax) as f32, (by - ay) as f32);
-        let lenab = (dxab*dxab + dyab*dyab).sqrt().max(1.0);
-        let ab_ax = (ax as f32 + dxab * (gap/lenab)).round() as i32;
-        let ab_ay = (ay as f32 + dyab * (gap/lenab)).round() as i32;
-        let ab_bx = (bx as f32 - dxab * (gap/lenab)).round() as i32;
-        let ab_by = (by as f32 - dyab * (gap/lenab)).round() as i32;
+        let lenab = (dxab * dxab + dyab * dyab).sqrt().max(1.0);
+        let ab_ax = (ax as f32 + dxab * (gap / lenab)).round() as i32;
+        let ab_ay = (ay as f32 + dyab * (gap / lenab)).round() as i32;
+        let ab_bx = (bx as f32 - dxab * (gap / lenab)).round() as i32;
+        let ab_by = (by as f32 - dyab * (gap / lenab)).round() as i32;
         // BC shortened
         let (dxbc, dybc) = ((cxv - bx) as f32, (cyv - by) as f32);
-        let lenbc = (dxbc*dxbc + dybc*dybc).sqrt().max(1.0);
-        let bc_bx = (bx as f32 + dxbc * (gap/lenbc)).round() as i32;
-        let bc_by = (by as f32 + dybc * (gap/lenbc)).round() as i32;
-        let bc_cx = (cxv as f32 - dxbc * (gap/lenbc)).round() as i32;
-        let bc_cy = (cyv as f32 - dybc * (gap/lenbc)).round() as i32;
+        let lenbc = (dxbc * dxbc + dybc * dybc).sqrt().max(1.0);
+        let bc_bx = (bx as f32 + dxbc * (gap / lenbc)).round() as i32;
+        let bc_by = (by as f32 + dybc * (gap / lenbc)).round() as i32;
+        let bc_cx = (cxv as f32 - dxbc * (gap / lenbc)).round() as i32;
+        let bc_cy = (cyv as f32 - dybc * (gap / lenbc)).round() as i32;
         // CA shortened
         let (dxca, dyca) = ((ax - cxv) as f32, (ay - cyv) as f32);
-        let lenca = (dxca*dxca + dyca*dyca).sqrt().max(1.0);
-        let ca_cx = (cxv as f32 + dxca * (gap/lenca)).round() as i32;
-        let ca_cy = (cyv as f32 + dyca * (gap/lenca)).round() as i32;
-        let ca_ax = (ax as f32 - dxca * (gap/lenca)).round() as i32;
-        let ca_ay = (ay as f32 - dyca * (gap/lenca)).round() as i32;
+        let lenca = (dxca * dxca + dyca * dyca).sqrt().max(1.0);
+        let ca_cx = (cxv as f32 + dxca * (gap / lenca)).round() as i32;
+        let ca_cy = (cyv as f32 + dyca * (gap / lenca)).round() as i32;
+        let ca_ax = (ax as f32 - dxca * (gap / lenca)).round() as i32;
+        let ca_ay = (ay as f32 - dyca * (gap / lenca)).round() as i32;
         // Clamp to canvas
         let clamp_x = |v: i32| v.clamp(0, (dot_w - 1) as i32) as usize;
         let clamp_y = |v: i32| v.clamp(0, (dot_h - 1) as i32) as usize;
         // Draw three independent sides (all green)
-        braille.draw_line_with_color(clamp_x(ab_ax), clamp_y(ab_ay), clamp_x(ab_bx), clamp_y(ab_by), hud_cyan);
-        braille.draw_line_with_color(clamp_x(bc_bx), clamp_y(bc_by), clamp_x(bc_cx), clamp_y(bc_cy), hud_cyan);
-        braille.draw_line_with_color(clamp_x(ca_cx), clamp_y(ca_cy), clamp_x(ca_ax), clamp_y(ca_ay), hud_cyan);
-
+        braille.draw_line_with_color(
+            clamp_x(ab_ax),
+            clamp_y(ab_ay),
+            clamp_x(ab_bx),
+            clamp_y(ab_by),
+            hud_cyan,
+        );
+        braille.draw_line_with_color(
+            clamp_x(bc_bx),
+            clamp_y(bc_by),
+            clamp_x(bc_cx),
+            clamp_y(bc_cy),
+            hud_cyan,
+        );
+        braille.draw_line_with_color(
+            clamp_x(ca_cx),
+            clamp_y(ca_cy),
+            clamp_x(ca_ax),
+            clamp_y(ca_ay),
+            hud_cyan,
+        );
 
         // Blit braille grid back to character grid
         for cell_y in 0..height {
@@ -398,7 +451,9 @@ impl Visualizer for TerrainLandscapeVisualizer {
             if y < height {
                 let mut xi = x;
                 for ch in s.chars() {
-                    if xi >= width { break; }
+                    if xi >= width {
+                        break;
+                    }
                     let cell = grid.get_cell_mut(xi, y);
                     cell.character = ch;
                     cell.foreground_color = Some(color);
@@ -409,39 +464,99 @@ impl Visualizer for TerrainLandscapeVisualizer {
         let tick = (elapsed * 0.22).floor() as u32; // slow transitions
         let h = hash_u32(tick.wrapping_mul(0x9E3779B9));
         let letter = |k: u32| -> char { (b'A' + ((h.wrapping_add(k) % 26) as u8)) as char };
-        let desig = format!("DESIG {}{}-{:02X}", letter(0), letter(1), ((h >> 12) & 0xFF));
+        let desig = format!(
+            "DESIG {}{}-{:02X}",
+            letter(0),
+            letter(1),
+            ((h >> 12) & 0xFF)
+        );
         let sector = format!("SECTOR {:02}-{}", ((h >> 20) & 0x3F), letter(8));
         write_text(2, 1, &desig, hud_dim);
         write_text(2, 2, &sector, hud_dim);
-        let elems = ["H","He","C","N","O","Ne","Na","Mg","Si","P","S","Cl","K","Ca","Ti","V","Cr","Mn","Fe","Co","Ni","Cu","Zn","Ag","Sn","I","Xe","Cs","Ba","W","Pt","Au","Hg","Pb","U"];
-        let pick = |off: u32| -> &str { let idx = (hash_u32(h.wrapping_add(off)) % (elems.len() as u32)) as usize; elems[idx] };
+        let elems = [
+            "H", "He", "C", "N", "O", "Ne", "Na", "Mg", "Si", "P", "S", "Cl", "K", "Ca", "Ti", "V",
+            "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn", "Ag", "Sn", "I", "Xe", "Cs", "Ba", "W", "Pt",
+            "Au", "Hg", "Pb", "U",
+        ];
+        let pick = |off: u32| -> &str {
+            let idx = (hash_u32(h.wrapping_add(off)) % (elems.len() as u32)) as usize;
+            elems[idx]
+        };
         let per_short = format!("ELEM: {} {} {}", pick(1), pick(7), pick(13));
         let snr = (hash_u32(h ^ 0x55AA) % 300) as f32 / 10.0;
         let conf = (hash_u32(h ^ 0xCC33) % 100) as f32 / 100.0;
 
         // Saturn system scan: target and trajectory readouts
         let moons = [
-            "TITAN","ENCELADUS","RHEA","IAPETUS","DIONE","TETHYS","MIMAS","HYPERION","PHOEBE","JANUS"
+            "TITAN",
+            "ENCELADUS",
+            "RHEA",
+            "IAPETUS",
+            "DIONE",
+            "TETHYS",
+            "MIMAS",
+            "HYPERION",
+            "PHOEBE",
+            "JANUS",
         ];
         let moon_idx = (hash_u32(h ^ 0xA5A5_5A5A) % (moons.len() as u32)) as usize;
         let target = moons[moon_idx];
-        let phase_str = if ((h >> 7) & 1) == 0 { "INBOUND" } else { "OUTBOUND" };
-        let apo_km = 8.0e5 + ((h & 0x3FFF) as f32) * 35.0;   // ~0.8M .. ~1.3M km
+        let phase_str = if ((h >> 7) & 1) == 0 {
+            "INBOUND"
+        } else {
+            "OUTBOUND"
+        };
+        let apo_km = 8.0e5 + ((h & 0x3FFF) as f32) * 35.0; // ~0.8M .. ~1.3M km
         let peri_km = 5.0e5 + (((h >> 10) & 0x3FFF) as f32) * 28.0; // ~0.5M .. ~0.9M km
-        let inc_deg = 3.0 + (((h >> 18) & 0x7FF) as f32) * 0.02;     // ~3..25 deg
+        let inc_deg = 3.0 + (((h >> 18) & 0x7FF) as f32) * 0.02; // ~3..25 deg
         let eta_s = 60 + ((h >> 4) % 600) as usize; // 1..11 minutes
-        let eta_m = eta_s / 60; let eta_r = eta_s % 60;
+        let eta_m = eta_s / 60;
+        let eta_r = eta_s % 60;
 
         // compute local right column anchor (duplicate of below, to place extended lines)
         let col_w2 = 18usize;
-        let right_x2 = if width > col_w2 + 2 { width - col_w2 - 2 } else { width.saturating_sub(2) };
+        let right_x2 = if width > col_w2 + 2 {
+            width - col_w2 - 2
+        } else {
+            width.saturating_sub(2)
+        };
         let right_y02 = ((height as f32) * 0.25) as usize;
-        write_text(right_x2, right_y02 + 4, &format!("TARGET {}", target), hud_cyan);
-        write_text(right_x2, right_y02 + 5, &format!("PHASE {}", phase_str), hud_dim);
-        write_text(right_x2, right_y02 + 6, &format!("APO {:>4.0}k", apo_km/1000.0), hud_dim);
-        write_text(right_x2, right_y02 + 7, &format!("PERI {:>4.0}k", peri_km/1000.0), hud_dim);
-        write_text(right_x2, right_y02 + 8, &format!("INC {:>4.1}°", inc_deg), hud_dim);
-        write_text(right_x2, right_y02 + 9, &format!("ETA {:02}:{:02}", eta_m, eta_r), hud_dim);
+        write_text(
+            right_x2,
+            right_y02 + 4,
+            &format!("TARGET {}", target),
+            hud_cyan,
+        );
+        write_text(
+            right_x2,
+            right_y02 + 5,
+            &format!("PHASE {}", phase_str),
+            hud_dim,
+        );
+        write_text(
+            right_x2,
+            right_y02 + 6,
+            &format!("APO {:>4.0}k", apo_km / 1000.0),
+            hud_dim,
+        );
+        write_text(
+            right_x2,
+            right_y02 + 7,
+            &format!("PERI {:>4.0}k", peri_km / 1000.0),
+            hud_dim,
+        );
+        write_text(
+            right_x2,
+            right_y02 + 8,
+            &format!("INC {:>4.1}°", inc_deg),
+            hud_dim,
+        );
+        write_text(
+            right_x2,
+            right_y02 + 9,
+            &format!("ETA {:02}:{:02}", eta_m, eta_r),
+            hud_dim,
+        );
 
         // Subtle references to unnamed/provisional small moons (dim)
         let years = [2004u32, 2006, 2007, 2009, 2019, 2020];
@@ -462,8 +577,8 @@ impl Visualizer for TerrainLandscapeVisualizer {
         let rx = (dot_w as f32 * 0.14).max(8.0) as i32;
         let ry = (dot_h as f32 * 0.09).max(6.0) as i32;
         let a0 = -2.6f32; // start angle
-        let a1 =  0.6f32; // end angle
-        // subtle static micro-markers along the arc (dim), hinting at unnamed bodies
+        let a1 = 0.6f32; // end angle
+                         // subtle static micro-markers along the arc (dim), hinting at unnamed bodies
         let mk_t1 = ((hash_u32(h ^ 0x1357) % 40) as f32) / 55.0;
         let mk_t2 = ((hash_u32(h ^ 0x2468) % 40 + 10) as f32) / 55.0;
         for t in [mk_t1, mk_t2] {
@@ -475,7 +590,9 @@ impl Visualizer for TerrainLandscapeVisualizer {
             braille.draw_circle(xu, yu, 1, hud_dim);
         }
 
-        let mut px = 0usize; let mut py = 0usize; let mut has_prev = false;
+        let mut px = 0usize;
+        let mut py = 0usize;
+        let mut has_prev = false;
         for step in 0..56 {
             let t = step as f32 / 55.0;
             let a = a0 + (a1 - a0) * t;
@@ -483,14 +600,22 @@ impl Visualizer for TerrainLandscapeVisualizer {
             let y = (arc_cy as f32 + (ry as f32) * a.sin()).round() as i32;
             let xu = x.clamp(0, (dot_w - 1) as i32) as usize;
             let yu = y.clamp(0, (dot_h - 1) as i32) as usize;
-            if has_prev { braille.draw_line_with_color(px, py, xu, yu, hud_dim); }
-            px = xu; py = yu; has_prev = true;
+            if has_prev {
+                braille.draw_line_with_color(px, py, xu, yu, hud_dim);
+            }
+            px = xu;
+            py = yu;
+            has_prev = true;
         }
         // moving marker along the arc
         let prog = ((elapsed * 0.015) % 1.0) as f32; // very slow
         let am = a0 + (a1 - a0) * prog;
-        let mx = (arc_cx as f32 + (rx as f32) * am.cos()).round().clamp(0.0, (dot_w - 1) as f32) as usize;
-        let my = (arc_cy as f32 + (ry as f32) * am.sin()).round().clamp(0.0, (dot_h - 1) as f32) as usize;
+        let mx = (arc_cx as f32 + (rx as f32) * am.cos())
+            .round()
+            .clamp(0.0, (dot_w - 1) as f32) as usize;
+        let my = (arc_cy as f32 + (ry as f32) * am.sin())
+            .round()
+            .clamp(0.0, (dot_h - 1) as f32) as usize;
         braille.draw_circle(mx, my, 1, hud_cyan);
 
         // Side columns (vertical state)
@@ -499,19 +624,42 @@ impl Visualizer for TerrainLandscapeVisualizer {
         write_text(left_x, left_y0.saturating_sub(1), "NAV", hud_dim);
         let z_sample = self.scroll_z + 12.0;
         let alt = self.height_fn(0.0, z_sample);
-        write_text(left_x, left_y0 + 0, &format!("VEL {:>5.2}", self.base_speed), hud_dim);
+        write_text(
+            left_x,
+            left_y0 + 0,
+            &format!("VEL {:>5.2}", self.base_speed),
+            hud_dim,
+        );
         write_text(left_x, left_y0 + 1, &format!("ALT {:>5.2}", alt), hud_dim);
-        write_text(left_x, left_y0 + 2, &format!("ZPOS {:>6.1}", self.scroll_z), hud_dim);
+        write_text(
+            left_x,
+            left_y0 + 2,
+            &format!("ZPOS {:>6.1}", self.scroll_z),
+            hud_dim,
+        );
 
         let col_w = 18usize;
-        let right_x = if width > col_w + 2 { width - col_w - 2 } else { width.saturating_sub(2) };
+        let right_x = if width > col_w + 2 {
+            width - col_w - 2
+        } else {
+            width.saturating_sub(2)
+        };
         let right_y0 = left_y0;
         write_text(right_x, right_y0.saturating_sub(1), "SCAN", hud_dim);
         write_text(right_x, right_y0 + 0, &per_short, hud_cyan);
-        write_text(right_x, right_y0 + 1, &format!("SNR  {:>4.1} dB", snr), hud_dim);
-        write_text(right_x, right_y0 + 2, &format!("CONF {:>4.2}", conf), hud_dim);
+        write_text(
+            right_x,
+            right_y0 + 1,
+            &format!("SNR  {:>4.1} dB", snr),
+            hud_dim,
+        );
+        write_text(
+            right_x,
+            right_y0 + 2,
+            &format!("CONF {:>4.2}", conf),
+            hud_dim,
+        );
         write_text(right_x, right_y0 + 3, "MODE PROSPECT", hud_dim);
-
     }
 
     fn name(&self) -> &str {
@@ -519,18 +667,22 @@ impl Visualizer for TerrainLandscapeVisualizer {
     }
 }
 
-
-
 // --- Simple 2D value noise and fBm helpers (no external deps) ---
 #[inline]
-fn smoothstep01(t: f32) -> f32 { let t = t.clamp(0.0, 1.0); t * t * (3.0 - 2.0 * t) }
+fn smoothstep01(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
 
 #[inline]
 fn hash_u32(mut x: u32) -> u32 {
     // Mix bits (Thomas Wang-ish integer hash)
-    x ^= x >> 16; x = x.wrapping_mul(0x7feb352d);
-    x ^= x >> 15; x = x.wrapping_mul(0x846ca68b);
-    x ^= x >> 16; x
+    x ^= x >> 16;
+    x = x.wrapping_mul(0x7feb352d);
+    x ^= x >> 15;
+    x = x.wrapping_mul(0x846ca68b);
+    x ^= x >> 16;
+    x
 }
 
 #[inline]
@@ -544,10 +696,14 @@ fn rand01_i32(xi: i32, zi: i32) -> f32 {
 
 #[inline]
 fn value_noise2(x: f32, z: f32) -> f32 {
-    let x0 = x.floor() as i32; let z0 = z.floor() as i32;
-    let x1 = x0 + 1;         let z1 = z0 + 1;
-    let fx = x - x0 as f32;  let fz = z - z0 as f32;
-    let ux = smoothstep01(fx); let uz = smoothstep01(fz);
+    let x0 = x.floor() as i32;
+    let z0 = z.floor() as i32;
+    let x1 = x0 + 1;
+    let z1 = z0 + 1;
+    let fx = x - x0 as f32;
+    let fz = z - z0 as f32;
+    let ux = smoothstep01(fx);
+    let uz = smoothstep01(fz);
 
     let v00 = rand01_i32(x0, z0);
     let v10 = rand01_i32(x1, z0);
@@ -562,10 +718,16 @@ fn value_noise2(x: f32, z: f32) -> f32 {
 
 #[inline]
 fn fbm(x: f32, z: f32) -> f32 {
-    let mut sum = 0.0; let mut amp = 1.0; let mut freq = 1.0; let mut norm = 0.0;
-    for _ in 0..4 { // 4 octaves
+    let mut sum = 0.0;
+    let mut amp = 1.0;
+    let mut freq = 1.0;
+    let mut norm = 0.0;
+    for _ in 0..4 {
+        // 4 octaves
         sum += value_noise2(x * freq, z * freq) * amp;
-        norm += amp; amp *= 0.5; freq *= 2.0;
+        norm += amp;
+        amp *= 0.5;
+        freq *= 2.0;
     }
     sum / norm
 }

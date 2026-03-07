@@ -11,10 +11,12 @@ Made with love by Frosty40. Build bridges not bombs.
 - � Multiple character sets for audio visuals (7 styles)
 - �🖼️ Image viewer: `--image <file>` or drag/paste with `--image-drop`
 - 🔁 Two‑image morph (crossfade, ping‑pong loop): `--morph-a <A>` `--morph-b <B>` `[--morph-duration ms]`
-- �️ Live image controls: `[ / ]` speed, `r` reverse, `Space` pause, `l` letterbox, `c` color, `+/-` threshold, `a` auto‑threshold, `x` maximize, `s` save
+- 🎛️ Standard quality bank across the app: `F1` color, `F2` preset, `F3` dither, `F4` gamma, `F5` contrast, `F6` exposure, `F7` reset
+- �️ Live image controls: `[ / ]` speed, `r` reverse, `Space` pause, `F1-7` quality bank (plus legacy `p/d/g/v/z/0/c` aliases), `l` letterbox, `+/-` threshold, `a` auto‑threshold, `x` maximize, `s` save
 - 💾 Save Braille art to text: writes `<image_stem>.braille.txt`
 - 📐 Smart fit: letterbox ON/OFF, live terminal resize handling, optional canvas maximize `x`
-- 🎞️ Video playback: `--video <file>` (feature‑gated)
+- 🎞️ Video playback: `--video <file-or-youtube-url>` (feature‑gated; YouTube uses `yt-dlp`)
+- 📼 Random Internet Archive tune-in: press `U` in-app for vintage TV/weird old media; archive channels auto-play the next show when one ends
 - 📹 Webcam capture: live camera feed with smart resolution governor for optimal FPS (feature-gated)
 - 🎵 Audio visualization: microphone and Windows WASAPI loopback capture
 - 🔊 Audio output (hear while visualizing) and device selection for input/output
@@ -22,6 +24,7 @@ Made with love by Frosty40. Build bridges not bombs.
 - ⚡ High‑performance Rust renderer with differential updates
 - 🖥️ Cross‑platform (Windows, macOS, Linux)
 - 🧊 3D OBJ Viewer: true edge/vertex wireframe with hidden-line removal, simple solid shading, zoom/focus, and multi‑axis rotation controls
+- 🌌 Retro 3D channels: Primitives, Grid Tunnel, Gravity Well, and Starfield with beat-reactive pulse, roll, orbit, plunge, warp, and trail effects
 
 
 ## 🎨 Gallery
@@ -112,12 +115,20 @@ cargo run --release -- --device "Microphone" --output-device "Speakers"
 ### Quick Start: Video (feature-gated)
 
 ```bash
-# Play a video file as Braille
+# Play a local video file as Braille
 cargo run --release -- --video ".\media\clip.mp4"
 
 cargo run --release --features video -- --video "media/clip.mp4"
 
+# Or play a YouTube URL/channel/playlist via yt-dlp resolution
+cargo run --release --features video -- --video "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
 ```
+
+Notes:
+- Local file playback still works as before.
+- YouTube watch/short/channel/playlist URLs are resolved through `yt-dlp` into a direct stream URL before FFmpeg playback.
+- For channel/playlist URLs, CrabMusic samples a random video from the first slice of results.
 
 ### Quick Start: 3D OBJ Viewer
 
@@ -141,6 +152,17 @@ Notes:
 - Solid mode uses simple diffuse lighting; if normals are missing in the OBJ, we fall back to flat shading safely.
 - OBJ loader supports 1‑based and negative indices and triangulates n‑gons by fan. Texture/MTL are ignored for now.
 
+### Quick Start: Retro 3D Channels
+
+- Switch to `Primitives`, `Grid Tunnel`, `Gravity Well`, or `Starfield` with `←/→`.
+- Each mode stays beat-reactive, but now you can steer/tune it live too.
+
+Controls:
+- `Primitives`: `A/D` yaw, `J/K` pitch, `,/.` roll, `Z/X` zoom, `R` auto-rotate
+- `Grid Tunnel`: `A/D` twist, `J/K` speed, `,/.` glow, `Z/X` zoom, `R` auto-roll
+- `Gravity Well`: audio-reactive dual-view channel with a warped top grid plus a falling-depth side view
+- `Starfield`: `A/D` twist, `J/K` speed, `,/.` trail gain, `Z/X` FOV, `R` auto-twist
+
 
 ### More
 
@@ -154,16 +176,40 @@ cargo run --release -- --help
 
 ## ⌨️ Image Mode Controls
 
+### Global quality bank
+
+- `F1` - color mode: Off → Grayscale → Full RGB
+- `F2` - cycle named quality presets
+- `F3` - cycle dither mode
+- `F4` - gamma preset
+- `F5` - contrast preset
+- `F6` - exposure preset
+- `F7` - reset quality controls
+
+These work consistently in the main audio visualizer app, image mode, and video mode.
+
 - `m` - start/stop morph (prompt for second image when starting from single image)
 - `Space` - pause/unpause morph
 - `r` - reverse morph direction instantly
 - `[` / `]` - faster / slower (shorter/longer duration per leg)
 - `l` - letterbox ON/OFF (preserve aspect vs fill)
-- `c` - color mode: Off → Grayscale → Full RGB
+- Legacy aliases still work in image mode: `c`, `p`, `d`, `g`, `v`, `z`, `0`
 - `+` / `-` - manual threshold up/down; `a` - toggle auto-threshold
 - `x` - attempt to maximize canvas (some terminals may not allow programmatic resize)
 - `s` - save current Braille art to `<image_stem>.braille.txt` next to the image
 - `Esc` - clears typed input/morph prompt; `Esc` again (empty) quits; `q` also quits
+
+## 🎞️ Video Mode Controls
+
+- `Space` - pause / resume playback
+- `l` - letterbox ON/OFF
+- `+` / `-` - manual threshold up/down; `a` - toggle auto-threshold
+- `F1-F7` - shared quality bank (image/video/main-app parity)
+- Legacy aliases still work in video mode: `c`, `p`, `d`, `g`, `v`, `z`, `0`
+- `t` - cycle temporal blend (frame memory) presets
+- `y` - cycle temporal hysteresis presets for steadier motion
+- `u` - open/retune a random Internet Archive stream (where supported)
+- `q` / `Esc` - quit
 
 ## 📝 Configuration
 
@@ -175,8 +221,19 @@ Key configuration options:
 - Visualization settings (amplitude scale, frequency scale, wave count)
 - Character set selection
 - Target FPS
+- Braille live/image/video presets, color mode defaults, dither overrides, gamma/contrast/exposure overrides
+- Video temporal blend + temporal hysteresis defaults for motion smoothing
 
-See `config.default.yaml` for all available options and detailed comments.
+See `config/default.yaml` for all available options and detailed comments.
+
+Example braille-quality config:
+
+```yaml
+rendering:
+  braille_live: { preset: motion, color_mode: full }
+  braille_image: { preset: cinema }
+  braille_video: { preset: motion, temporal_blend_preset: 2 }
+```
 
 ## 🛠️ Development
 
@@ -329,7 +386,7 @@ Built with these excellent Rust crates:
 - ✅ Unicode Braille renderer with full RGB color mode (Off → Grayscale → Full)
 - ✅ Image viewer: `--image`, drag/paste with `--image-drop`
 - ✅ Two-image morph (crossfade, ping‑pong): `--morph-a`, `--morph-b`, optional `--morph-duration`
-- ✅ Live controls: `[ / ]` speed, `r` reverse, `Space` pause, `l` letterbox, `c` color, `+/-` threshold, `a` auto-threshold, `x` maximize, `s` save
+- ✅ Live controls: `[ / ]` speed, `r` reverse, `Space` pause, shared `F1-F7` quality bank, image/video legacy aliases, `l` letterbox, `+/-` threshold, `a` auto-threshold, `x` maximize, `s` save
 - ✅ Live terminal-resize handling
 - ✅ Save Braille art to `<stem>.braille.txt`
 - ✅ Audio capture (mic + Windows WASAPI loopback) and audio output
