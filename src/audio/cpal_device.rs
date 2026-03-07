@@ -255,6 +255,10 @@ impl AudioCaptureDevice for CpalAudioDevice {
         self.ring_buffer.pop()
     }
 
+    fn read_latest_samples(&mut self) -> (Option<AudioBuffer>, usize) {
+        self.ring_buffer.pop_latest()
+    }
+
     fn get_config(&self) -> AudioConfig {
         self.config
     }

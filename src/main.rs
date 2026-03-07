@@ -15,14 +15,13 @@ mod audio;
 mod braille_quality;
 mod config;
 mod dsp;
-#[allow(dead_code)]
-mod effects;
 mod error;
 mod grid_postprocess;
 #[allow(dead_code)]
 mod img;
 mod rendering;
 mod runtime_controls;
+mod session_reporter;
 mod video;
 mod visualization;
 
@@ -33,13 +32,13 @@ use audio::{
 };
 use config::{AppConfig, BrailleColorMode, InternetArchiveConfig, RenderingConfig};
 use dsp::DspProcessor;
-use effects::EffectPipeline;
 use grid_postprocess::GridBraillePostProcessor;
 use rendering::TerminalRenderer;
 use runtime_controls::{
     apply_quality_action, quality_control_action_from_key, quality_summary, ColorMode,
     QualityControlAction,
 };
+use session_reporter::init_logging;
 use visualization::{
     character_sets::CharacterSet, color_schemes::ColorScheme, primitives::PrimitivesVisualizer,
     ray_tracer::RenderMode, GravityWellVisualizer, GridBuffer, GridTunnelVisualizer,
@@ -75,6 +74,14 @@ struct Args {
     /// Debug logging
     #[arg(long)]
     debug: bool,
+
+    /// Write a per-session report log with timing data to reports/sessions/
+    #[arg(long)]
+    report: bool,
+
+    /// Override the session report log path for this run
+    #[arg(long)]
+    report_file: Option<String>,
 
     /// Play video/GIF file (path to video file)
     #[arg(long)]
@@ -269,6 +276,29 @@ impl ArchiveRequestContext {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArchiveFetchPurpose {
+    Immediate,
+    Prefetch,
+}
+
+#[derive(Debug)]
+struct ArchiveFetchResult {
+    channel: ArchiveChannelKind,
+    context: ArchiveRequestContext,
+    purpose: ArchiveFetchPurpose,
+    result: Result<crate::video::internet_archive::ArchiveStream>,
+}
+
+fn should_start_archive_prefetch(
+    channel: ArchiveChannelKind,
+    has_prefetched_stream: bool,
+    prefetch_in_flight: Option<ArchiveChannelKind>,
+    visible_load_for_channel: bool,
+) -> bool {
+    !has_prefetched_stream && prefetch_in_flight != Some(channel) && !visible_load_for_channel
+}
+
 fn is_quit_key(code: KeyCode) -> bool {
     matches!(code, KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc)
 }
@@ -295,6 +325,119 @@ fn should_process_key_event(
     }
 
     time_since_last_press.as_millis() >= debounce_ms as u128
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct FramePacingStats {
+    requested_sleep: Duration,
+    actual_sleep: Duration,
+    overshoot: Duration,
+    wall_frame_time: Duration,
+}
+
+#[derive(Debug)]
+struct FramePacer {
+    frame_duration: Duration,
+    next_deadline: Instant,
+}
+
+impl FramePacer {
+    fn new(frame_duration: Duration) -> Self {
+        let now = Instant::now();
+        Self {
+            frame_duration,
+            next_deadline: now + frame_duration,
+        }
+    }
+
+    async fn wait_for_next_frame(&mut self, frame_start: Instant) -> FramePacingStats {
+        let now = Instant::now();
+        let requested_sleep = self.next_deadline.saturating_duration_since(now);
+        let sleep_started = Instant::now();
+        if requested_sleep > Duration::ZERO {
+            tokio::time::sleep_until(tokio::time::Instant::from_std(self.next_deadline)).await;
+        }
+
+        let woke_at = Instant::now();
+        let actual_sleep = woke_at.saturating_duration_since(sleep_started);
+        let overshoot = actual_sleep.saturating_sub(requested_sleep);
+        let wall_frame_time = woke_at.saturating_duration_since(frame_start);
+        self.advance_deadline(woke_at);
+
+        FramePacingStats {
+            requested_sleep,
+            actual_sleep,
+            overshoot,
+            wall_frame_time,
+        }
+    }
+
+    fn advance_deadline(&mut self, now: Instant) {
+        self.next_deadline += self.frame_duration;
+        while self.next_deadline <= now {
+            self.next_deadline += self.frame_duration;
+        }
+    }
+}
+
+#[cfg(windows)]
+#[derive(Debug)]
+struct WindowsTimerResolutionGuard {
+    period_ms: u32,
+    enabled: bool,
+}
+
+#[cfg(windows)]
+impl WindowsTimerResolutionGuard {
+    fn new(period_ms: u32) -> Self {
+        #[link(name = "winmm")]
+        unsafe extern "system" {
+            fn timeBeginPeriod(uPeriod: u32) -> u32;
+        }
+
+        // SAFETY: `timeBeginPeriod` is a process-wide Windows API that takes a plain integer
+        // period in milliseconds and has no aliasing or lifetime requirements.
+        let enabled = unsafe { timeBeginPeriod(period_ms) == 0 };
+        if enabled {
+            tracing::info!(
+                "Enabled Windows high-resolution timer pacing at {} ms",
+                period_ms
+            );
+        } else {
+            tracing::warn!(
+                "Failed to enable Windows high-resolution timer pacing at {} ms",
+                period_ms
+            );
+        }
+        Self { period_ms, enabled }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for WindowsTimerResolutionGuard {
+    fn drop(&mut self) {
+        #[link(name = "winmm")]
+        unsafe extern "system" {
+            fn timeEndPeriod(uPeriod: u32) -> u32;
+        }
+
+        if self.enabled {
+            // SAFETY: `timeEndPeriod` pairs with `timeBeginPeriod` for the same plain integer
+            // period and has no aliasing or lifetime requirements.
+            let _ = unsafe { timeEndPeriod(self.period_ms) };
+        }
+    }
+}
+
+#[cfg(not(windows))]
+#[derive(Debug, Default)]
+struct WindowsTimerResolutionGuard;
+
+#[cfg(not(windows))]
+impl WindowsTimerResolutionGuard {
+    fn new(_period_ms: u32) -> Self {
+        Self
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -370,7 +513,6 @@ struct Application {
     visualizer: Box<dyn Visualizer>,
     visualizer_mode: VisualizerMode,
     renderer: TerminalRenderer,
-    effect_pipeline: EffectPipeline,
     color_scheme: ColorScheme,
     target_fps: u32,
     microphone_enabled: bool,
@@ -419,12 +561,15 @@ struct Application {
 
     // Internet Archive specific
     internet_archive: InternetArchiveConfig,
-    archive_stream_tx: mpsc::Sender<Result<crate::video::internet_archive::ArchiveStream>>,
-    archive_stream_rx: mpsc::Receiver<Result<crate::video::internet_archive::ArchiveStream>>,
+    archive_stream_tx: mpsc::Sender<ArchiveFetchResult>,
+    archive_stream_rx: mpsc::Receiver<ArchiveFetchResult>,
     is_loading_archive: bool,
     pending_archive_channel: ArchiveChannelKind,
     archive_request_context: ArchiveRequestContext,
     last_archive_identifiers: HashMap<ArchiveChannelKind, String>,
+    prefetched_archive_streams:
+        HashMap<ArchiveChannelKind, crate::video::internet_archive::ArchiveStream>,
+    archive_prefetch_in_flight: Option<ArchiveChannelKind>,
 }
 
 fn color_mode_from_config(color_mode: BrailleColorMode) -> ColorMode {
@@ -519,7 +664,7 @@ impl Application {
         ));
 
         // Create Internet Archive stream channel
-        let (tx, rx) = mpsc::channel(1);
+        let (tx, rx) = mpsc::channel(4);
 
         Ok(Self {
             audio_device,
@@ -528,7 +673,6 @@ impl Application {
             visualizer,
             visualizer_mode: VisualizerMode::SineWave,
             renderer,
-            effect_pipeline: EffectPipeline::new(),
             color_scheme,
             target_fps: config.rendering.target_fps,
             microphone_enabled: audio_flags.microphone_enabled,
@@ -567,7 +711,7 @@ impl Application {
             live_quality_defaults: live_quality,
             live_color_mode,
             live_color_mode_default: live_color_mode,
-            live_postprocess: GridBraillePostProcessor,
+            live_postprocess: GridBraillePostProcessor::default(),
             audio_buffer_capacity: config.audio.buffer_capacity,
             use_loopback: audio_flags.use_loopback,
             rendering_config,
@@ -579,6 +723,8 @@ impl Application {
             pending_archive_channel: ArchiveChannelKind::Tv,
             archive_request_context: ArchiveRequestContext::ManualHotkey,
             last_archive_identifiers: HashMap::new(),
+            prefetched_archive_streams: HashMap::new(),
+            archive_prefetch_in_flight: None,
         })
     }
 
@@ -680,6 +826,20 @@ impl Application {
             return;
         }
 
+        if let Some(stream) = self.prefetched_archive_streams.remove(&channel) {
+            tracing::info!(
+                "Using prefetched {} stream: {} ({}) -> {}",
+                channel.name(),
+                stream.title,
+                stream.identifier,
+                stream.stream_url
+            );
+            if let Err(e) = self.activate_archive_stream(channel, context, stream) {
+                tracing::error!("Failed to play prefetched {} stream: {}", channel.name(), e);
+            }
+            return;
+        }
+
         if self.is_loading_archive {
             tracing::warn!("Already loading an Internet Archive video.");
             return;
@@ -701,6 +861,23 @@ impl Application {
         );
 
         let queries = queries.to_vec();
+        self.spawn_archive_fetch(
+            channel,
+            context,
+            ArchiveFetchPurpose::Immediate,
+            queries,
+            excluded_identifier,
+        );
+    }
+
+    fn spawn_archive_fetch(
+        &self,
+        channel: ArchiveChannelKind,
+        context: ArchiveRequestContext,
+        purpose: ArchiveFetchPurpose,
+        queries: Vec<String>,
+        excluded_identifier: Option<String>,
+    ) {
         let rows_per_page = self.internet_archive.rows_per_page;
         let max_pages = self.internet_archive.max_pages;
         let tx = self.archive_stream_tx.clone();
@@ -719,13 +896,153 @@ impl Application {
                 Err(e) => Err(anyhow!("Internet Archive fetch task failed: {}", e)),
             };
 
-            if let Err(e) = tx.send(result).await {
+            if let Err(e) = tx
+                .send(ArchiveFetchResult {
+                    channel,
+                    context,
+                    purpose,
+                    result,
+                })
+                .await
+            {
                 tracing::error!(
                     "Failed to send Internet Archive stream back to main thread: {}",
                     e
                 );
             }
         });
+    }
+
+    fn schedule_archive_prefetch(
+        &mut self,
+        channel: ArchiveChannelKind,
+        excluded_identifier: String,
+    ) {
+        let has_prefetched_stream = self.prefetched_archive_streams.contains_key(&channel);
+        let visible_load_for_channel =
+            self.is_loading_archive && self.pending_archive_channel == channel;
+        if !should_start_archive_prefetch(
+            channel,
+            has_prefetched_stream,
+            self.archive_prefetch_in_flight,
+            visible_load_for_channel,
+        ) {
+            return;
+        }
+
+        let queries = match channel {
+            ArchiveChannelKind::Tv => &self.internet_archive.tv_queries,
+            ArchiveChannelKind::Cooking => &self.internet_archive.cooking_queries,
+            ArchiveChannelKind::PublicAccess => &self.internet_archive.public_access_queries,
+            ArchiveChannelKind::Industrial => &self.internet_archive.industrial_queries,
+            ArchiveChannelKind::Educational => &self.internet_archive.educational_queries,
+            ArchiveChannelKind::LocalNews => &self.internet_archive.local_news_queries,
+        };
+        if queries.is_empty() {
+            return;
+        }
+
+        self.archive_prefetch_in_flight = Some(channel);
+        tracing::info!("Prefetching next {} stream...", channel.name());
+        self.spawn_archive_fetch(
+            channel,
+            ArchiveRequestContext::PlaybackEnded,
+            ArchiveFetchPurpose::Prefetch,
+            queries.to_vec(),
+            Some(excluded_identifier),
+        );
+    }
+
+    fn activate_archive_stream(
+        &mut self,
+        channel: ArchiveChannelKind,
+        context: ArchiveRequestContext,
+        stream: crate::video::internet_archive::ArchiveStream,
+    ) -> Result<()> {
+        let identifier = stream.identifier.clone();
+
+        self.last_archive_identifiers
+            .insert(channel, identifier.clone());
+
+        if context.requires_active_channel_match()
+            && self.visualizer_mode != channel.visualizer_mode()
+        {
+            tracing::info!(
+                "Caching {} stream because the user left that archive channel before tuning completed",
+                channel.name(),
+            );
+            self.prefetched_archive_streams.insert(channel, stream);
+            if let Some(active_channel) =
+                ArchiveChannelKind::from_visualizer_mode(self.visualizer_mode)
+            {
+                self.request_archive_stream_for(
+                    active_channel,
+                    ArchiveRequestContext::RotationMode,
+                );
+            }
+            return Ok(());
+        }
+
+        if self.visualizer_mode == channel.visualizer_mode() {
+            if let Err(e) = self.try_load_current_channel_path(stream.stream_url.as_str()) {
+                tracing::warn!("Failed to update {} channel status: {}", channel.name(), e);
+            }
+        }
+
+        self.schedule_archive_prefetch(channel, identifier);
+        self.play_video_stream(stream.stream_url.as_str())
+    }
+
+    fn handle_archive_fetch_result(&mut self, fetch: ArchiveFetchResult) {
+        match fetch.purpose {
+            ArchiveFetchPurpose::Immediate => {
+                self.is_loading_archive = false;
+                match fetch.result {
+                    Ok(stream) => {
+                        tracing::info!(
+                            "Tuned {} stream: {} ({}) -> {}",
+                            fetch.channel.name(),
+                            stream.title,
+                            stream.identifier,
+                            stream.stream_url
+                        );
+                        if let Err(e) =
+                            self.activate_archive_stream(fetch.channel, fetch.context, stream)
+                        {
+                            tracing::error!("Failed to play Internet Archive stream: {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to fetch Internet Archive video: {}", e);
+                    }
+                }
+            }
+            ArchiveFetchPurpose::Prefetch => {
+                if self.archive_prefetch_in_flight == Some(fetch.channel) {
+                    self.archive_prefetch_in_flight = None;
+                }
+                match fetch.result {
+                    Ok(stream) => {
+                        tracing::info!(
+                            "Prefetched {} stream: {} ({}) -> {}",
+                            fetch.channel.name(),
+                            stream.title,
+                            stream.identifier,
+                            stream.stream_url
+                        );
+                        self.prefetched_archive_streams
+                            .insert(fetch.channel, stream);
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to prefetch next {} stream: {}",
+                            fetch.channel.name(),
+                            e
+                        );
+                    }
+                }
+            }
+        }
     }
 
     fn recreate_visualizer(&mut self) {
@@ -933,22 +1250,6 @@ impl Application {
         // Raycaster and ObjViewer might use their own coloring or ignore it
     }
 
-    fn toggle_effects(&mut self) {
-        self.effect_pipeline.toggle_enabled();
-    }
-
-    fn toggle_effect(&mut self, name: &str) {
-        self.effect_pipeline.toggle_effect(name);
-    }
-
-    fn decrease_effect_intensity(&mut self) {
-        self.effect_pipeline.decrease_all_intensities();
-    }
-
-    fn increase_effect_intensity(&mut self) {
-        self.effect_pipeline.increase_all_intensities();
-    }
-
     fn toggle_microphone(&mut self) {
         self.microphone_enabled = !self.microphone_enabled;
     }
@@ -1066,33 +1367,6 @@ impl Application {
             "MIC:OFF"
         };
 
-        // Build effect status string with individual effect states
-        let mut fx_parts = Vec::new();
-        if self.effect_pipeline.is_enabled() {
-            fx_parts.push("FX:ON".to_string());
-        } else {
-            fx_parts.push("FX:OFF".to_string());
-        }
-
-        // Show individual effect states and intensities
-        for effect_name in self.effect_pipeline.effect_names() {
-            if let Some(effect) = self.effect_pipeline.get_effect(effect_name) {
-                let short_name = match effect_name {
-                    "Bloom" => "B",
-                    "Scanline" => "S",
-                    "Phosphor" => "P",
-                    _ => &effect_name[0..1],
-                };
-                let intensity_pct = (effect.intensity() * 100.0) as u8;
-                if effect.is_enabled() {
-                    fx_parts.push(format!("{}:{}%", short_name, intensity_pct));
-                } else {
-                    fx_parts.push(format!("{}:off", short_name));
-                }
-            }
-        }
-        let fx_status = fx_parts.join(" ");
-
         // Optional channel prefix (e.g., "CH 3/11: ")
         let channel_prefix = if self.show_channel_number {
             format!(
@@ -1106,8 +1380,8 @@ impl Application {
 
         let info_text = if self.visualizer_mode == VisualizerMode::Oscilloscope {
             format!(
-                    " {}{} | {} | {} | {} | ←/→ V:chan I:num U:archive O:color E:fx B:bloom S:scan H:phosphor []:intensity G:grid F:fill T:trigger M:mic Q:quit ",
-                channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status
+                    " {}{} | {} | {} | ←/→ V:chan I:num U:archive O:color G:grid F:fill T:trigger M:mic Q:quit ",
+                channel_prefix, visualizer_name, color_scheme_name, mic_status
             )
         } else if self.visualizer_mode == VisualizerMode::Spectrum {
             let map_name = match self.spectrum_mapping {
@@ -1121,13 +1395,13 @@ impl Application {
                     _ => ("A1-A6", 55.0, 1760.0),
                 };
                 format!(
-                    " {}{} | {} | {} | {} | ←/→ V:chan I:num U:archive O:color E:fx B:bloom S:scan H:phosphor []:intensity P:peaks L:labels N:map({}) R:range({}) M:mic +/-:sens Q:quit ",
-                    channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status, map_name, range_label
+                    " {}{} | {} | {} | ←/→ V:chan I:num U:archive O:color P:peaks L:labels N:map({}) R:range({}) M:mic +/-:sens Q:quit ",
+                    channel_prefix, visualizer_name, color_scheme_name, mic_status, map_name, range_label
                 )
             } else {
                 format!(
-                    " {}{} | {} | {} | {} | ←/→ V:chan I:num U:archive O:color E:fx B:bloom S:scan H:phosphor []:intensity P:peaks L:labels N:map({}) M:mic +/-:sens Q:quit ",
-                    channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status, map_name
+                    " {}{} | {} | {} | ←/→ V:chan I:num U:archive O:color P:peaks L:labels N:map({}) M:mic +/-:sens Q:quit ",
+                    channel_prefix, visualizer_name, color_scheme_name, mic_status, map_name
                 )
             }
         } else if self.visualizer_mode == VisualizerMode::Raycaster3D {
@@ -1140,8 +1414,8 @@ impl Application {
             let auto_label = if self.ray3d_auto_rotate { "ON" } else { "OFF" };
             let rot_speed = self.ray3d_rotation_speed_y;
             format!(
-                " {}{}({}) | {} | {} | {} | W:mode G/H:step({:.0}°) T/Y:thick({:.3}) J/K:rot({:.1}) R:auto({}) Up/Down:bright ←/→ V:chan I:num U:archive O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
-                channel_prefix, visualizer_name, mode_name, color_scheme_name, mic_status, fx_status, step_deg, tol, rot_speed, auto_label
+                " {}{}({}) | {} | {} | W:mode G/H:step({:.0}°) T/Y:thick({:.3}) J/K:rot({:.1}) R:auto({}) Up/Down:bright ←/→ V:chan I:num U:archive O:color M:mic +/-:sens Q:quit ",
+                channel_prefix, visualizer_name, mode_name, color_scheme_name, mic_status, step_deg, tol, rot_speed, auto_label
             )
         } else if self.visualizer_mode == VisualizerMode::ObjViewer {
             let (model_name, line_px, dot_px) = if let Some(viz) = (&*self.visualizer
@@ -1159,33 +1433,33 @@ impl Application {
                 "OFF"
             };
             format!(
-                " {}{} | {} | {} | {} | Model: {} | W:mode A/D:yaw J/K:pitch ,/.:roll G/H:line({}px) T/Y:dot({}px) Z/X:zoom F:focus R:auto({}) Up/Down:switch ←/→ V:chan I:num U:archive O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
-                channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status, model_name, line_px, dot_px, auto_label
+                " {}{} | {} | {} | Model: {} | W:mode A/D:yaw J/K:pitch ,/.:roll G/H:line({}px) T/Y:dot({}px) Z/X:zoom F:focus R:auto({}) Up/Down:switch ←/→ V:chan I:num U:archive O:color M:mic +/-:sens Q:quit ",
+                channel_prefix, visualizer_name, color_scheme_name, mic_status, model_name, line_px, dot_px, auto_label
             )
         } else if self.visualizer_mode == VisualizerMode::Primitives {
             format!(
-                " {}{} | {} | {} | {} | Bass:core pulse Mid:orbit Treble:glow | A/D:yaw J/K:pitch ,/.:roll Z/X:zoom R:auto | ←/→ V:chan I:num U:archive O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
-                channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status
+                " {}{} | {} | {} | Bass:core pulse Mid:orbit Treble:glow | A/D:yaw J/K:pitch ,/.:roll Z/X:zoom R:auto | ←/→ V:chan I:num U:archive O:color M:mic +/-:sens Q:quit ",
+                channel_prefix, visualizer_name, color_scheme_name, mic_status
             )
         } else if self.visualizer_mode == VisualizerMode::GridTunnel {
             format!(
-                " {}{} | {} | {} | {} | Bass:pulse Mid:roll Treble:glow | A/D:twist J/K:speed ,/.:glow Z/X:zoom R:auto | ←/→ V:chan I:num U:archive O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
-                channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status
+                " {}{} | {} | {} | Bass:pulse Mid:roll Treble:glow | A/D:twist J/K:speed ,/.:glow Z/X:zoom R:auto | ←/→ V:chan I:num U:archive O:color M:mic +/-:sens Q:quit ",
+                channel_prefix, visualizer_name, color_scheme_name, mic_status
             )
         } else if self.visualizer_mode == VisualizerMode::GravityWell {
             format!(
-                " {}{} | {} | {} | {} | Bass:well depth Mid:lens twist Treble:spark ring | dual-view plunge/orbit/swallow | ←/→ V:chan I:num U:archive O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
-                channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status
+                " {}{} | {} | {} | Bass:well depth Mid:lens twist Treble:spark ring | dual-view plunge/orbit/swallow | ←/→ V:chan I:num U:archive O:color M:mic +/-:sens Q:quit ",
+                channel_prefix, visualizer_name, color_scheme_name, mic_status
             )
         } else if self.visualizer_mode == VisualizerMode::Starfield {
             format!(
-                " {}{} | {} | {} | {} | Bass:warp Mid:twist Treble:trails | A/D:twist J/K:speed ,/.:trails Z/X:fov R:auto | ←/→ V:chan I:num U:archive O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
-                channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status
+                " {}{} | {} | {} | Bass:warp Mid:twist Treble:trails | A/D:twist J/K:speed ,/.:trails Z/X:fov R:auto | ←/→ V:chan I:num U:archive O:color M:mic +/-:sens Q:quit ",
+                channel_prefix, visualizer_name, color_scheme_name, mic_status
             )
         } else {
             format!(
-                " {}{} | {} | {} | {} | ←/→ V:chan I:num U:archive O:color E:fx B:bloom S:scan H:phosphor []:intensity M:mic +/-:sens Q:quit ",
-                channel_prefix, visualizer_name, color_scheme_name, mic_status, fx_status
+                " {}{} | {} | {} | ←/→ V:chan I:num U:archive O:color M:mic +/-:sens Q:quit ",
+                channel_prefix, visualizer_name, color_scheme_name, mic_status
             )
         };
 
@@ -1279,6 +1553,8 @@ impl Application {
 
         // Calculate frame time
         let frame_duration = Duration::from_secs_f32(1.0 / self.target_fps as f32);
+        let _timer_resolution_guard = WindowsTimerResolutionGuard::new(1);
+        let mut frame_pacer = FramePacer::new(frame_duration);
 
         // Performance tracking
         let mut frame_count = 0;
@@ -1286,6 +1562,25 @@ impl Application {
         let mut total_frame_time = Duration::ZERO;
         let mut max_frame_time = Duration::ZERO;
         let mut min_frame_time = Duration::from_secs(1);
+        let mut input_audio_stage_total = Duration::ZERO;
+        let mut archive_poll_stage_total = Duration::ZERO;
+        let mut input_poll_stage_total = Duration::ZERO;
+        let mut audio_read_stage_total = Duration::ZERO;
+        let mut audio_process_stage_total = Duration::ZERO;
+        let mut audio_output_stage_total = Duration::ZERO;
+        let mut visualize_stage_total = Duration::ZERO;
+        let mut post_stage_total = Duration::ZERO;
+        let mut render_stage_total = Duration::ZERO;
+        let mut requested_sleep_total = Duration::ZERO;
+        let mut actual_sleep_total = Duration::ZERO;
+        let mut overshoot_total = Duration::ZERO;
+        let mut wall_frame_time_total = Duration::ZERO;
+        let mut audio_buffers_consumed = 0_u32;
+        let mut stale_audio_buffers_dropped_total = 0_u32;
+        let mut audio_buffer_age_total = Duration::ZERO;
+        let mut max_audio_buffer_age = Duration::ZERO;
+        let (initial_width, initial_height) = self.renderer.dimensions();
+        let mut grid = GridBuffer::new(initial_width as usize, initial_height as usize);
 
         loop {
             let frame_start = Instant::now();
@@ -1296,70 +1591,24 @@ impl Application {
                 break;
             }
 
+            let input_audio_start = Instant::now();
+            let archive_poll_start = Instant::now();
+
             // Check for completed Internet Archive fetches
-            match self.archive_stream_rx.try_recv() {
-                Ok(Ok(stream)) => {
-                    self.is_loading_archive = false;
-                    let pending_channel = self.pending_archive_channel;
-                    let request_context = self.archive_request_context;
-                    tracing::info!(
-                        "Tuned {} stream: {} ({}) -> {}",
-                        pending_channel.name(),
-                        stream.title,
-                        stream.identifier,
-                        stream.stream_url
-                    );
-                    self.last_archive_identifiers
-                        .insert(pending_channel, stream.identifier.clone());
-
-                    if self.visualizer_mode == pending_channel.visualizer_mode() {
-                        if let Err(e) =
-                            self.try_load_current_channel_path(stream.stream_url.as_str())
-                        {
-                            tracing::warn!(
-                                "Failed to update {} channel status: {}",
-                                pending_channel.name(),
-                                e
-                            );
-                        }
+            loop {
+                match self.archive_stream_rx.try_recv() {
+                    Ok(fetch) => self.handle_archive_fetch_result(fetch),
+                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
+                    Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                        tracing::error!("Internet Archive stream channel disconnected.");
+                        break;
                     }
-
-                    if request_context.requires_active_channel_match()
-                        && self.visualizer_mode != pending_channel.visualizer_mode()
-                    {
-                        tracing::info!(
-                            "Skipping {} autoplay because the user left that archive channel before tuning completed",
-                            pending_channel.name(),
-                        );
-                        if let Some(active_channel) =
-                            ArchiveChannelKind::from_visualizer_mode(self.visualizer_mode)
-                        {
-                            self.request_archive_stream_for(
-                                active_channel,
-                                ArchiveRequestContext::RotationMode,
-                            );
-                        }
-                        continue;
-                    }
-
-                    if let Err(e) = self.play_video_stream(stream.stream_url.as_str()) {
-                        tracing::error!("Failed to play Internet Archive stream: {}", e);
-                    }
-                }
-                Ok(Err(e)) => {
-                    self.is_loading_archive = false;
-                    tracing::error!("Failed to fetch Internet Archive video: {}", e);
-                }
-                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
-                    // No message yet
-                }
-                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                    // Should not happen
-                    tracing::error!("Internet Archive stream channel disconnected.");
                 }
             }
+            archive_poll_stage_total += archive_poll_start.elapsed();
 
             // Check for keyboard/paste input
+            let input_poll_start = Instant::now();
             if event::poll(Duration::from_millis(0)).unwrap_or(false) {
                 if let Ok(ev) = event::read() {
                     match ev {
@@ -1446,15 +1695,6 @@ impl Application {
                                         KeyCode::Char('o') | KeyCode::Char('O') => {
                                             self.next_color_scheme();
                                         }
-                                        KeyCode::Char('e') | KeyCode::Char('E') => {
-                                            self.toggle_effects();
-                                        }
-                                        KeyCode::Char('b') | KeyCode::Char('B') => {
-                                            self.toggle_effect("Bloom");
-                                        }
-                                        KeyCode::Char('s') | KeyCode::Char('S') => {
-                                            self.toggle_effect("Scanline");
-                                        }
                                         KeyCode::Char('h') | KeyCode::Char('H') => {
                                             if self.visualizer_mode == VisualizerMode::Raycaster3D {
                                                 // Increase wireframe grid step (sparser)
@@ -1490,15 +1730,7 @@ impl Application {
                                                         step_prev.to_degrees()
                                                     );
                                                 }
-                                            } else {
-                                                self.toggle_effect("Phosphor");
                                             }
-                                        }
-                                        KeyCode::Char('[') | KeyCode::Char('{') => {
-                                            self.decrease_effect_intensity();
-                                        }
-                                        KeyCode::Char(']') | KeyCode::Char('}') => {
-                                            self.increase_effect_intensity();
                                         }
                                         KeyCode::Char('m') | KeyCode::Char('M') => {
                                             self.toggle_microphone();
@@ -2235,6 +2467,7 @@ impl Application {
                     }
                 }
             }
+            input_poll_stage_total += input_poll_start.elapsed();
 
             // Check if audio capture is still active
             if !self.audio_device.is_capturing() {
@@ -2247,7 +2480,13 @@ impl Application {
             }
 
             // 1. Read audio samples from ring buffer (only if microphone is enabled)
-            let audio_params = if let Some(audio_buffer) = self.audio_device.read_samples() {
+            let audio_read_start = Instant::now();
+            let (latest_audio_buffer, stale_audio_buffers_dropped) =
+                self.audio_device.read_latest_samples();
+            audio_read_stage_total += audio_read_start.elapsed();
+            stale_audio_buffers_dropped_total += stale_audio_buffers_dropped as u32;
+
+            let audio_params = if let Some(audio_buffer) = latest_audio_buffer {
                 // Debug: Log that we're receiving audio (disabled for production)
                 // if frame_count % 60 == 0 {
                 //     tracing::debug!(
@@ -2257,27 +2496,39 @@ impl Application {
                 //     );
                 // }
 
+                audio_buffers_consumed += 1;
+                let audio_buffer_age = audio_buffer.timestamp.elapsed();
+                audio_buffer_age_total += audio_buffer_age;
+                max_audio_buffer_age = max_audio_buffer_age.max(audio_buffer_age);
+
                 // 1a. If microphone passthrough is enabled, write to output so you can hear it
+                let audio_output_start = Instant::now();
                 if self.microphone_enabled {
                     if let Some(ref audio_output) = self.audio_output {
                         audio_output.write_samples(&audio_buffer);
                     }
                 }
+                audio_output_stage_total += audio_output_start.elapsed();
 
                 // 2. Process audio only when appropriate source is active
                 // - Loopback: always process (system audio) WITHOUT amplitude squelch
                 // - Mic: process only when microphone_enabled is true (WITH squelch)
+                let audio_process_start = Instant::now();
                 if self.use_loopback {
-                    self.dsp_processor.process(&audio_buffer)
+                    let audio_params = self.dsp_processor.process(&audio_buffer);
+                    audio_process_stage_total += audio_process_start.elapsed();
+                    audio_params
                 } else if self.microphone_enabled {
                     let mut audio_params = self.dsp_processor.process(&audio_buffer);
                     const SQUELCH_THRESHOLD: f32 = 0.005; // conservative floor for mic noise
                     if audio_params.amplitude < SQUELCH_THRESHOLD {
                         audio_params = dsp::AudioParameters::default();
                     }
+                    audio_process_stage_total += audio_process_start.elapsed();
                     audio_params
                 } else {
                     // Mic is OFF and we're not in loopback: feed silence so visuals decay to zero
+                    audio_process_stage_total += audio_process_start.elapsed();
                     dsp::AudioParameters::default()
                 }
             } else {
@@ -2289,18 +2540,24 @@ impl Application {
                 dsp::AudioParameters::default()
             };
 
+            input_audio_stage_total += input_audio_start.elapsed();
+
             // 3. Update visualizer with audio parameters
+            let visualize_start = Instant::now();
             self.visualizer.update(&audio_params);
 
             // 4. Render visualization to grid
             let (width, height) = self.renderer.dimensions();
-            let mut grid = GridBuffer::new(width as usize, height as usize);
+            if grid.width() != width as usize || grid.height() != height as usize {
+                grid = GridBuffer::new(width as usize, height as usize);
+            } else {
+                grid.clear();
+            }
             self.visualizer.render(&mut grid);
+            visualize_stage_total += visualize_start.elapsed();
 
-            // 5. Apply post-processing effects
-            self.effect_pipeline.apply(&mut grid, &audio_params);
-
-            // 6. Apply app-wide braille quality controls for parity with image/video paths
+            // 5. Apply app-wide braille quality controls for parity with image/video paths
+            let post_start = Instant::now();
             self.live_postprocess
                 .apply(&mut grid, self.live_quality, self.live_color_mode);
 
@@ -2309,37 +2566,113 @@ impl Application {
 
             // 8. Add UI overlay (character set name and controls)
             self.add_ui_overlay(&mut grid);
+            post_stage_total += post_start.elapsed();
 
             // 9. Update terminal display
+            let render_start = Instant::now();
             self.renderer
-                .render(&grid)
+                .render_fast(&mut grid)
                 .context("Failed to render frame")?;
+            render_stage_total += render_start.elapsed();
 
             // Frame timing
             frame_count += 1;
             let frame_elapsed = frame_start.elapsed();
+            let pacing = frame_pacer.wait_for_next_frame(frame_start).await;
 
             // Track performance metrics
             total_frame_time += frame_elapsed;
             max_frame_time = max_frame_time.max(frame_elapsed);
             min_frame_time = min_frame_time.min(frame_elapsed);
+            requested_sleep_total += pacing.requested_sleep;
+            actual_sleep_total += pacing.actual_sleep;
+            overshoot_total += pacing.overshoot;
+            wall_frame_time_total += pacing.wall_frame_time;
 
             // FPS tracking and diagnostics (log every second)
             if fps_timer.elapsed() >= Duration::from_secs(1) {
                 let actual_fps = frame_count;
                 let avg_frame_time = total_frame_time / frame_count;
+                let avg_wall_frame_time = wall_frame_time_total / frame_count;
                 let target_frame_time = frame_duration;
+                let avg_input_ms =
+                    input_audio_stage_total.as_secs_f32() * 1000.0 / frame_count as f32;
+                let avg_archive_poll_ms =
+                    archive_poll_stage_total.as_secs_f32() * 1000.0 / frame_count as f32;
+                let avg_input_poll_ms =
+                    input_poll_stage_total.as_secs_f32() * 1000.0 / frame_count as f32;
+                let avg_audio_read_ms =
+                    audio_read_stage_total.as_secs_f32() * 1000.0 / frame_count as f32;
+                let avg_audio_process_ms =
+                    audio_process_stage_total.as_secs_f32() * 1000.0 / frame_count as f32;
+                let avg_audio_output_ms =
+                    audio_output_stage_total.as_secs_f32() * 1000.0 / frame_count as f32;
+                let avg_visualize_ms =
+                    visualize_stage_total.as_secs_f32() * 1000.0 / frame_count as f32;
+                let avg_post_ms = post_stage_total.as_secs_f32() * 1000.0 / frame_count as f32;
+                let avg_render_ms = render_stage_total.as_secs_f32() * 1000.0 / frame_count as f32;
+                let avg_requested_sleep_ms =
+                    requested_sleep_total.as_secs_f32() * 1000.0 / frame_count as f32;
+                let avg_actual_sleep_ms =
+                    actual_sleep_total.as_secs_f32() * 1000.0 / frame_count as f32;
+                let avg_overshoot_ms = overshoot_total.as_secs_f32() * 1000.0 / frame_count as f32;
+                let avg_stale_audio_buffers_dropped =
+                    stale_audio_buffers_dropped_total as f32 / frame_count as f32;
+                let avg_audio_buffer_age_ms = if audio_buffers_consumed > 0 {
+                    audio_buffer_age_total.as_secs_f32() * 1000.0 / audio_buffers_consumed as f32
+                } else {
+                    0.0
+                };
+                let max_audio_buffer_age_ms = max_audio_buffer_age.as_secs_f32() * 1000.0;
+
+                tracing::debug!(
+                    "Runtime timings: fps={}/{} input+audio={:.2}ms archive={:.2}ms input={:.2}ms audio_read={:.2}ms audio_process={:.2}ms audio_output={:.2}ms audio_drops={:.2} audio_age={:.2}/{:.2}ms viz={:.2}ms post={:.2}ms render={:.2}ms requested_sleep={:.2}ms actual_sleep={:.2}ms overshoot={:.2}ms wall={:.2}ms",
+                    actual_fps,
+                    self.target_fps,
+                    avg_input_ms,
+                    avg_archive_poll_ms,
+                    avg_input_poll_ms,
+                    avg_audio_read_ms,
+                    avg_audio_process_ms,
+                    avg_audio_output_ms,
+                    avg_stale_audio_buffers_dropped,
+                    avg_audio_buffer_age_ms,
+                    max_audio_buffer_age_ms,
+                    avg_visualize_ms,
+                    avg_post_ms,
+                    avg_render_ms,
+                    avg_requested_sleep_ms,
+                    avg_actual_sleep_ms,
+                    avg_overshoot_ms,
+                    avg_wall_frame_time.as_secs_f32() * 1000.0,
+                );
 
                 // Log performance metrics (only warnings, not regular debug)
                 if actual_fps < self.target_fps * 9 / 10 {
                     // Warn if FPS drops below 90% of target
                     tracing::warn!(
-                        "Performance: FPS={} (target={}), avg={:.2}ms, min={:.2}ms, max={:.2}ms",
+                        "Performance: FPS={} (target={}), work_avg={:.2}ms, wall_avg={:.2}ms, min={:.2}ms, max={:.2}ms, input+audio={:.2}ms, archive={:.2}ms, input={:.2}ms, audio_read={:.2}ms, audio_process={:.2}ms, audio_output={:.2}ms, audio_drops={:.2}, audio_age={:.2}/{:.2}ms, viz={:.2}ms, post={:.2}ms, render={:.2}ms, requested_sleep={:.2}ms, actual_sleep={:.2}ms, overshoot={:.2}ms",
                         actual_fps,
                         self.target_fps,
                         avg_frame_time.as_secs_f32() * 1000.0,
+                        avg_wall_frame_time.as_secs_f32() * 1000.0,
                         min_frame_time.as_secs_f32() * 1000.0,
-                        max_frame_time.as_secs_f32() * 1000.0
+                        max_frame_time.as_secs_f32() * 1000.0,
+                        avg_input_ms,
+                        avg_archive_poll_ms,
+                        avg_input_poll_ms,
+                        avg_audio_read_ms,
+                        avg_audio_process_ms,
+                        avg_audio_output_ms,
+                        avg_stale_audio_buffers_dropped,
+                        avg_audio_buffer_age_ms,
+                        max_audio_buffer_age_ms,
+                        avg_visualize_ms,
+                        avg_post_ms,
+                        avg_render_ms,
+                        avg_requested_sleep_ms,
+                        avg_actual_sleep_ms,
+                        avg_overshoot_ms,
                     );
                 }
                 // Disabled regular performance debug logging for production
@@ -2369,18 +2702,23 @@ impl Application {
                 total_frame_time = Duration::ZERO;
                 max_frame_time = Duration::ZERO;
                 min_frame_time = Duration::from_secs(1);
-            }
-
-            // Sleep to maintain target FPS
-            if let Some(sleep_time) = frame_duration.checked_sub(frame_elapsed) {
-                tokio::time::sleep(sleep_time).await;
-            } else {
-                // Frame took longer than target - log at trace level
-                tracing::trace!(
-                    "Frame overrun: {:.2}ms (target: {:.2}ms)",
-                    frame_elapsed.as_secs_f32() * 1000.0,
-                    frame_duration.as_secs_f32() * 1000.0
-                );
+                input_audio_stage_total = Duration::ZERO;
+                archive_poll_stage_total = Duration::ZERO;
+                input_poll_stage_total = Duration::ZERO;
+                audio_read_stage_total = Duration::ZERO;
+                audio_process_stage_total = Duration::ZERO;
+                audio_output_stage_total = Duration::ZERO;
+                visualize_stage_total = Duration::ZERO;
+                post_stage_total = Duration::ZERO;
+                render_stage_total = Duration::ZERO;
+                requested_sleep_total = Duration::ZERO;
+                actual_sleep_total = Duration::ZERO;
+                overshoot_total = Duration::ZERO;
+                wall_frame_time_total = Duration::ZERO;
+                audio_buffers_consumed = 0;
+                stale_audio_buffers_dropped_total = 0;
+                audio_buffer_age_total = Duration::ZERO;
+                max_audio_buffer_age = Duration::ZERO;
             }
         }
 
@@ -2503,45 +2841,6 @@ impl Application {
     }
 }
 
-/// Initialize logging based on verbosity level
-fn init_logging(verbose: bool, debug: bool) -> Result<()> {
-    use tracing_subscriber::{fmt, EnvFilter};
-
-    // Determine log level - during visualization, suppress all logs to avoid
-    // corrupting the terminal display. Only show logs when not in TUI mode.
-    // Since we're always in TUI mode when visualizing, use "off" for normal runs.
-    let filter = if debug {
-        // Debug mode: log to file instead (future enhancement)
-        // For now, completely suppress to prevent terminal corruption
-        EnvFilter::new("off")
-    } else if verbose {
-        // Verbose mode: also suppress during TUI
-        EnvFilter::new("off")
-    } else {
-        // Normal mode: no logging during visualization
-        EnvFilter::new("off")
-    };
-
-    // Configure logging format
-    // IMPORTANT: Writing to stderr while in alternate screen mode causes
-    // visual corruption (artifacts, stacking frames). We disable logging
-    // entirely during visualization. For debugging, run with --test mode
-    // or redirect logs to a file.
-    fmt()
-        .with_env_filter(filter)
-        .with_target(false)
-        .with_thread_ids(false)
-        .with_file(false)
-        .with_line_number(false)
-        .with_timer(fmt::time::uptime())
-        .with_writer(std::io::sink)  // Write to sink (discard all output)
-        .with_ansi(false)
-        .with_level(true)
-        .init();
-
-    Ok(())
-}
-
 /// Setup Ctrl+C handler for graceful shutdown
 fn setup_shutdown_handler() -> Result<()> {
     ctrlc::set_handler(move || {
@@ -2656,52 +2955,66 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     // Initialize logging
-    init_logging(args.verbose, args.debug)?;
+    let reporter = init_logging(
+        args.verbose,
+        args.debug,
+        args.report,
+        args.report_file.as_deref(),
+    )?;
+
+    let mode = if args.list_devices {
+        "list-devices"
+    } else if args.test {
+        "test"
+    } else if args.video.is_some() {
+        "video"
+    } else {
+        "live"
+    };
+    reporter.log_session_start(mode, &args.config, args.video.as_deref());
 
     // Print version info
     if args.verbose {
         print_version_info();
     }
 
-    // List devices if requested
-    if args.list_devices {
+    let result: Result<()> = if args.list_devices {
         list_audio_devices()?;
-        return Ok(());
-    }
-
-    // Load configuration
-    let config = AppConfig::load_or_default(&args.config)?;
-
-    // Play video if requested
-    if let Some(video_path) = &args.video {
-        let prepared = video::prepare_video_input(video_path)
-            .with_context(|| format!("Failed to prepare video input: {video_path}"))?;
-        if let Some(label) = &prepared.display_label {
-            tracing::info!("{label}");
-        }
-        return video::run_video_playback_with_config(&prepared.playback_target, &config.rendering);
-    }
-
-    // Setup shutdown handler
-    setup_shutdown_handler()?;
-
-    // Create application
-    let app = Application::new(config, &args)?;
-
-    // Run application
-    if args.test {
-        app.run_test_mode()?;
+        Ok(())
     } else {
-        app.run().await?;
+        let config = AppConfig::load_or_default(&args.config)?;
+
+        if let Some(video_path) = &args.video {
+            let prepared = video::prepare_video_input(video_path)
+                .with_context(|| format!("Failed to prepare video input: {video_path}"))?;
+            if let Some(label) = &prepared.display_label {
+                tracing::info!("{label}");
+            }
+            video::run_video_playback_with_config(&prepared.playback_target, &config.rendering)
+        } else {
+            setup_shutdown_handler()?;
+            let app = Application::new(config, &args)?;
+            if args.test {
+                app.run_test_mode()
+            } else {
+                app.run().await
+            }
+        }
+    };
+
+    match &result {
+        Ok(()) => reporter.log_session_finish("ok"),
+        Err(error) => reporter.log_session_failure(error),
     }
 
-    Ok(())
+    result
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        is_channel_navigation_key, runtime_audio_flags, should_process_key_event, AudioRuntimeFlags,
+        is_channel_navigation_key, runtime_audio_flags, should_process_key_event,
+        should_start_archive_prefetch, AudioRuntimeFlags, FramePacer,
     };
     use super::{ArchiveChannelKind, ArchiveRequestContext, VisualizerMode};
     use crossterm::event::{KeyCode, KeyEventKind};
@@ -2832,6 +3145,45 @@ mod tests {
         assert!(!ArchiveRequestContext::ManualHotkey.requires_active_channel_match());
         assert!(ArchiveRequestContext::RotationMode.requires_active_channel_match());
         assert!(ArchiveRequestContext::PlaybackEnded.requires_active_channel_match());
+    }
+
+    #[test]
+    fn archive_prefetch_starts_only_when_not_already_ready_or_loading() {
+        assert!(should_start_archive_prefetch(
+            ArchiveChannelKind::Tv,
+            false,
+            None,
+            false,
+        ));
+        assert!(!should_start_archive_prefetch(
+            ArchiveChannelKind::Tv,
+            true,
+            None,
+            false,
+        ));
+        assert!(!should_start_archive_prefetch(
+            ArchiveChannelKind::Tv,
+            false,
+            Some(ArchiveChannelKind::Tv),
+            false,
+        ));
+        assert!(!should_start_archive_prefetch(
+            ArchiveChannelKind::Tv,
+            false,
+            None,
+            true,
+        ));
+    }
+
+    #[test]
+    fn frame_pacer_deadline_stays_in_the_future_after_advance() {
+        let frame_duration = Duration::from_millis(16);
+        let mut pacer = FramePacer::new(frame_duration);
+        let now = pacer.next_deadline + Duration::from_millis(20);
+
+        pacer.advance_deadline(now);
+
+        assert!(pacer.next_deadline > now);
     }
 
     #[test]

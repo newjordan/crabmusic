@@ -1,30 +1,19 @@
 # 🦀 CrabMusic
 
-CrabMusic is an experimental project into the boundaries of ASCII control, utilizing a Rust framework.
-
-Made with love by Frosty40. Build bridges not bombs.
+CrabMusic turns audio, images, videos, old TV, and 3D scenes into terminal art.
 
 ## ✨ Current Capabilities
 
-- 🟣 Unicode Braille engine for ultra‑fine ASCII art (2×4 dots per cell)
-- 🌈 Color modes: Off → Grayscale → Full RGB
-- � Multiple character sets for audio visuals (7 styles)
-- �🖼️ Image viewer: `--image <file>` or drag/paste with `--image-drop`
-- 🔁 Two‑image morph (crossfade, ping‑pong loop): `--morph-a <A>` `--morph-b <B>` `[--morph-duration ms]`
-- 🎛️ Standard quality bank across the app: `F1` color, `F2` preset, `F3` dither, `F4` gamma, `F5` contrast, `F6` exposure, `F7` reset
-- �️ Live image controls: `[ / ]` speed, `r` reverse, `Space` pause, `F1-7` quality bank (plus legacy `p/d/g/v/z/0/c` aliases), `l` letterbox, `+/-` threshold, `a` auto‑threshold, `x` maximize, `s` save
-- 💾 Save Braille art to text: writes `<image_stem>.braille.txt`
-- 📐 Smart fit: letterbox ON/OFF, live terminal resize handling, optional canvas maximize `x`
-- 🎞️ Video playback: `--video <file-or-youtube-url>` (feature‑gated; YouTube uses `yt-dlp`)
-- 📼 Random Internet Archive tune-in: press `U` in-app for vintage TV/weird old media; archive channels auto-play the next show when one ends
-- 📹 Webcam capture: live camera feed with smart resolution governor for optimal FPS (feature-gated)
-- 🎵 Audio visualization: microphone and Windows WASAPI loopback capture
-- 🔊 Audio output (hear while visualizing) and device selection for input/output
-- ⚙️ Configurable via YAML with hot‑reload
-- ⚡ High‑performance Rust renderer with differential updates
-- 🖥️ Cross‑platform (Windows, macOS, Linux)
-- 🧊 3D OBJ Viewer: true edge/vertex wireframe with hidden-line removal, simple solid shading, zoom/focus, and multi‑axis rotation controls
-- 🌌 Retro 3D channels: Primitives, Grid Tunnel, Gravity Well, and Starfield with beat-reactive pulse, roll, orbit, plunge, warp, and trail effects
+- 🖼️ Turn images into Braille art in the terminal
+- 🔁 Morph between two images
+- 🎮 Pause, reverse, speed up, tweak, resize, and save image mode live
+- 🎞️ Play local videos or YouTube in terminal art
+- 📼 Press `U` to jump through random Internet Archive channels and let the next show roll automatically
+- 📹 Use your webcam as a live terminal feed
+- 🎵 Visualize your mic or your system audio
+- 🔊 Hear the audio while you watch
+- 🧊 Load `.obj` files and spin, zoom, and inspect them
+- 🌌 Fly through Primitives, Grid Tunnel, Gravity Well, and Starfield and steer them live
 
 
 ## 🎨 Gallery
@@ -382,17 +371,12 @@ Built with these excellent Rust crates:
 
 **Version**: 0.1.0
 
-**Implemented:**
-- ✅ Unicode Braille renderer with full RGB color mode (Off → Grayscale → Full)
-- ✅ Image viewer: `--image`, drag/paste with `--image-drop`
-- ✅ Two-image morph (crossfade, ping‑pong): `--morph-a`, `--morph-b`, optional `--morph-duration`
-- ✅ Live controls: `[ / ]` speed, `r` reverse, `Space` pause, shared `F1-F7` quality bank, image/video legacy aliases, `l` letterbox, `+/-` threshold, `a` auto-threshold, `x` maximize, `s` save
-- ✅ Live terminal-resize handling
-- ✅ Save Braille art to `<stem>.braille.txt`
-- ✅ Audio capture (mic + Windows WASAPI loopback) and audio output
-- ✅ Differential terminal updates + YAML config with hot‑reload
-- ✅ Video playback entrypoint (`--video`, feature‑gated)
-- ✅ 3D OBJ Viewer channel: real mesh wireframe (hidden‑line removal), simple solid shading, zoom/focus, multi‑axis rotation; place .obj files in `models/` and use Up/Down to switch. Keys: W mode, A/D yaw, J/K pitch, ,/. roll, Z/X zoom, F focus, G/H line, T/Y dot, R auto‑rotate.
+**Best stuff right now:**
+- ✅ Open images, videos, YouTube links, webcam feed, mic input, or system audio
+- ✅ Morph images, save text art, and tweak the look live while it runs
+- ✅ Channel-surf random old TV and weird archive finds
+- ✅ Load `.obj` files and control them in the terminal
+- ✅ Jump into retro 3D scenes and steer them live
 
 
 **Next up (roadmap):**

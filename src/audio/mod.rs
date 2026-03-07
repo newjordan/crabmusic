@@ -78,6 +78,14 @@ pub trait AudioCaptureDevice {
     /// Returns None if no samples are available
     fn read_samples(&mut self) -> Option<AudioBuffer>;
 
+    /// Read the newest captured audio samples, dropping older queued buffers if needed.
+    ///
+    /// Returns the newest available buffer plus the number of older queued buffers that were
+    /// discarded in order to jump to the freshest audio after a stall or background pause.
+    fn read_latest_samples(&mut self) -> (Option<AudioBuffer>, usize) {
+        (self.read_samples(), 0)
+    }
+
     /// Get the current audio configuration
     fn get_config(&self) -> AudioConfig;
 }

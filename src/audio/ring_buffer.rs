@@ -68,9 +68,12 @@ impl AudioRingBuffer {
     /// * `buffer` - AudioBuffer to push
     ///
     /// # Returns
-    /// `true` if buffer was pushed, `false` if ring was full (oldest overwritten)
+    /// `true` if the buffer was pushed, `false` if the mutex was busy or the push otherwise
+    /// failed. If the ring is full and the lock is acquired, the oldest buffer is dropped first.
     pub fn push(&self, buffer: AudioBuffer) -> bool {
-        let mut ring = self.inner.lock().unwrap();
+        let Ok(mut ring) = self.inner.try_lock() else {
+            return false;
+        };
         if ring.is_full() {
             // Drop oldest buffer to make room
             let _ = ring.try_pop();
@@ -80,13 +83,37 @@ impl AudioRingBuffer {
 
     /// Pop an audio buffer from the ring (non-blocking)
     ///
-    /// Returns None if no buffers are available.
+    /// Returns None if no buffers are available or the ring is currently locked elsewhere.
     ///
     /// # Returns
     /// `Some(AudioBuffer)` if data available, `None` if ring is empty
     pub fn pop(&self) -> Option<AudioBuffer> {
-        let mut ring = self.inner.lock().unwrap();
+        let Ok(mut ring) = self.inner.try_lock() else {
+            return None;
+        };
         ring.try_pop()
+    }
+
+    /// Pop the newest available audio buffer, discarding any older queued buffers.
+    ///
+    /// Returns the newest buffer plus the number of older buffers discarded. If the ring is empty
+    /// or currently locked elsewhere, returns `(None, 0)`.
+    pub fn pop_latest(&self) -> (Option<AudioBuffer>, usize) {
+        let Ok(mut ring) = self.inner.try_lock() else {
+            return (None, 0);
+        };
+
+        let Some(mut latest) = ring.try_pop() else {
+            return (None, 0);
+        };
+
+        let mut dropped = 0;
+        while let Some(buffer) = ring.try_pop() {
+            latest = buffer;
+            dropped += 1;
+        }
+
+        (Some(latest), dropped)
     }
 
     /// Check if the ring buffer is empty
@@ -170,6 +197,35 @@ mod tests {
         // First buffer should be gone, second should be first
         let first = ring.pop().unwrap();
         assert_eq!(first.samples[0], 1.0); // Second buffer (index 1)
+    }
+
+    #[test]
+    fn test_pop_latest_returns_newest_and_discards_older_buffers() {
+        let ring = AudioRingBuffer::new(5);
+
+        for i in 0..4 {
+            let buffer = AudioBuffer::with_samples(vec![i as f32], 44100, 1);
+            assert!(ring.push(buffer));
+        }
+
+        let (latest, dropped) = ring.pop_latest();
+        let latest = latest.expect("expected newest buffer");
+
+        assert_eq!(latest.samples[0], 3.0);
+        assert_eq!(dropped, 3);
+        assert!(ring.is_empty());
+    }
+
+    #[test]
+    fn test_non_blocking_access_returns_none_or_false_when_mutex_busy() {
+        let ring = AudioRingBuffer::new(2);
+        let _guard = ring.inner.lock().unwrap();
+
+        assert!(ring.pop().is_none());
+        assert!(!ring.push(AudioBuffer::with_samples(vec![1.0], 44100, 1)));
+        let (latest, dropped) = ring.pop_latest();
+        assert!(latest.is_none());
+        assert_eq!(dropped, 0);
     }
 
     #[test]

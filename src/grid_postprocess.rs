@@ -13,8 +13,23 @@ const BRAILLE_DOT_MAP: [(usize, usize); 8] = [
     (1, 3),
 ];
 
-#[derive(Default)]
-pub struct GridBraillePostProcessor;
+pub struct GridBraillePostProcessor {
+    dot_luma: Vec<u8>,
+    toned: Vec<u8>,
+    source_cells: Vec<GridCell>,
+    braille: BrailleGrid,
+}
+
+impl Default for GridBraillePostProcessor {
+    fn default() -> Self {
+        Self {
+            dot_luma: Vec::new(),
+            toned: Vec::new(),
+            source_cells: Vec::new(),
+            braille: BrailleGrid::new(0, 0),
+        }
+    }
+}
 
 impl GridBraillePostProcessor {
     pub fn apply(
@@ -29,41 +44,49 @@ impl GridBraillePostProcessor {
 
         let width = grid.width();
         let height = grid.height();
+        let cell_count = width * height;
         let dot_width = width * 2;
         let dot_height = height * 4;
-        let mut dot_luma = vec![0u8; dot_width * dot_height];
-        let mut source_cells = Vec::with_capacity(width * height);
-        let mut protected_cells = vec![None; width * height];
+        let dot_count = dot_width * dot_height;
+
+        self.dot_luma.resize(dot_count, 0);
+        self.dot_luma.fill(0);
+        self.toned.resize(dot_count, 0);
+        self.source_cells.resize(cell_count, GridCell::empty());
+        if self.braille.width() != width || self.braille.height() != height {
+            self.braille = BrailleGrid::new(width, height);
+        }
 
         for y in 0..height {
             for x in 0..width {
+                let idx = y * width + x;
                 let cell = *grid.get_cell(x, y);
-                source_cells.push(cell);
+                self.source_cells[idx] = cell;
                 if should_preserve_cell(cell.character) {
-                    protected_cells[y * width + x] = Some(cell);
                     continue;
                 }
-                write_cell_to_dots(&mut dot_luma, dot_width, x, y, cell);
+                write_cell_to_dots(&mut self.dot_luma, dot_width, x, y, cell);
             }
         }
 
-        let toned = braille_quality::apply_tone_curve(&dot_luma, quality);
-        let threshold = braille_quality::otsu_threshold(&toned);
-        let mut braille = BrailleGrid::new(width, height);
+        braille_quality::apply_tone_curve_into(&self.dot_luma, quality, &mut self.toned);
+        let threshold = braille_quality::otsu_threshold(&self.toned);
         braille_quality::render_dot_luma_to_braille(
-            &toned,
+            &self.toned,
             dot_width,
             dot_height,
             threshold,
             quality.dither_mode,
-            &mut braille,
+            &mut self.braille,
         );
 
         grid.clear();
         for y in 0..height {
             for x in 0..width {
                 let idx = y * width + x;
-                if let Some(cell) = protected_cells[idx] {
+                let source = self.source_cells[idx];
+                if should_preserve_cell(source.character) {
+                    let cell = source;
                     if let Some(color) = cell.foreground_color {
                         grid.set_cell_with_color(x, y, cell.character, color);
                     } else {
@@ -72,13 +95,12 @@ impl GridBraillePostProcessor {
                     continue;
                 }
 
-                let ch = braille.get_char(x, y);
+                let ch = self.braille.get_char(x, y);
                 if ch == ' ' || ch == '⠀' {
                     continue;
                 }
 
-                let color =
-                    resolve_output_color(color_mode, source_cells[idx], &toned, dot_width, x, y);
+                let color = resolve_output_color(color_mode, source, &self.toned, dot_width, x, y);
                 if let Some(color) = color {
                     grid.set_cell_with_color(x, y, ch, color);
                 } else {
@@ -247,7 +269,7 @@ mod tests {
         for x in 0..grid.width() {
             grid.set_cell_with_color(x, 3, '█', Color::new(255, 128, 32));
         }
-        let mut processor = GridBraillePostProcessor;
+        let mut processor = GridBraillePostProcessor::default();
         processor.apply(
             &mut grid,
             BrailleQualitySettings::default(),
@@ -257,5 +279,34 @@ mod tests {
             .filter(|&x| grid.get_cell(x, 3).character != ' ')
             .count();
         assert!(visible > 4);
+    }
+
+    #[test]
+    fn postprocess_reuses_and_resizes_cached_buffers() {
+        let mut processor = GridBraillePostProcessor::default();
+
+        let mut small = GridBuffer::new(4, 2);
+        small.set_cell(0, 0, '█');
+        processor.apply(
+            &mut small,
+            BrailleQualitySettings::default(),
+            ColorMode::Off,
+        );
+        assert_eq!(processor.dot_luma.len(), 4 * 2 * 8);
+        assert_eq!(processor.source_cells.len(), 4 * 2);
+        assert_eq!(processor.braille.width(), 4);
+        assert_eq!(processor.braille.height(), 2);
+
+        let mut large = GridBuffer::new(6, 3);
+        large.set_cell(1, 1, '█');
+        processor.apply(
+            &mut large,
+            BrailleQualitySettings::default(),
+            ColorMode::Off,
+        );
+        assert_eq!(processor.dot_luma.len(), 6 * 3 * 8);
+        assert_eq!(processor.source_cells.len(), 6 * 3);
+        assert_eq!(processor.braille.width(), 6);
+        assert_eq!(processor.braille.height(), 3);
     }
 }

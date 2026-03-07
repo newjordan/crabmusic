@@ -262,15 +262,22 @@ pub fn otsu_threshold(luma: &[u8]) -> u8 {
 }
 
 pub fn apply_tone_curve(luma: &[u8], quality: BrailleQualitySettings) -> Vec<u8> {
-    luma.iter()
-        .map(|&v| {
-            let exposed = ((v as f32 / 255.0) * quality.exposure()).clamp(0.0, 1.0);
-            let centered = (exposed - 0.5) * quality.contrast() + 0.5;
-            let contrasted = centered.clamp(0.0, 1.0);
-            let gamma_corrected = contrasted.powf(1.0 / quality.gamma());
-            (gamma_corrected * 255.0).round().clamp(0.0, 255.0) as u8
-        })
-        .collect()
+    let mut adjusted = Vec::new();
+    apply_tone_curve_into(luma, quality, &mut adjusted);
+    adjusted
+}
+
+pub fn apply_tone_curve_into(luma: &[u8], quality: BrailleQualitySettings, output: &mut Vec<u8>) {
+    output.resize(luma.len(), 0);
+    for (dst, &value) in output.iter_mut().zip(luma.iter()) {
+        *dst = tone_curve_value(value, quality);
+    }
+}
+
+pub fn apply_tone_curve_in_place(luma: &mut [u8], quality: BrailleQualitySettings) {
+    for value in luma.iter_mut() {
+        *value = tone_curve_value(*value, quality);
+    }
 }
 
 pub fn preprocess_luma_to_dot_grid(
@@ -281,47 +288,84 @@ pub fn preprocess_luma_to_dot_grid(
     dot_h: usize,
     quality: BrailleQualitySettings,
 ) -> Vec<u8> {
-    sample_to_dot_grid(luma, img_w, img_h, dot_w, dot_h, quality)
+    let mut sampled = Vec::new();
+    preprocess_luma_to_dot_grid_into(luma, img_w, img_h, dot_w, dot_h, quality, &mut sampled);
+    sampled
 }
 
+pub fn preprocess_luma_to_dot_grid_into(
+    luma: &[u8],
+    img_w: usize,
+    img_h: usize,
+    dot_w: usize,
+    dot_h: usize,
+    quality: BrailleQualitySettings,
+    output: &mut Vec<u8>,
+) {
+    sample_to_dot_grid_into(luma, img_w, img_h, dot_w, dot_h, output);
+    apply_tone_curve_in_place(output, quality);
+}
+
+#[cfg(test)]
 pub fn blend_dot_luma_with_previous(
     current: &[u8],
     previous: Option<&[u8]>,
     amount: f32,
 ) -> Vec<u8> {
+    let mut blended = Vec::new();
+    blend_dot_luma_with_previous_into(current, previous, amount, &mut blended);
+    blended
+}
+
+pub fn blend_dot_luma_with_previous_into(
+    current: &[u8],
+    previous: Option<&[u8]>,
+    amount: f32,
+    output: &mut Vec<u8>,
+) {
+    output.resize(current.len(), 0);
     let blend = amount.clamp(0.0, 0.95);
     match previous {
-        Some(prev) if prev.len() == current.len() && blend > 0.0 => current
-            .iter()
-            .zip(prev.iter())
-            .map(|(&cur, &old)| {
+        Some(prev) if prev.len() == current.len() && blend > 0.0 => {
+            for ((dst, &cur), &old) in output.iter_mut().zip(current.iter()).zip(prev.iter()) {
                 let mixed = cur as f32 * (1.0 - blend) + old as f32 * blend;
-                mixed.round().clamp(0.0, 255.0) as u8
-            })
-            .collect(),
-        _ => current.to_vec(),
+                *dst = mixed.round().clamp(0.0, 255.0) as u8;
+            }
+        }
+        _ => output.copy_from_slice(current),
     }
 }
 
+#[cfg(test)]
 pub fn apply_temporal_hysteresis(
     current: &[u8],
     previous_mask: Option<&[u8]>,
     strength: u8,
 ) -> Vec<u8> {
+    let mut adjusted = Vec::new();
+    apply_temporal_hysteresis_into(current, previous_mask, strength, &mut adjusted);
+    adjusted
+}
+
+pub fn apply_temporal_hysteresis_into(
+    current: &[u8],
+    previous_mask: Option<&[u8]>,
+    strength: u8,
+    output: &mut Vec<u8>,
+) {
+    output.resize(current.len(), 0);
     match previous_mask {
-        Some(previous) if previous.len() == current.len() && strength > 0 => current
-            .iter()
-            .zip(previous.iter())
-            .map(|(&cur, &prev)| {
+        Some(previous) if previous.len() == current.len() && strength > 0 => {
+            for ((dst, &cur), &prev) in output.iter_mut().zip(current.iter()).zip(previous.iter()) {
                 let bias = if prev > 0 {
                     strength as i16
                 } else {
                     -(strength as i16)
                 };
-                (cur as i16 + bias).clamp(0, 255) as u8
-            })
-            .collect(),
-        _ => current.to_vec(),
+                *dst = (cur as i16 + bias).clamp(0, 255) as u8;
+            }
+        }
+        _ => output.copy_from_slice(current),
     }
 }
 
@@ -369,36 +413,51 @@ pub fn blit_luma_to_braille_with_quality(
     );
 }
 
+#[cfg(test)]
 pub fn capture_braille_dot_mask(braille: &BrailleGrid) -> Vec<u8> {
-    let mut mask = vec![0; braille.dot_width() * braille.dot_height()];
-    for y in 0..braille.dot_height() {
-        for x in 0..braille.dot_width() {
-            if braille.is_dot_set(x, y) {
-                mask[y * braille.dot_width() + x] = 255;
-            }
-        }
-    }
+    let mut mask = Vec::new();
+    capture_braille_dot_mask_into(braille, &mut mask);
     mask
 }
 
-fn sample_to_dot_grid(
+pub fn capture_braille_dot_mask_into(braille: &BrailleGrid, output: &mut Vec<u8>) {
+    output.resize(braille.dot_width() * braille.dot_height(), 0);
+    output.fill(0);
+    for y in 0..braille.dot_height() {
+        for x in 0..braille.dot_width() {
+            if braille.is_dot_set(x, y) {
+                output[y * braille.dot_width() + x] = 255;
+            }
+        }
+    }
+}
+
+fn sample_to_dot_grid_into(
     luma: &[u8],
     img_w: usize,
     img_h: usize,
     dot_w: usize,
     dot_h: usize,
-    quality: BrailleQualitySettings,
-) -> Vec<u8> {
-    let mut sampled = vec![0u8; dot_w * dot_h];
+    output: &mut Vec<u8>,
+) {
+    output.resize(dot_w * dot_h, 0);
     for dy in 0..dot_h {
         let sy = (dy * img_h) / dot_h;
         let sy_off = sy * img_w;
         for dx in 0..dot_w {
             let sx = (dx * img_w) / dot_w;
-            sampled[dy * dot_w + dx] = luma[sy_off + sx];
+            output[dy * dot_w + dx] = luma[sy_off + sx];
         }
     }
-    apply_tone_curve(&sampled, quality)
+}
+
+#[inline]
+fn tone_curve_value(value: u8, quality: BrailleQualitySettings) -> u8 {
+    let exposed = ((value as f32 / 255.0) * quality.exposure()).clamp(0.0, 1.0);
+    let centered = (exposed - 0.5) * quality.contrast() + 0.5;
+    let contrasted = centered.clamp(0.0, 1.0);
+    let gamma_corrected = contrasted.powf(1.0 / quality.gamma());
+    (gamma_corrected * 255.0).round().clamp(0.0, 255.0) as u8
 }
 
 #[inline]
@@ -544,6 +603,56 @@ mod tests {
         quality.exposure_preset = 3;
         let adjusted = apply_tone_curve(&[96], quality);
         assert!(adjusted[0] > 96);
+    }
+
+    #[test]
+    fn tone_curve_into_matches_allocating_version() {
+        let quality = BrailleQualitySettings::from_preset(QualityPreset::Motion);
+        let input = [0_u8, 32, 96, 160, 255];
+        let expected = apply_tone_curve(&input, quality);
+        let mut out = vec![9_u8; 2];
+        apply_tone_curve_into(&input, quality, &mut out);
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn temporal_buffer_helpers_match_allocating_versions() {
+        let current = [10_u8, 100, 200, 250];
+        let previous = [20_u8, 80, 180, 255];
+        let previous_mask = [0_u8, 255, 0, 255];
+
+        let expected_blend = blend_dot_luma_with_previous(&current, Some(&previous), 0.35);
+        let expected_hysteresis = apply_temporal_hysteresis(&current, Some(&previous_mask), 12);
+
+        let mut blended = vec![1_u8; 1];
+        let mut hysteresis = vec![2_u8; 1];
+        blend_dot_luma_with_previous_into(&current, Some(&previous), 0.35, &mut blended);
+        apply_temporal_hysteresis_into(&current, Some(&previous_mask), 12, &mut hysteresis);
+
+        assert_eq!(blended, expected_blend);
+        assert_eq!(hysteresis, expected_hysteresis);
+    }
+
+    #[test]
+    fn capture_mask_into_matches_allocating_version() {
+        let mut braille = BrailleGrid::new(1, 1);
+        braille.set_dot(0, 0);
+        braille.set_dot(1, 3);
+
+        let expected = capture_braille_dot_mask(&braille);
+        let mut actual = vec![7_u8; 2];
+        capture_braille_dot_mask_into(&braille, &mut actual);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn preprocess_into_matches_allocating_version() {
+        let quality = BrailleQualitySettings::from_preset(QualityPreset::Motion);
+        let luma = [0_u8, 32, 64, 96, 128, 160, 192, 255];
+        let expected = preprocess_luma_to_dot_grid(&luma, 2, 4, 2, 4, quality);
+        let mut actual = vec![3_u8; 1];
+        preprocess_luma_to_dot_grid_into(&luma, 2, 4, 2, 4, quality, &mut actual);
+        assert_eq!(actual, expected);
     }
 
     #[test]

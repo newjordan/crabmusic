@@ -12,7 +12,12 @@ use crate::runtime_controls::{
     apply_quality_action, quality_control_action_from_key, ColorMode, QualityControlAction,
 };
 use crate::visualization::braille::BrailleGrid;
-use crate::visualization::GridBuffer;
+use crate::visualization::{Color, GridBuffer};
+#[cfg(feature = "video")]
+use std::time::Duration;
+
+#[cfg(feature = "video")]
+const AUTO_THRESHOLD_REFRESH_INTERVAL: usize = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreparedVideoInput {
@@ -127,7 +132,7 @@ pub fn run_video_playback_with_config(_path: &str, _rendering: &RenderingConfig)
             }
         }
 
-        renderer.render(&grid)?;
+        renderer.render_fast(&mut grid)?;
         std::thread::sleep(Duration::from_millis(33)); // ~30 FPS
 
         // Run for ~3 seconds then exit
@@ -291,15 +296,7 @@ fn run_video_playback_internal(
         util::{format::pixel::Pixel, frame::video::Video},
     };
     use ffmpeg_next as ffmpeg;
-    use image::{imageops, ImageBuffer, RgbImage};
     use std::time::{Duration, Instant};
-
-    use crate::dsp::AudioParameters;
-    use crate::effects::EffectPipeline;
-    use crate::effects::{
-        bloom::BloomEffect, phosphor::PhosphorGlowEffect, scanline::ScanlineEffect,
-    };
-    use crate::visualization::Color;
 
     ffmpeg::init().context("ffmpeg init failed")?;
 
@@ -313,27 +310,29 @@ fn run_video_playback_internal(
     // Target dot resolution for thresholding (updated on resize)
     let mut target_dot_w = braille.dot_width();
     let mut target_dot_h = braille.dot_height();
+    let mut gray_luma = vec![0u8; target_dot_w * target_dot_h];
+    let mut toned_gray = vec![0u8; target_dot_w * target_dot_h];
 
     // Visual controls state
     let default_settings = VideoRenderSettings::from_rendering_config(rendering);
     let mut settings = default_settings;
 
-    // Effects pipeline (disabled by default; toggle with 'e')
-    let mut effect_pipeline = EffectPipeline::new();
-    effect_pipeline.add_effect(Box::new(BloomEffect::new(0.7, 2)));
-    effect_pipeline.add_effect(Box::new(ScanlineEffect::new(2)));
-    effect_pipeline.add_effect(Box::new(PhosphorGlowEffect::new(0.3, 0.7)));
-    effect_pipeline.set_enabled(false);
-    let mut last_effect: String = "Bloom".to_string();
-
-    // Dummy audio params for effects (video mode has no audio input)
-    let audio_params = AudioParameters::default();
     // HUD visibility
     let mut show_hud: bool = true;
+    let mut dot_luma = Vec::new();
+    let mut blended_dot_luma = Vec::new();
+    let mut hysteresis_dot_luma = Vec::new();
+    let mut previous_dot_luma = Vec::new();
+    let mut previous_dot_mask = Vec::new();
+    let mut cached_auto_threshold = settings.manual_threshold;
+    let mut auto_threshold_frames_since_refresh = AUTO_THRESHOLD_REFRESH_INTERVAL;
     // Default: loop playback forever until the user quits
     loop {
-        let mut previous_dot_luma: Option<Vec<u8>> = None;
-        let mut previous_dot_mask: Option<Vec<u8>> = None;
+        reset_temporal_history(
+            &mut previous_dot_luma,
+            &mut previous_dot_mask,
+            &mut auto_threshold_frames_since_refresh,
+        );
         // Open input and find the best video stream
         let mut ictx = format::input(&path).with_context(|| format!("open input {}", path))?;
         let input = ictx
@@ -348,6 +347,13 @@ fn run_video_playback_internal(
 
         let src_w = decoder.width();
         let src_h = decoder.height();
+        let (initial_fit_w, initial_fit_h) = compute_fit_dimensions(
+            src_w as usize,
+            src_h as usize,
+            target_dot_w,
+            target_dot_h,
+            settings.letterbox,
+        );
 
         // Convert to RGB24 for simple pipeline
         let mut scaler = Scaler::get(
@@ -355,10 +361,14 @@ fn run_video_playback_internal(
             src_w,
             src_h,
             Pixel::RGB24,
-            src_w,
-            src_h,
+            initial_fit_w as u32,
+            initial_fit_h as u32,
             Flags::BILINEAR,
         )?;
+        let mut frame = Video::empty();
+        let mut rgb_frame = Video::empty();
+        let mut scaler_output_w = initial_fit_w;
+        let mut scaler_output_h = initial_fit_h;
 
         // Determine playback FPS for pacing
         let afr = input.avg_frame_rate();
@@ -370,6 +380,13 @@ fn run_video_playback_internal(
         let frame_duration =
             Duration::from_secs_f64(if fps > 0.0 { 1.0 / fps } else { 1.0 / 24.0 });
         let mut last_frame_time = Instant::now();
+        let mut perf_timer = Instant::now();
+        let mut perf_frames = 0usize;
+        let mut decode_copy_total = Duration::ZERO;
+        let mut resize_total = Duration::ZERO;
+        let mut braille_total = Duration::ZERO;
+        let mut color_total = Duration::ZERO;
+        let mut render_total = Duration::ZERO;
 
         // Packet -> frame loop
         for (stream, packet) in ictx.packets() {
@@ -378,91 +395,105 @@ fn run_video_playback_internal(
             }
             decoder.send_packet(&packet)?;
 
-            let mut frame = Video::empty();
             while decoder.receive_frame(&mut frame).is_ok() {
-                // Convert to RGB24
-                let mut rgb_frame = Video::empty();
-                scaler.run(&frame, &mut rgb_frame)?;
-
-                let src_w = rgb_frame.width() as usize;
-                let src_h = rgb_frame.height() as usize;
-                let data = rgb_frame.data(0);
-                let stride = rgb_frame.stride(0) as usize;
-
-                // Construct an RgbImage row-by-row (account for stride)
-                let mut img: RgbImage = ImageBuffer::new(src_w as u32, src_h as u32);
-                for y in 0..src_h {
-                    let row = &data[y * stride..y * stride + src_w * 3];
-                    let dst = &mut img.as_mut()[y * src_w * 3..(y + 1) * src_w * 3];
-                    dst.copy_from_slice(row);
-                }
-
-                // Resize to dot grid with optional letterboxing
+                let decode_start = Instant::now();
                 let dst_w = target_dot_w;
                 let dst_h = target_dot_h;
-                let (fit_w, fit_h) = if settings.letterbox {
-                    let src_aspect = src_w as f32 / src_h as f32;
-                    let dst_aspect = dst_w as f32 / dst_h as f32;
-                    if src_aspect > dst_aspect {
-                        let w = dst_w as u32;
-                        let h = ((dst_w as f32 / src_aspect).round().max(1.0)) as u32;
-                        (w.min(dst_w as u32), h.min(dst_h as u32))
-                    } else {
-                        let h = dst_h as u32;
-                        let w = ((dst_h as f32 * src_aspect).round().max(1.0)) as u32;
-                        (w.min(dst_w as u32), h.min(dst_h as u32))
-                    }
-                } else {
-                    (dst_w as u32, dst_h as u32)
-                };
+                let (fit_w_us, fit_h_us) = compute_fit_dimensions(
+                    src_w as usize,
+                    src_h as usize,
+                    dst_w,
+                    dst_h,
+                    settings.letterbox,
+                );
 
-                let resized_fit =
-                    imageops::resize(&img, fit_w, fit_h, imageops::FilterType::Triangle);
-                let mut canvas: RgbImage = ImageBuffer::new(dst_w as u32, dst_h as u32);
-                // Center the fitted image in the canvas (black bars around)
-                let off_x = ((dst_w as i32 - fit_w as i32) / 2).max(0) as usize;
-                let off_y = ((dst_h as i32 - fit_h as i32) / 2).max(0) as usize;
-                {
-                    let src_bytes = resized_fit.as_raw();
-                    let dst_bytes = canvas.as_mut();
-                    let fit_w_us = fit_w as usize;
-                    let fit_h_us = fit_h as usize;
-                    for y in 0..fit_h_us {
-                        let src_row = &src_bytes[y * fit_w_us * 3..(y + 1) * fit_w_us * 3];
-                        let dst_start = ((off_y + y) * dst_w + off_x) * 3;
-                        let dst_row = &mut dst_bytes[dst_start..dst_start + fit_w_us * 3];
-                        dst_row.copy_from_slice(src_row);
-                    }
+                if fit_w_us != scaler_output_w || fit_h_us != scaler_output_h {
+                    scaler.cached(
+                        decoder.format(),
+                        src_w,
+                        src_h,
+                        Pixel::RGB24,
+                        fit_w_us as u32,
+                        fit_h_us as u32,
+                        Flags::BILINEAR,
+                    );
+                    rgb_frame = Video::empty();
+                    scaler_output_w = fit_w_us;
+                    scaler_output_h = fit_h_us;
                 }
 
-                // Convert to luma for Braille dot thresholding
-                let gray = image::DynamicImage::ImageRgb8(canvas.clone()).to_luma8();
+                // Convert to RGB24 directly at the fitted output size
+                scaler.run(&frame, &mut rgb_frame)?;
+                let data = rgb_frame.data(0);
+                let stride = rgb_frame.stride(0) as usize;
+                decode_copy_total += decode_start.elapsed();
 
+                let resize_start = Instant::now();
+                let fit_rgb = data;
+                let fit_rgb_stride = stride;
+
+                // Center the fitted image in the destination (black bars around if needed)
+                let off_x = ((dst_w as isize - fit_w_us as isize) / 2).max(0) as usize;
+                let off_y = ((dst_h as isize - fit_h_us as isize) / 2).max(0) as usize;
+
+                if fit_w_us == dst_w && fit_h_us == dst_h {
+                    rgb_to_luma_strided(
+                        fit_rgb,
+                        fit_w_us,
+                        fit_h_us,
+                        fit_rgb_stride,
+                        &mut gray_luma,
+                    );
+                } else {
+                    rgb_to_luma_letterboxed_strided(
+                        fit_rgb,
+                        fit_w_us,
+                        fit_h_us,
+                        fit_rgb_stride,
+                        &mut gray_luma,
+                        dst_w,
+                        dst_h,
+                        off_x,
+                        off_y,
+                    );
+                }
+                resize_total += resize_start.elapsed();
+
+                let braille_start = Instant::now();
                 // Blit to Braille dots using manual or auto (Otsu) threshold
                 let dot_w = braille.dot_width();
                 let dot_h = braille.dot_height();
-                let dot_luma = braille_quality::preprocess_luma_to_dot_grid(
-                    gray.as_raw(),
+                braille_quality::preprocess_luma_to_dot_grid_into(
+                    &gray_luma,
                     dst_w,
                     dst_h,
                     dot_w,
                     dot_h,
                     settings.quality,
+                    &mut dot_luma,
                 );
-                let blended_dot_luma = braille_quality::blend_dot_luma_with_previous(
+                braille_quality::blend_dot_luma_with_previous_into(
                     &dot_luma,
-                    previous_dot_luma.as_deref(),
+                    (!previous_dot_luma.is_empty()).then_some(previous_dot_luma.as_slice()),
                     settings.temporal_blend(),
+                    &mut blended_dot_luma,
                 );
                 let used_threshold: u8 = if settings.auto_threshold {
-                    otsu_threshold(&blended_dot_luma)
+                    if auto_threshold_frames_since_refresh >= AUTO_THRESHOLD_REFRESH_INTERVAL {
+                        cached_auto_threshold = otsu_threshold(&blended_dot_luma);
+                        auto_threshold_frames_since_refresh = 0;
+                    }
+                    auto_threshold_frames_since_refresh += 1;
+                    cached_auto_threshold
                 } else {
+                    auto_threshold_frames_since_refresh = AUTO_THRESHOLD_REFRESH_INTERVAL;
                     settings.manual_threshold
                 };
-                let hysteresis_dot_luma = braille_quality::apply_temporal_hysteresis(
+                braille_quality::apply_temporal_hysteresis_into(
                     &blended_dot_luma,
-                    previous_dot_mask.as_deref(),
+                    (!previous_dot_mask.is_empty()).then_some(previous_dot_mask.as_slice()),
                     settings.temporal_hysteresis(),
+                    &mut hysteresis_dot_luma,
                 );
                 braille_quality::render_dot_luma_to_braille(
                     &hysteresis_dot_luma,
@@ -472,80 +503,52 @@ fn run_video_playback_internal(
                     settings.quality.dither_mode,
                     &mut braille,
                 );
-                previous_dot_luma = Some(blended_dot_luma);
-                previous_dot_mask = Some(braille_quality::capture_braille_dot_mask(&braille));
+                std::mem::swap(&mut previous_dot_luma, &mut blended_dot_luma);
+                braille_quality::capture_braille_dot_mask_into(&braille, &mut previous_dot_mask);
+                braille_total += braille_start.elapsed();
 
                 // Write characters and colors according to color mode
-                let toned_gray = braille_quality::apply_tone_curve(gray.as_raw(), settings.quality);
-                let gray_bytes = toned_gray.as_slice();
-                let rgb_bytes = canvas.as_raw();
-                for cy in 0..h_cells {
-                    for cx in 0..w_cells {
-                        let ch = braille.get_char(cx, cy);
-                        match settings.color_mode {
-                            ColorMode::Off => {
+                let color_start = Instant::now();
+                match settings.color_mode {
+                    ColorMode::Off => {
+                        for cy in 0..h_cells {
+                            for cx in 0..w_cells {
+                                let ch = braille.get_char(cx, cy);
                                 grid.set_cell(cx, cy, ch);
-                            }
-                            ColorMode::Grayscale => {
-                                let x0 = cx * 2;
-                                let y0 = cy * 4;
-                                let mut acc: u32 = 0;
-                                let mut count: u32 = 0;
-                                for oy in 0..4 {
-                                    let y = y0 + oy;
-                                    if y >= dst_h {
-                                        break;
-                                    }
-                                    let row_off = y * dst_w;
-                                    for ox in 0..2 {
-                                        let x = x0 + ox;
-                                        if x >= dst_w {
-                                            break;
-                                        }
-                                        acc += gray_bytes[row_off + x] as u32;
-                                        count += 1;
-                                    }
-                                }
-                                let v = if count > 0 { (acc / count) as u8 } else { 0 };
-                                grid.set_cell_with_color(cx, cy, ch, Color::new(v, v, v));
-                            }
-                            ColorMode::Full => {
-                                let x0 = cx * 2;
-                                let y0 = cy * 4;
-                                let mut r_acc: u32 = 0;
-                                let mut g_acc: u32 = 0;
-                                let mut b_acc: u32 = 0;
-                                let mut count: u32 = 0;
-                                for oy in 0..4 {
-                                    let y = y0 + oy;
-                                    if y >= dst_h {
-                                        break;
-                                    }
-                                    let row_off = y * dst_w;
-                                    for ox in 0..2 {
-                                        let x = x0 + ox;
-                                        if x >= dst_w {
-                                            break;
-                                        }
-                                        let idx = (row_off + x) * 3;
-                                        r_acc += rgb_bytes[idx] as u32;
-                                        g_acc += rgb_bytes[idx + 1] as u32;
-                                        b_acc += rgb_bytes[idx + 2] as u32;
-                                        count += 1;
-                                    }
-                                }
-                                let r = if count > 0 { (r_acc / count) as u8 } else { 0 };
-                                let g = if count > 0 { (g_acc / count) as u8 } else { 0 };
-                                let b = if count > 0 { (b_acc / count) as u8 } else { 0 };
-                                grid.set_cell_with_color(cx, cy, ch, Color::new(r, g, b));
                             }
                         }
                     }
+                    ColorMode::Grayscale => {
+                        braille_quality::apply_tone_curve_into(
+                            &gray_luma,
+                            settings.quality,
+                            &mut toned_gray,
+                        );
+                        write_grayscale_braille_to_grid(
+                            &mut grid,
+                            &braille,
+                            &toned_gray,
+                            w_cells,
+                            h_cells,
+                            dst_w,
+                        );
+                    }
+                    ColorMode::Full => {
+                        write_full_color_braille_to_grid(
+                            &mut grid,
+                            &braille,
+                            fit_rgb,
+                            fit_w_us,
+                            fit_h_us,
+                            fit_rgb_stride,
+                            w_cells,
+                            h_cells,
+                            off_x,
+                            off_y,
+                        );
+                    }
                 }
-
-                // Apply effects then render
-                effect_pipeline.apply(&mut grid, &audio_params);
-                // Tiny HUD overlay after effects, before render
+                // Tiny HUD overlay before render
                 if show_hud {
                     draw_video_hud(
                         &mut grid,
@@ -559,12 +562,56 @@ fn run_video_playback_internal(
                         settings.quality,
                         settings.temporal_blend(),
                         settings.temporal_hysteresis(),
-                        &effect_pipeline,
-                        &last_effect,
                     );
                 }
+                color_total += color_start.elapsed();
 
-                renderer.render(&grid)?;
+                let render_start = Instant::now();
+                renderer.render_fast(&mut grid)?;
+                render_total += render_start.elapsed();
+
+                perf_frames += 1;
+                let perf_elapsed = perf_timer.elapsed();
+                if perf_elapsed >= Duration::from_secs(1) {
+                    let actual_fps = perf_frames as f64 / perf_elapsed.as_secs_f64();
+                    let avg_decode_ms = average_stage_ms(decode_copy_total, perf_frames);
+                    let avg_resize_ms = average_stage_ms(resize_total, perf_frames);
+                    let avg_braille_ms = average_stage_ms(braille_total, perf_frames);
+                    let avg_color_ms = average_stage_ms(color_total, perf_frames);
+                    let avg_render_ms = average_stage_ms(render_total, perf_frames);
+
+                    if actual_fps < fps * 0.9 {
+                        tracing::warn!(
+                            "Video playback slow: fps={:.1}/{:.1} decode={:.2}ms resize={:.2}ms braille={:.2}ms color={:.2}ms render={:.2}ms",
+                            actual_fps,
+                            fps,
+                            avg_decode_ms,
+                            avg_resize_ms,
+                            avg_braille_ms,
+                            avg_color_ms,
+                            avg_render_ms
+                        );
+                    } else {
+                        tracing::debug!(
+                            "Video playback timings: fps={:.1}/{:.1} decode={:.2}ms resize={:.2}ms braille={:.2}ms color={:.2}ms render={:.2}ms",
+                            actual_fps,
+                            fps,
+                            avg_decode_ms,
+                            avg_resize_ms,
+                            avg_braille_ms,
+                            avg_color_ms,
+                            avg_render_ms
+                        );
+                    }
+
+                    perf_timer = Instant::now();
+                    perf_frames = 0;
+                    decode_copy_total = Duration::ZERO;
+                    resize_total = Duration::ZERO;
+                    braille_total = Duration::ZERO;
+                    color_total = Duration::ZERO;
+                    render_total = Duration::ZERO;
+                }
 
                 // Input and resize handling
                 while event::poll(Duration::from_millis(0))? {
@@ -594,7 +641,11 @@ fn run_video_playback_internal(
                                     if k.kind == KeyEventKind::Press =>
                                 {
                                     settings.letterbox = !settings.letterbox;
-                                    previous_dot_luma = None;
+                                    reset_temporal_history(
+                                        &mut previous_dot_luma,
+                                        &mut previous_dot_mask,
+                                        &mut auto_threshold_frames_since_refresh,
+                                    );
                                 }
                                 // Toggle HUD (F1): only on press
                                 KeyCode::F(1) if k.kind == KeyEventKind::Press => {
@@ -602,61 +653,6 @@ fn run_video_playback_internal(
                                 }
 
                                 // Toggle effects pipeline: only on press
-                                KeyCode::Char('e') | KeyCode::Char('E')
-                                    if k.kind == KeyEventKind::Press =>
-                                {
-                                    effect_pipeline.set_enabled(!effect_pipeline.is_enabled());
-                                }
-                                // Toggle individual effects and set last_effect: only on press
-                                KeyCode::Char('b') | KeyCode::Char('B')
-                                    if k.kind == KeyEventKind::Press =>
-                                {
-                                    if let Some(eff) = effect_pipeline.get_effect_mut("Bloom") {
-                                        eff.set_enabled(!eff.is_enabled());
-                                        last_effect = "Bloom".to_string();
-                                    }
-                                }
-                                KeyCode::Char('s') | KeyCode::Char('S')
-                                    if k.kind == KeyEventKind::Press =>
-                                {
-                                    if let Some(eff) = effect_pipeline.get_effect_mut("Scanline") {
-                                        eff.set_enabled(!eff.is_enabled());
-                                        last_effect = "Scanline".to_string();
-                                    }
-                                }
-                                KeyCode::Char('h') | KeyCode::Char('H')
-                                    if k.kind == KeyEventKind::Press =>
-                                {
-                                    if let Some(eff) = effect_pipeline.get_effect_mut("Phosphor") {
-                                        eff.set_enabled(!eff.is_enabled());
-                                        last_effect = "Phosphor".to_string();
-                                    }
-                                }
-                                // Intensity adjust for last-toggled effect: respond to press and repeat
-                                KeyCode::Char('[') | KeyCode::Char('{')
-                                    if matches!(
-                                        k.kind,
-                                        KeyEventKind::Press | KeyEventKind::Repeat
-                                    ) =>
-                                {
-                                    if let Some(eff) = effect_pipeline.get_effect_mut(&last_effect)
-                                    {
-                                        let new_i = (eff.intensity() - 0.1).max(0.0);
-                                        eff.set_intensity(new_i);
-                                    }
-                                }
-                                KeyCode::Char(']') | KeyCode::Char('}')
-                                    if matches!(
-                                        k.kind,
-                                        KeyEventKind::Press | KeyEventKind::Repeat
-                                    ) =>
-                                {
-                                    if let Some(eff) = effect_pipeline.get_effect_mut(&last_effect)
-                                    {
-                                        let new_i = (eff.intensity() + 0.1).min(1.0);
-                                        eff.set_intensity(new_i);
-                                    }
-                                }
                                 // Image extraction threshold controls: respond to press and repeat
                                 KeyCode::Char('+') | KeyCode::Char('=')
                                     if matches!(
@@ -667,8 +663,11 @@ fn run_video_playback_internal(
                                     if settings.manual_threshold < 250 {
                                         settings.manual_threshold =
                                             settings.manual_threshold.saturating_add(5);
-                                        previous_dot_luma = None;
-                                        previous_dot_mask = None;
+                                        reset_temporal_history(
+                                            &mut previous_dot_luma,
+                                            &mut previous_dot_mask,
+                                            &mut auto_threshold_frames_since_refresh,
+                                        );
                                     }
                                 }
                                 KeyCode::Char('-') | KeyCode::Char('_')
@@ -680,8 +679,11 @@ fn run_video_playback_internal(
                                     if settings.manual_threshold > 5 {
                                         settings.manual_threshold =
                                             settings.manual_threshold.saturating_sub(5);
-                                        previous_dot_luma = None;
-                                        previous_dot_mask = None;
+                                        reset_temporal_history(
+                                            &mut previous_dot_luma,
+                                            &mut previous_dot_mask,
+                                            &mut auto_threshold_frames_since_refresh,
+                                        );
                                     }
                                 }
                                 // Auto threshold toggle: only on press
@@ -689,8 +691,11 @@ fn run_video_playback_internal(
                                     if k.kind == KeyEventKind::Press =>
                                 {
                                     settings.auto_threshold = !settings.auto_threshold;
-                                    previous_dot_luma = None;
-                                    previous_dot_mask = None;
+                                    reset_temporal_history(
+                                        &mut previous_dot_luma,
+                                        &mut previous_dot_mask,
+                                        &mut auto_threshold_frames_since_refresh,
+                                    );
                                 }
                                 code if k.kind == KeyEventKind::Press
                                     && quality_control_action_from_key(code).is_some() =>
@@ -699,62 +704,89 @@ fn run_video_playback_internal(
                                         quality_control_action_from_key(code).unwrap(),
                                         &default_settings,
                                     );
-                                    previous_dot_luma = None;
-                                    previous_dot_mask = None;
+                                    reset_temporal_history(
+                                        &mut previous_dot_luma,
+                                        &mut previous_dot_mask,
+                                        &mut auto_threshold_frames_since_refresh,
+                                    );
                                 }
                                 KeyCode::Char('d') | KeyCode::Char('D')
                                     if k.kind == KeyEventKind::Press =>
                                 {
                                     settings.quality.cycle_dither();
-                                    previous_dot_luma = None;
-                                    previous_dot_mask = None;
+                                    reset_temporal_history(
+                                        &mut previous_dot_luma,
+                                        &mut previous_dot_mask,
+                                        &mut auto_threshold_frames_since_refresh,
+                                    );
                                 }
                                 KeyCode::Char('p') | KeyCode::Char('P')
                                     if k.kind == KeyEventKind::Press =>
                                 {
                                     settings.quality.cycle_preset();
-                                    previous_dot_luma = None;
-                                    previous_dot_mask = None;
+                                    reset_temporal_history(
+                                        &mut previous_dot_luma,
+                                        &mut previous_dot_mask,
+                                        &mut auto_threshold_frames_since_refresh,
+                                    );
                                 }
                                 KeyCode::Char('g') | KeyCode::Char('G')
                                     if k.kind == KeyEventKind::Press =>
                                 {
                                     settings.quality.cycle_gamma();
-                                    previous_dot_luma = None;
-                                    previous_dot_mask = None;
+                                    reset_temporal_history(
+                                        &mut previous_dot_luma,
+                                        &mut previous_dot_mask,
+                                        &mut auto_threshold_frames_since_refresh,
+                                    );
                                 }
                                 KeyCode::Char('v') | KeyCode::Char('V')
                                     if k.kind == KeyEventKind::Press =>
                                 {
                                     settings.quality.cycle_contrast();
-                                    previous_dot_luma = None;
-                                    previous_dot_mask = None;
+                                    reset_temporal_history(
+                                        &mut previous_dot_luma,
+                                        &mut previous_dot_mask,
+                                        &mut auto_threshold_frames_since_refresh,
+                                    );
                                 }
                                 KeyCode::Char('z') | KeyCode::Char('Z')
                                     if k.kind == KeyEventKind::Press =>
                                 {
                                     settings.quality.cycle_exposure();
-                                    previous_dot_luma = None;
-                                    previous_dot_mask = None;
+                                    reset_temporal_history(
+                                        &mut previous_dot_luma,
+                                        &mut previous_dot_mask,
+                                        &mut auto_threshold_frames_since_refresh,
+                                    );
                                 }
                                 KeyCode::Char('t') | KeyCode::Char('T')
                                     if k.kind == KeyEventKind::Press =>
                                 {
                                     settings.cycle_temporal_blend();
-                                    previous_dot_luma = None;
-                                    previous_dot_mask = None;
+                                    reset_temporal_history(
+                                        &mut previous_dot_luma,
+                                        &mut previous_dot_mask,
+                                        &mut auto_threshold_frames_since_refresh,
+                                    );
                                 }
                                 KeyCode::Char('y') | KeyCode::Char('Y')
                                     if k.kind == KeyEventKind::Press =>
                                 {
                                     settings.cycle_temporal_hysteresis();
-                                    previous_dot_luma = None;
-                                    previous_dot_mask = None;
+                                    reset_temporal_history(
+                                        &mut previous_dot_luma,
+                                        &mut previous_dot_mask,
+                                        &mut auto_threshold_frames_since_refresh,
+                                    );
                                 }
                                 KeyCode::Char('0') if k.kind == KeyEventKind::Press => {
                                     settings.reset_quality_controls(&default_settings);
-                                    previous_dot_luma = None;
-                                    previous_dot_mask = None;
+                                    reset_temporal_history(
+                                        &mut previous_dot_luma,
+                                        &mut previous_dot_mask,
+                                        &mut auto_threshold_frames_since_refresh,
+                                    );
                                 }
                                 _ => {}
                             }
@@ -768,8 +800,13 @@ fn run_video_playback_internal(
                             target_dot_w = braille.dot_width();
 
                             target_dot_h = braille.dot_height();
-                            previous_dot_luma = None;
-                            previous_dot_mask = None;
+                            gray_luma.resize(target_dot_w * target_dot_h, 0);
+                            toned_gray.resize(target_dot_w * target_dot_h, 0);
+                            reset_temporal_history(
+                                &mut previous_dot_luma,
+                                &mut previous_dot_mask,
+                                &mut auto_threshold_frames_since_refresh,
+                            );
                         }
                         _ => {}
                     }
@@ -795,6 +832,185 @@ fn run_video_playback_internal(
         }
 
         // Loop repeats: reopen the input and continue playback
+    }
+}
+
+#[cfg(feature = "video")]
+fn reset_temporal_history(
+    previous_dot_luma: &mut Vec<u8>,
+    previous_dot_mask: &mut Vec<u8>,
+    auto_threshold_frames_since_refresh: &mut usize,
+) {
+    previous_dot_luma.clear();
+    previous_dot_mask.clear();
+    *auto_threshold_frames_since_refresh = AUTO_THRESHOLD_REFRESH_INTERVAL;
+}
+
+#[cfg(feature = "video")]
+fn rgb_to_luma_strided(
+    rgb: &[u8],
+    src_w: usize,
+    src_h: usize,
+    src_stride: usize,
+    gray: &mut Vec<u8>,
+) {
+    gray.resize(src_w * src_h, 0);
+    for y in 0..src_h {
+        let src_row = &rgb[y * src_stride..y * src_stride + src_w * 3];
+        let dst_row = &mut gray[y * src_w..(y + 1) * src_w];
+        for (dst, chunk) in dst_row.iter_mut().zip(src_row.chunks_exact(3)) {
+            *dst = rgb_triplet_to_luma(chunk[0], chunk[1], chunk[2]);
+        }
+    }
+}
+
+#[cfg(feature = "video")]
+fn compute_fit_dimensions(
+    src_w: usize,
+    src_h: usize,
+    dst_w: usize,
+    dst_h: usize,
+    letterbox: bool,
+) -> (usize, usize) {
+    if !letterbox {
+        return (dst_w.max(1), dst_h.max(1));
+    }
+
+    let src_aspect = src_w as f32 / src_h.max(1) as f32;
+    let dst_aspect = dst_w as f32 / dst_h.max(1) as f32;
+    if src_aspect > dst_aspect {
+        let fit_w = dst_w.max(1);
+        let fit_h = ((dst_w as f32 / src_aspect).round().max(1.0) as usize).min(dst_h.max(1));
+        (fit_w, fit_h)
+    } else {
+        let fit_h = dst_h.max(1);
+        let fit_w = ((dst_h as f32 * src_aspect).round().max(1.0) as usize).min(dst_w.max(1));
+        (fit_w, fit_h)
+    }
+}
+
+#[cfg(feature = "video")]
+fn rgb_to_luma_letterboxed_strided(
+    rgb: &[u8],
+    src_w: usize,
+    src_h: usize,
+    src_stride: usize,
+    gray: &mut Vec<u8>,
+    dst_w: usize,
+    dst_h: usize,
+    off_x: usize,
+    off_y: usize,
+) {
+    gray.resize(dst_w * dst_h, 0);
+    gray.fill(0);
+
+    for y in 0..src_h {
+        let src_row = &rgb[y * src_stride..y * src_stride + src_w * 3];
+        let dst_row = &mut gray[(off_y + y) * dst_w + off_x..(off_y + y) * dst_w + off_x + src_w];
+        for (dst, chunk) in dst_row.iter_mut().zip(src_row.chunks_exact(3)) {
+            *dst = rgb_triplet_to_luma(chunk[0], chunk[1], chunk[2]);
+        }
+    }
+}
+
+#[cfg(feature = "video")]
+fn write_grayscale_braille_to_grid(
+    grid: &mut GridBuffer,
+    braille: &BrailleGrid,
+    toned_gray: &[u8],
+    w_cells: usize,
+    h_cells: usize,
+    dst_w: usize,
+) {
+    for cy in 0..h_cells {
+        let row0 = (cy * 4) * dst_w;
+        let row1 = row0 + dst_w;
+        let row2 = row1 + dst_w;
+        let row3 = row2 + dst_w;
+        for cx in 0..w_cells {
+            let ch = braille.get_char(cx, cy);
+            let x0 = cx * 2;
+            let acc = toned_gray[row0 + x0] as u32
+                + toned_gray[row0 + x0 + 1] as u32
+                + toned_gray[row1 + x0] as u32
+                + toned_gray[row1 + x0 + 1] as u32
+                + toned_gray[row2 + x0] as u32
+                + toned_gray[row2 + x0 + 1] as u32
+                + toned_gray[row3 + x0] as u32
+                + toned_gray[row3 + x0 + 1] as u32;
+            let v = (acc / 8) as u8;
+            grid.set_cell_with_color(cx, cy, ch, Color::new(v, v, v));
+        }
+    }
+}
+
+#[cfg(feature = "video")]
+fn write_full_color_braille_to_grid(
+    grid: &mut GridBuffer,
+    braille: &BrailleGrid,
+    src_rgb: &[u8],
+    src_w: usize,
+    src_h: usize,
+    src_stride: usize,
+    w_cells: usize,
+    h_cells: usize,
+    off_x: usize,
+    off_y: usize,
+) {
+    let src_x_end = off_x + src_w;
+    let src_y_end = off_y + src_h;
+    for cy in 0..h_cells {
+        let dst_y0 = cy * 4;
+        for cx in 0..w_cells {
+            let ch = braille.get_char(cx, cy);
+            let dst_x0 = cx * 2;
+            let mut r_acc: u32 = 0;
+            let mut g_acc: u32 = 0;
+            let mut b_acc: u32 = 0;
+            for oy in 0..4 {
+                let dst_y = dst_y0 + oy;
+                if dst_y < off_y || dst_y >= src_y_end {
+                    continue;
+                }
+                let src_y = dst_y - off_y;
+                let row_off = src_y * src_stride;
+                for ox in 0..2 {
+                    let dst_x = dst_x0 + ox;
+                    if dst_x < off_x || dst_x >= src_x_end {
+                        continue;
+                    }
+                    let src_x = dst_x - off_x;
+                    let idx = row_off + src_x * 3;
+                    r_acc += src_rgb[idx] as u32;
+                    g_acc += src_rgb[idx + 1] as u32;
+                    b_acc += src_rgb[idx + 2] as u32;
+                }
+            }
+            grid.set_cell_with_color(
+                cx,
+                cy,
+                ch,
+                Color::new((r_acc / 8) as u8, (g_acc / 8) as u8, (b_acc / 8) as u8),
+            );
+        }
+    }
+}
+
+#[cfg(feature = "video")]
+#[inline]
+fn rgb_triplet_to_luma(r: u8, g: u8, b: u8) -> u8 {
+    let r = r as u32;
+    let g = g as u32;
+    let b = b as u32;
+    ((r * 77 + g * 150 + b * 29) >> 8) as u8
+}
+
+#[cfg(feature = "video")]
+fn average_stage_ms(total: Duration, frames: usize) -> f32 {
+    if frames == 0 {
+        0.0
+    } else {
+        total.as_secs_f32() * 1000.0 / frames as f32
     }
 }
 
@@ -824,8 +1040,6 @@ fn draw_video_hud(
     quality: BrailleQualitySettings,
     temporal_blend: f32,
     temporal_hysteresis: u8,
-    pipeline: &crate::effects::EffectPipeline,
-    last_effect: &str,
 ) {
     use std::path::Path;
     let name = Path::new(path)
@@ -837,18 +1051,9 @@ fn draw_video_hud(
         ColorMode::Grayscale => "GRAY",
         ColorMode::Full => "FULL",
     };
-    let eff = if pipeline.is_enabled() {
-        if let Some(e) = pipeline.get_effect(last_effect) {
-            format!("ON {} {:.1}", last_effect, e.intensity())
-        } else {
-            "ON".to_string()
-        }
-    } else {
-        "OFF".to_string()
-    };
     let navigation_hint = playback_navigation_hint(allow_app_navigation, show_archive_retune_hint);
     let status = format!(
-        "{}{} | +/- thr={} | a auto={} | F1-7 quality | p {} | d {} | g {:.2} | v {:.2} | z {:.2} | t {:.2} | y {} | l letterbox={} | c color={} | fx={}",
+        "{}{} | +/- thr={} | a auto={} | F1-7 quality | p {} | d {} | g {:.2} | v {:.2} | z {:.2} | t {:.2} | y {} | l letterbox={} | c color={}",
         name,
         navigation_hint,
         used_threshold,
@@ -861,8 +1066,7 @@ fn draw_video_hud(
         temporal_blend,
         temporal_hysteresis,
         if letterbox { "ON" } else { "OFF" },
-        color_str,
-        eff
+        color_str
     );
     draw_centered(grid, &status);
 }
@@ -983,5 +1187,52 @@ mod tests {
     fn playback_navigation_hint_is_hidden_for_standalone_playback() {
         assert_eq!(playback_navigation_hint(false, false), "");
         assert_eq!(playback_navigation_hint(false, true), "");
+    }
+
+    #[cfg(feature = "video")]
+    #[test]
+    fn letterboxed_luma_writes_into_offset_region() {
+        let rgb = vec![255, 0, 0, 0, 255, 0];
+        let mut gray = Vec::new();
+        rgb_to_luma_letterboxed_strided(&rgb, 2, 1, 6, &mut gray, 4, 2, 1, 1);
+
+        assert_eq!(gray.len(), 8);
+        assert_eq!(gray[0], 0);
+        assert_eq!(gray[5], rgb_triplet_to_luma(255, 0, 0));
+        assert_eq!(gray[6], rgb_triplet_to_luma(0, 255, 0));
+    }
+
+    #[cfg(feature = "video")]
+    #[test]
+    fn strided_rgb_to_luma_skips_padding() {
+        let rgb = vec![
+            255, 0, 0, 0, 255, 0, 9, 9, 9, 0, 0, 255, 255, 255, 255, 7, 7, 7,
+        ];
+        let mut gray = Vec::new();
+        rgb_to_luma_strided(&rgb, 2, 2, 9, &mut gray);
+
+        assert_eq!(
+            gray,
+            vec![
+                rgb_triplet_to_luma(255, 0, 0),
+                rgb_triplet_to_luma(0, 255, 0),
+                rgb_triplet_to_luma(0, 0, 255),
+                rgb_triplet_to_luma(255, 255, 255)
+            ]
+        );
+    }
+
+    #[cfg(feature = "video")]
+    #[test]
+    fn compute_fit_dimensions_preserves_aspect_when_letterboxed() {
+        assert_eq!(
+            compute_fit_dimensions(1920, 1080, 100, 100, true),
+            (100, 56)
+        );
+        assert_eq!(
+            compute_fit_dimensions(1080, 1920, 100, 100, true),
+            (56, 100)
+        );
+        assert_eq!(compute_fit_dimensions(640, 480, 80, 40, false), (80, 40));
     }
 }

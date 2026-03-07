@@ -9,7 +9,7 @@ use nokhwa::{
     Camera,
 };
 #[cfg(feature = "video")]
-use std::time::Duration;
+use std::{cmp::Ordering, time::Duration};
 
 #[cfg(feature = "video")]
 use crate::rendering::TerminalRenderer;
@@ -24,6 +24,7 @@ use super::{blit_luma_to_braille, draw_centered, otsu_threshold, ColorMode};
 #[cfg(feature = "video")]
 pub fn run_webcam_capture(device_index: usize) -> Result<()> {
     use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+    const FPS_SMOOTHING_WINDOW: usize = 30;
 
     // 1. Get terminal dimensions first to inform camera resolution choice
     let mut renderer = TerminalRenderer::new()?;
@@ -48,13 +49,22 @@ pub fn run_webcam_capture(device_index: usize) -> Result<()> {
         RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
     let mut camera = Camera::new(index, requested).context("Failed to open camera")?;
 
-    // Smart Governor: Find optimal camera resolution based on terminal size
-    // Strategy: Use ~2x terminal resolution for quality, but not more (diminishing returns)
+    // Smart Governor: Find camera mode based on terminal size and advertised FPS.
+    // Strategy: prefer the highest frame-rate mode that still provides enough
+    // detail for the terminal, while avoiding oversized formats that waste CPU.
     let optimal_width = (target_pixel_w * 2) as u32; // 2x for quality
     let optimal_height = (target_pixel_h * 2) as u32;
+    let minimum_width = target_pixel_w as u32;
+    let minimum_height = target_pixel_h as u32;
 
     if let Ok(formats) = camera.compatible_camera_formats() {
         tracing::info!("Available camera formats: {}", formats.len());
+        let max_fps = formats
+            .iter()
+            .map(|f| f.frame_rate())
+            .max()
+            .unwrap_or(1)
+            .max(1);
 
         // Score each format based on how well it matches our needs
         let mut scored_formats: Vec<_> = formats
@@ -63,78 +73,74 @@ pub fn run_webcam_capture(device_index: usize) -> Result<()> {
                 let res = f.resolution();
                 let w = res.width();
                 let h = res.height();
-
-                // Calculate how much we'd need to scale (prefer minimal scaling)
+                let fps = f.frame_rate().max(1);
+                let score = score_webcam_format(
+                    w,
+                    h,
+                    fps,
+                    max_fps,
+                    optimal_width,
+                    optimal_height,
+                    minimum_width,
+                    minimum_height,
+                );
                 let scale_factor =
                     ((w as f32 / optimal_width as f32) + (h as f32 / optimal_height as f32)) / 2.0;
 
-                // Penalty for being too large (wasted processing)
-                let size_penalty = if scale_factor > 1.5 {
-                    (scale_factor - 1.5) * 100.0
-                } else {
-                    0.0
-                };
-
-                // Penalty for being too small (quality loss)
-                let quality_penalty = if scale_factor < 0.8 {
-                    (0.8 - scale_factor) * 150.0
-                } else {
-                    0.0
-                };
-
-                // Prefer common resolutions (they're usually better optimized)
-                let common_bonus = match (w, h) {
-                    (640, 480) | (320, 240) | (800, 600) => -20.0,
-                    (1280, 720) | (1920, 1080) => {
-                        if scale_factor > 2.0 {
-                            50.0
-                        } else {
-                            0.0
-                        }
-                    }
-                    _ => 0.0,
-                };
-
-                // Total score (lower is better)
-                let score = size_penalty
-                    + quality_penalty
-                    + common_bonus
-                    + ((w * h) as f32 / 1_000_000.0) * 10.0; // Slight penalty for total pixels
-
                 tracing::debug!(
-                    "Format {}x{}: scale={:.2}x, score={:.1} (size_pen={:.1}, qual_pen={:.1})",
+                    "Format {}x{}@{}fps: scale={:.2}x, score={:.1}",
                     w,
                     h,
+                    fps,
                     scale_factor,
-                    score,
-                    size_penalty,
-                    quality_penalty
+                    score
                 );
 
-                (f, score)
+                (f, score, fps)
             })
             .collect();
 
         // Sort by score (best first)
-        scored_formats.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored_formats.sort_by(|a, b| {
+            a.1.partial_cmp(&b.1)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| b.2.cmp(&a.2))
+        });
 
-        if let Some((best_format, score)) = scored_formats.first() {
+        if let Some((best_format, score, fps)) = scored_formats.first() {
             let res = best_format.resolution();
             tracing::info!(
-                "🎯 Smart Governor selected: {}x{} (score: {:.1}, optimal was {}x{})",
+                "🎯 Smart Governor selected: {}x{} @ {} FPS (score: {:.1}, optimal was {}x{})",
                 res.width(),
                 res.height(),
+                fps,
                 score,
                 optimal_width,
                 optimal_height
             );
-            let _ = camera.set_camera_format((*best_format).clone());
+            if let Err(error) = camera.set_camera_format((*best_format).clone()) {
+                tracing::warn!(
+                    "Failed to set selected camera format {}x{} @ {} FPS: {}",
+                    res.width(),
+                    res.height(),
+                    fps,
+                    error
+                );
+            }
         }
     }
 
     camera
         .open_stream()
         .context("Failed to open camera stream")?;
+
+    let actual_format = camera.camera_format();
+    tracing::info!(
+        "Webcam stream opened at {}x{} @ {} FPS",
+        actual_format.resolution().width(),
+        actual_format.resolution().height(),
+        actual_format.frame_rate()
+    );
 
     // 3. Setup rendering buffers
     let mut grid = GridBuffer::new(w_cells, h_cells);
@@ -148,12 +154,15 @@ pub fn run_webcam_capture(device_index: usize) -> Result<()> {
     let mut manual_threshold: u8 = 128;
     let mut auto_thresh: bool = false;
     let mut show_hud: bool = true;
-    let mut last_used_threshold: u8 = manual_threshold;
 
     // FPS tracking for performance monitoring
     use std::time::Instant;
-    let mut frame_times: Vec<f32> = Vec::with_capacity(30);
     let mut last_frame_time = Instant::now();
+    let mut frame_times = [0.0_f32; FPS_SMOOTHING_WINDOW];
+    let mut frame_time_sum = 0.0_f32;
+    let mut frame_time_count = 0usize;
+    let mut frame_time_index = 0usize;
+    let mut luma_bytes = vec![0u8; target_dot_w * target_dot_h];
 
     // 4. Loop - optimized for performance
     loop {
@@ -180,46 +189,55 @@ pub fn run_webcam_capture(device_index: usize) -> Result<()> {
 
         // Compute luma inline for better performance
         let rgb_bytes = resized.as_raw();
-        let mut luma_bytes = Vec::with_capacity(dst_w * dst_h);
+        if luma_bytes.len() != dst_w * dst_h {
+            luma_bytes.resize(dst_w * dst_h, 0);
+        }
 
         // Fast RGB to grayscale conversion (ITU-R BT.601 formula)
-        for chunk in rgb_bytes.chunks_exact(3) {
+        for (dst, chunk) in luma_bytes.iter_mut().zip(rgb_bytes.chunks_exact(3)) {
             let r = chunk[0] as u32;
             let g = chunk[1] as u32;
             let b = chunk[2] as u32;
             // Weighted average: 0.299*R + 0.587*G + 0.114*B
             let luma = ((r * 77 + g * 150 + b * 29) >> 8) as u8;
-            luma_bytes.push(luma);
+            *dst = luma;
         }
 
         // Threshold
-        braille.clear();
         let used_threshold: u8 = if auto_thresh {
             otsu_threshold(&luma_bytes)
         } else {
             manual_threshold
         };
-        last_used_threshold = used_threshold;
 
         blit_luma_to_braille(&luma_bytes, dst_w, dst_h, used_threshold, &mut braille);
 
         // Color mapping - optimized
-        for cy in 0..h_cells {
-            for cx in 0..w_cells {
-                let ch = braille.get_char(cx, cy);
-                match color_mode {
-                    ColorMode::Off => {
+        match color_mode {
+            ColorMode::Off => {
+                for cy in 0..h_cells {
+                    for cx in 0..w_cells {
+                        let ch = braille.get_char(cx, cy);
                         grid.set_cell(cx, cy, ch);
                     }
-                    ColorMode::Grayscale => {
-                        // Simple sampling
+                }
+            }
+            ColorMode::Grayscale => {
+                for cy in 0..h_cells {
+                    for cx in 0..w_cells {
+                        let ch = braille.get_char(cx, cy);
                         let x = (cx * 2).min(dst_w - 1);
                         let y = (cy * 4).min(dst_h - 1);
                         let idx = y * dst_w + x;
                         let v = luma_bytes[idx];
                         grid.set_cell_with_color(cx, cy, ch, Color::new(v, v, v));
                     }
-                    ColorMode::Full => {
+                }
+            }
+            ColorMode::Full => {
+                for cy in 0..h_cells {
+                    for cx in 0..w_cells {
+                        let ch = braille.get_char(cx, cy);
                         let x = (cx * 2).min(dst_w - 1);
                         let y = (cy * 4).min(dst_h - 1);
                         let idx = (y * dst_w + x) * 3;
@@ -233,15 +251,24 @@ pub fn run_webcam_capture(device_index: usize) -> Result<()> {
         }
 
         // Calculate FPS (rolling average over last 30 frames)
-        let frame_time = last_frame_time.elapsed().as_secs_f32();
-        last_frame_time = Instant::now();
+        let now = Instant::now();
+        let frame_time = now.duration_since(last_frame_time).as_secs_f32();
+        last_frame_time = now;
 
-        frame_times.push(frame_time);
-        if frame_times.len() > 30 {
-            frame_times.remove(0);
+        if frame_time_count == FPS_SMOOTHING_WINDOW {
+            frame_time_sum -= frame_times[frame_time_index];
+        } else {
+            frame_time_count += 1;
         }
+        frame_times[frame_time_index] = frame_time;
+        frame_time_sum += frame_time;
+        frame_time_index = (frame_time_index + 1) % FPS_SMOOTHING_WINDOW;
 
-        let avg_frame_time = frame_times.iter().sum::<f32>() / frame_times.len() as f32;
+        let avg_frame_time = if frame_time_count > 0 {
+            frame_time_sum / frame_time_count as f32
+        } else {
+            0.0
+        };
         let fps = if avg_frame_time > 0.0 {
             1.0 / avg_frame_time
         } else {
@@ -264,7 +291,7 @@ pub fn run_webcam_capture(device_index: usize) -> Result<()> {
             draw_centered(&mut grid, &status);
         }
 
-        renderer.render(&grid)?;
+        renderer.render_fast(&mut grid)?;
 
         // Input
         if event::poll(Duration::from_millis(0))? {
@@ -301,6 +328,7 @@ pub fn run_webcam_capture(device_index: usize) -> Result<()> {
                     braille = BrailleGrid::new(w_cells, h_cells);
                     target_dot_w = braille.dot_width();
                     target_dot_h = braille.dot_height();
+                    luma_bytes.resize(target_dot_w * target_dot_h, 0);
                 }
                 _ => {}
             }
@@ -309,4 +337,60 @@ pub fn run_webcam_capture(device_index: usize) -> Result<()> {
 
     renderer.cleanup()?;
     Ok(())
+}
+
+#[cfg(feature = "video")]
+fn score_webcam_format(
+    width: u32,
+    height: u32,
+    fps: u32,
+    max_fps: u32,
+    optimal_width: u32,
+    optimal_height: u32,
+    minimum_width: u32,
+    minimum_height: u32,
+) -> f32 {
+    let width_scale = width as f32 / optimal_width.max(1) as f32;
+    let height_scale = height as f32 / optimal_height.max(1) as f32;
+    let scale_factor = (width_scale + height_scale) / 2.0;
+
+    let oversize_penalty = if scale_factor > 1.35 {
+        (scale_factor - 1.35) * 90.0
+    } else {
+        0.0
+    };
+
+    let undersize_penalty = if scale_factor < 0.9 {
+        (0.9 - scale_factor) * 170.0
+    } else {
+        0.0
+    };
+
+    let minimum_floor_penalty = if width < minimum_width || height < minimum_height {
+        let width_shortfall = (minimum_width as f32 / width.max(1) as f32 - 1.0).max(0.0);
+        let height_shortfall = (minimum_height as f32 / height.max(1) as f32 - 1.0).max(0.0);
+        (width_shortfall + height_shortfall) * 140.0
+    } else {
+        0.0
+    };
+
+    let megapixel_penalty = ((width as u64 * height as u64) as f32 / 1_000_000.0) * 12.0;
+    let fps_penalty = if max_fps > 0 {
+        (1.0 - (fps as f32 / max_fps as f32)).max(0.0) * 120.0
+    } else {
+        0.0
+    };
+
+    let common_bonus = match (width, height) {
+        (320, 240) | (640, 480) | (800, 600) => -12.0,
+        (1280, 720) | (1920, 1080) if scale_factor > 2.0 => 35.0,
+        _ => 0.0,
+    };
+
+    oversize_penalty
+        + undersize_penalty
+        + minimum_floor_penalty
+        + megapixel_penalty
+        + fps_penalty
+        + common_bonus
 }
