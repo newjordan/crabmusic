@@ -1,10 +1,10 @@
-// Ring buffer for lock-free audio pipeline communication
+// Ring buffer for non-blocking audio pipeline communication
 
 use super::AudioBuffer;
 use ringbuf::{traits::*, HeapRb};
 use std::sync::{Arc, Mutex};
 
-/// Lock-free ring buffer for audio pipeline
+/// Shared ring buffer for audio pipeline
 ///
 /// Provides single-producer single-consumer communication between
 /// audio capture thread and main processing thread.
@@ -12,7 +12,8 @@ use std::sync::{Arc, Mutex};
 /// # Thread Safety
 /// - Producer (audio thread): Calls `push()` to write samples
 /// - Consumer (main thread): Calls `pop()` to read samples
-/// - Both operations are lock-free and non-blocking
+/// - Both operations are non-blocking: they use `try_lock`, so a
+///   contended mutex makes them report "not ready" rather than wait
 ///
 /// # Examples
 ///
@@ -262,34 +263,46 @@ mod tests {
 
     #[test]
     fn test_multi_threaded() {
+        use std::sync::atomic::{AtomicBool, Ordering};
         use std::thread;
 
         let ring = AudioRingBuffer::new(100);
         let producer = ring.clone();
         let consumer = ring.clone();
+        let producer_done = Arc::new(AtomicBool::new(false));
+        let producer_done_flag = producer_done.clone();
 
         // Producer thread
         let producer_handle = thread::spawn(move || {
             for i in 0..50 {
                 let buffer = AudioBuffer::with_samples(vec![i as f32], 44100, 1);
-                producer.push(buffer);
+                // push() is non-blocking and returns false if the lock is
+                // busy, so retry until the buffer is actually queued.
+                while !producer.push(buffer.clone()) {
+                    thread::sleep(std::time::Duration::from_micros(10));
+                }
                 // Small delay to simulate audio callback timing
                 thread::sleep(std::time::Duration::from_micros(10));
             }
+            producer_done_flag.store(true, Ordering::Release);
         });
 
         // Consumer thread
         let consumer_handle = thread::spawn(move || {
             let mut count = 0;
-            let mut attempts = 0;
-            while count < 50 && attempts < 10000 {
+            // Pop until we have all 50 buffers. Once the producer has
+            // finished, keep draining until the ring is actually empty
+            // (a fixed attempt count or wall-clock deadline can be starved
+            // on a loaded test runner and report false failures).
+            while count < 50 {
                 if let Some(_buffer) = consumer.pop() {
                     count += 1;
+                } else if producer_done.load(Ordering::Acquire) && consumer.is_empty() {
+                    break;
                 } else {
                     // Small delay if no data available
                     thread::sleep(std::time::Duration::from_micros(10));
                 }
-                attempts += 1;
             }
             count
         });
