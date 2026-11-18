@@ -1,15 +1,13 @@
 # 🦀 CrabMusic
 
-CrabMusic turns audio, images, videos, old TV, and 3D scenes into terminal art.
+CrabMusic turns audio, videos, old TV, and 3D scenes into terminal art.
+(The image channel currently shows a procedural placeholder; loading local
+images is temporarily disabled in the app.)
 
 ## ✨ Current Capabilities
 
-- 🖼️ Turn images into Braille art in the terminal
-- 🔁 Morph between two images
-- 🎮 Pause, reverse, speed up, tweak, resize, and save image mode live
 - 🎞️ Play local videos or YouTube in terminal art
 - 📼 Press `U` to jump through random Internet Archive channels and let the next show roll automatically
-- 📹 Use your webcam as a live terminal feed
 - 🎵 Visualize your mic or your system audio
 - 🔊 Hear the audio while you watch
 - 🧊 Load `.obj` files and spin, zoom, and inspect them
@@ -77,41 +75,31 @@ cargo run --release
 
 ### Quick Start: Images
 
-```bash
-# Open a single image (Braille art)
-cargo run --release -- --image ".\media\viper.jpg"
-
-# Start a morph that ping‑pongs between two images (A↔B)
-cargo run --release -- --morph-a ".\media\viper.jpg" --morph-b ".\media\tiger.jpg"
-
-# Optional: set morph duration per leg (ms)
-cargo run --release -- --morph-a ".\media\viper.jpg" --morph-b ".\media\tiger.jpg" --morph-duration 4000
-
-# Drag-and-paste mode: start, then paste paths to view
-cargo run --release -- --image-drop
-```
+The Image channel (`v` to cycle channels) currently renders a procedural
+placeholder pattern. Loading images from the command line or by pasting a
+path is temporarily disabled in the app, so there is no flag for it right
+now.
 
 ### Quick Start: Audio
 
 ```bash
-# Windows system audio (WASAPI loopback)
-cargo run --release -- --loopback
-
-# Mic input, pick devices
-cargo run --release -- --device "Microphone" --output-device "Speakers"
+# List audio devices, then pick one
+cargo run --release -- --list-devices
+cargo run --release -- --device "Microphone"
 ```
 
-### Quick Start: Video (feature-gated)
+Windows system audio (WASAPI loopback) is enabled through the config file
+instead of a flag: set `audio.use_loopback: true` in your `config.yaml`.
+On other platforms loopback capture is not supported.
+
+### Quick Start: Video
 
 ```bash
 # Play a local video file as Braille
-cargo run --release -- --video ".\media\clip.mp4"
-
-cargo run --release --features video -- --video "media/clip.mp4"
+cargo run --release -- --video "media/clip.mp4"
 
 # Or play a YouTube URL/channel/playlist via yt-dlp resolution
-cargo run --release --features video -- --video "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-
+cargo run --release -- --video "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 ```
 
 Notes:
@@ -163,7 +151,7 @@ cargo run --release -- --list-devices
 cargo run --release -- --help
 ```
 
-## ⌨️ Image Mode Controls
+## ⌨️ Controls
 
 ### Global quality bank
 
@@ -175,29 +163,20 @@ cargo run --release -- --help
 - `F6` - exposure preset
 - `F7` - reset quality controls
 
-These work consistently in the main audio visualizer app, image mode, and video mode.
+These work consistently across the visualizer modes.
 
-- `m` - start/stop morph (prompt for second image when starting from single image)
-- `Space` - pause/unpause morph
-- `r` - reverse morph direction instantly
-- `[` / `]` - faster / slower (shorter/longer duration per leg)
-- `l` - letterbox ON/OFF (preserve aspect vs fill)
-- Legacy aliases still work in image mode: `c`, `p`, `d`, `g`, `v`, `z`, `0`
-- `+` / `-` - manual threshold up/down; `a` - toggle auto-threshold
-- `x` - attempt to maximize canvas (some terminals may not allow programmatic resize)
-- `s` - save current Braille art to `<image_stem>.braille.txt` next to the image
-- `Esc` - clears typed input/morph prompt; `Esc` again (empty) quits; `q` also quits
+### App keys
 
-## 🎞️ Video Mode Controls
-
-- `Space` - pause / resume playback
-- `l` - letterbox ON/OFF
-- `+` / `-` - manual threshold up/down; `a` - toggle auto-threshold
-- `F1-F7` - shared quality bank (image/video/main-app parity)
-- Legacy aliases still work in video mode: `c`, `p`, `d`, `g`, `v`, `z`, `0`
-- `t` - cycle temporal blend (frame memory) presets
-- `y` - cycle temporal hysteresis presets for steadier motion
-- `u` - open/retune a random Internet Archive stream (where supported)
+- `←` / `→` (or `v`) - previous / next visualizer channel
+- `u` - jump to a random Internet Archive channel and let the next show roll
+- `m` - toggle microphone input
+- `o` - cycle color scheme
+- `i` - show/hide channel number
+- `+` / `-` - sensitivity up/down; `1`-`5` - sensitivity presets
+- `l` - toggle spectrum labels; `p` - toggle spectrum peak hold; `n` - cycle spectrum note tracking
+- `f` - oscilloscope fill mode; `g` - oscilloscope grid
+- `t` / `y` - Raycaster 3D wireframe thickness down / up (in that mode)
+- `h` / `x` - OBJ viewer grid step / zoom out (plus mode-specific steering keys, see the in-app help)
 - `q` / `Esc` - quit
 
 ## 📝 Configuration
@@ -213,7 +192,7 @@ Key configuration options:
 - Braille live/image/video presets, color mode defaults, dither overrides, gamma/contrast/exposure overrides
 - Video temporal blend + temporal hysteresis defaults for motion smoothing
 
-See `config/default.yaml` for all available options and detailed comments.
+See `config.default.yaml` for all available options and detailed comments.
 
 Example braille-quality config:
 
@@ -229,6 +208,8 @@ rendering:
 ### Prerequisites
 
 - Rust 1.75 or later
+- FFmpeg development libraries (the `video` feature builds against them by
+  default; `pkg-config` should find libavcodec/libavformat/libavutil)
 - System audio libraries:
   - **Linux**: ALSA development files (`libasound2-dev` on Debian/Ubuntu)
   - **macOS**: CoreAudio (included with Xcode Command Line Tools)
@@ -295,7 +276,7 @@ crabmusic/
 │   │   ├── cpal_device.rs   # CPAL-based audio capture
 │   │   ├── wasapi_loopback.rs  # Windows WASAPI loopback (system audio)
 │   │   ├── output_device.rs # Audio output/passthrough
-│   │   └── ring_buffer.rs   # Lock-free ring buffer
+│   │   └── ring_buffer.rs   # Shared audio ring buffer
 │   ├── dsp/                 # DSP processing (FFT, frequency analysis)
 │   ├── visualization/       # Visualization engine
 │   │   ├── sine_wave.rs     # Sine wave visualizer
@@ -337,7 +318,7 @@ CrabMusic uses a pipeline architecture with lock-free ring buffers for thread co
 ```
 
 **Key Design Decisions:**
-- **Lock-free ring buffer** for audio data transfer between threads
+- **Non-blocking ring buffer** for audio data transfer between threads
 - **Trait-based audio devices** for polymorphic capture (CPAL vs WASAPI)
 - **Differential rendering** to minimize terminal I/O
 - **Hot-reload configuration** for live parameter tuning
@@ -372,11 +353,14 @@ Built with these excellent Rust crates:
 **Version**: 0.1.0
 
 **Best stuff right now:**
-- ✅ Open images, videos, YouTube links, webcam feed, mic input, or system audio
-- ✅ Morph images, save text art, and tweak the look live while it runs
+- ✅ Play videos, YouTube links, mic input, or system audio
 - ✅ Channel-surf random old TV and weird archive finds
 - ✅ Load `.obj` files and control them in the terminal
 - ✅ Jump into retro 3D scenes and steer them live
+
+**Image channel note:** loading local images (and the morph mode) is
+temporarily disabled in the app; the Image channel shows a procedural
+placeholder for now.
 
 
 **Next up (roadmap):**
