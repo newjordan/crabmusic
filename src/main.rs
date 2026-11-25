@@ -28,7 +28,8 @@ mod visualization;
 #[cfg(windows)]
 use audio::WasapiLoopbackDevice;
 use audio::{
-    AudioCaptureDevice, AudioOutputDevice, AudioRingBuffer, CpalAudioDevice, SilentAudioDevice,
+    AudioCaptureDevice, AudioOutputDevice, AudioRingBuffer, CpalAudioDevice, FileAudioDevice,
+    SilentAudioDevice,
 };
 use config::{AppConfig, BrailleColorMode, InternetArchiveConfig, RenderingConfig};
 use dsp::DspProcessor;
@@ -86,6 +87,33 @@ struct Args {
     /// Play video/GIF file (path to video file)
     #[arg(long)]
     video: Option<String>,
+
+    /// WAV file to visualize instead of a live microphone or loopback device.
+    /// PCM (8/16/24/32-bit) and 32-bit float WAV are supported. Playback loops.
+    #[arg(long, value_name = "FILE")]
+    input: Option<String>,
+
+    /// Visualizer to start. Names are listed by --list-visualizers.
+    #[arg(long, value_name = "NAME")]
+    visualizer: Option<String>,
+
+    /// Print every visualizer name and exit
+    #[arg(long)]
+    list_visualizers: bool,
+
+    /// Write the built-in synthetic test tone to a 16-bit WAV file and exit
+    #[arg(long, value_name = "FILE")]
+    write_tone: Option<String>,
+
+    /// Render a text capture of each visualizer (or --visualizer) and exit.
+    /// Uses --input when set, otherwise a synthetic test tone. No audio device
+    /// or terminal is required.
+    #[arg(long, value_name = "DIR")]
+    capture_dir: Option<String>,
+
+    /// Audio frames to feed each capture
+    #[arg(long, default_value_t = 12)]
+    capture_frames: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -195,6 +223,35 @@ impl VisualizerMode {
             VisualizerMode::ArchiveEducational => "Archive Educational",
             VisualizerMode::ArchiveLocalNews => "Archive Local News",
         }
+    }
+
+    fn parse(name: &str) -> Option<Self> {
+        let id = crabmusic::preview::find_visualizer(name)?.id;
+        Some(match id {
+            "sine-wave" => Self::SineWave,
+            "spectrum" => Self::Spectrum,
+            "oscilloscope" => Self::Oscilloscope,
+            "xy-oscilloscope" => Self::XYOscilloscope,
+            "raycaster3d" => Self::Raycaster3D,
+            "obj-viewer" => Self::ObjViewer,
+            "primitives" => Self::Primitives,
+            "grid-tunnel" => Self::GridTunnel,
+            "gravity-well" => Self::GravityWell,
+            "waveform-tunnel" => Self::WaveformTunnel,
+            "terrain" => Self::TerrainLandscape,
+            "starfield" => Self::Starfield,
+            "spectrogram" => Self::Spectrogram,
+            "night-night" => Self::NightNight,
+            "image" => Self::Image,
+            "video" => Self::Video,
+            "archive-tv" => Self::InternetArchive,
+            "archive-cooking" => Self::ArchiveCooking,
+            "archive-public-access" => Self::ArchivePublicAccess,
+            "archive-industrial" => Self::ArchiveIndustrial,
+            "archive-educational" => Self::ArchiveEducational,
+            "archive-local-news" => Self::ArchiveLocalNews,
+            _ => return None,
+        })
     }
 
     fn index(&self) -> usize {
@@ -480,6 +537,11 @@ fn create_audio_capture_device(
     requested_use_loopback: bool,
     configured_device_name: Option<String>,
 ) -> Result<Box<dyn AudioCaptureDevice>> {
+    if let Some(path) = &args.input {
+        let ring_buffer = Arc::new(AudioRingBuffer::new(buffer_capacity));
+        return Ok(Box::new(FileAudioDevice::open(path, ring_buffer)?));
+    }
+
     if args.test {
         return create_silent_audio_device(buffer_capacity, sample_rate, channels);
     }
@@ -600,26 +662,41 @@ impl Application {
         let requested_use_loopback = config.audio.resolved_use_loopback();
         let mut audio_flags = runtime_audio_flags(true, requested_use_loopback);
 
-        let audio_device = match create_audio_capture_device(
-            args,
-            config.audio.buffer_capacity,
-            config.audio.sample_rate,
-            config.audio.channels,
-            requested_use_loopback,
-            config.audio.device_name.clone(),
-        ) {
-            Ok(device) => device,
-            Err(error) => {
-                tracing::warn!(
-                    error = %error,
-                    "Failed to initialize audio capture; falling back to audio-off mode"
-                );
-                audio_flags = runtime_audio_flags(false, requested_use_loopback);
-                create_silent_audio_device(
-                    config.audio.buffer_capacity,
-                    config.audio.sample_rate,
-                    config.audio.channels,
-                )?
+        let audio_device = if args.input.is_some() {
+            audio_flags = AudioRuntimeFlags {
+                use_loopback: false,
+                microphone_enabled: false,
+            };
+            create_audio_capture_device(
+                args,
+                config.audio.buffer_capacity,
+                config.audio.sample_rate,
+                config.audio.channels,
+                false,
+                None,
+            )?
+        } else {
+            match create_audio_capture_device(
+                args,
+                config.audio.buffer_capacity,
+                config.audio.sample_rate,
+                config.audio.channels,
+                requested_use_loopback,
+                config.audio.device_name.clone(),
+            ) {
+                Ok(device) => device,
+                Err(error) => {
+                    tracing::warn!(
+                        error = %error,
+                        "Failed to initialize audio capture; falling back to audio-off mode"
+                    );
+                    audio_flags = runtime_audio_flags(false, requested_use_loopback);
+                    create_silent_audio_device(
+                        config.audio.buffer_capacity,
+                        config.audio.sample_rate,
+                        config.audio.channels,
+                    )?
+                }
             }
         };
 
@@ -640,7 +717,12 @@ impl Application {
             None
         };
 
-        let dsp_processor = DspProcessor::new(config.audio.sample_rate, config.dsp.fft_size)?;
+        let dsp_sample_rate = if args.input.is_some() {
+            audio_device.get_config().sample_rate
+        } else {
+            config.audio.sample_rate
+        };
+        let dsp_processor = DspProcessor::new(dsp_sample_rate, config.dsp.fft_size)?;
 
         let color_scheme = ColorScheme::default();
         let current_charset =
@@ -777,6 +859,14 @@ impl Application {
                 }
                 Ok(())
             }
+        }
+    }
+
+    fn select_visualizer(&mut self, mode: VisualizerMode) {
+        self.visualizer_mode = mode;
+        self.recreate_visualizer();
+        if ArchiveChannelKind::from_visualizer_mode(mode).is_some() {
+            self.autotune_archive_mode();
         }
     }
 
@@ -2962,8 +3052,16 @@ async fn main() -> Result<()> {
         args.report_file.as_deref(),
     )?;
 
-    let mode = if args.list_devices {
+    let mode = if args.list_visualizers {
+        "list-visualizers"
+    } else if args.write_tone.is_some() {
+        "write-tone"
+    } else if args.capture_dir.is_some() {
+        "capture"
+    } else if args.list_devices {
         "list-devices"
+    } else if args.input.is_some() {
+        "file"
     } else if args.test {
         "test"
     } else if args.video.is_some() {
@@ -2978,7 +3076,43 @@ async fn main() -> Result<()> {
         print_version_info();
     }
 
-    let result: Result<()> = if args.list_devices {
+    let result: Result<()> = if args.list_visualizers {
+        for info in crabmusic::preview::visualizers() {
+            println!("{:<24} {}", info.id, info.title);
+        }
+        Ok(())
+    } else if let Some(path) = &args.write_tone {
+        crabmusic::preview::write_synthetic_tone(path)
+            .map_err(|err| anyhow!("failed to write synthetic tone: {err}"))?;
+        println!("Wrote synthetic test tone to {path}");
+        Ok(())
+    } else if let Some(dir) = &args.capture_dir {
+        let (samples, sample_rate, channels) = if let Some(path) = &args.input {
+            let wav = audio::read_wav(path)?;
+            (wav.samples, wav.sample_rate, wav.channels)
+        } else {
+            (
+                crabmusic::preview::synthetic_test_tone(44_100, 2.0),
+                44_100,
+                1,
+            )
+        };
+        let written = crabmusic::preview::write_captures(
+            dir,
+            &samples,
+            sample_rate,
+            channels,
+            64,
+            16,
+            args.capture_frames,
+            args.visualizer.as_deref(),
+        )
+        .map_err(|err| anyhow!(err))?;
+        for info in &written {
+            println!("captured {} -> {dir}/{}.txt", info.title, info.id);
+        }
+        Ok(())
+    } else if args.list_devices {
         list_audio_devices()?;
         Ok(())
     } else {
@@ -2993,7 +3127,15 @@ async fn main() -> Result<()> {
             video::run_video_playback_with_config(&prepared.playback_target, &config.rendering)
         } else {
             setup_shutdown_handler()?;
-            let app = Application::new(config, &args)?;
+            let mut app = Application::new(config, &args)?;
+            if let Some(name) = &args.visualizer {
+                let mode = VisualizerMode::parse(name).with_context(|| {
+                    format!(
+                        "unknown visualizer '{name}'. Run with --list-visualizers to see the names."
+                    )
+                })?;
+                app.select_visualizer(mode);
+            }
             if args.test {
                 app.run_test_mode()
             } else {
@@ -3019,6 +3161,18 @@ mod tests {
     use super::{ArchiveChannelKind, ArchiveRequestContext, VisualizerMode};
     use crossterm::event::{KeyCode, KeyEventKind};
     use std::time::Duration;
+
+    #[test]
+    fn every_catalog_id_selects_a_visualizer_mode() {
+        for info in crabmusic::preview::visualizers() {
+            let mode = VisualizerMode::parse(info.id).expect(info.id);
+            assert_eq!(mode.name(), info.title);
+        }
+        assert_eq!(
+            crabmusic::preview::visualizers().len(),
+            VisualizerMode::count()
+        );
+    }
 
     #[test]
     fn archive_modes_are_in_visualizer_rotation() {

@@ -5,17 +5,21 @@
 #![allow(unused_imports)]
 
 mod cpal_device;
+mod file_device;
 mod output_device;
 mod ring_buffer;
 mod silent_device;
+mod wav;
 
 #[cfg(windows)]
 mod wasapi_loopback;
 
 pub use cpal_device::CpalAudioDevice;
+pub use file_device::{looping_frames, FileAudioDevice};
 pub use output_device::AudioOutputDevice;
 pub use ring_buffer::AudioRingBuffer;
 pub use silent_device::SilentAudioDevice;
+pub use wav::{encode_wav_pcm16, parse_wav, read_wav, write_wav, WavData};
 
 #[cfg(windows)]
 pub use wasapi_loopback::WasapiLoopbackDevice;

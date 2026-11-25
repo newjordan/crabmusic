@@ -62,6 +62,10 @@ pub enum AudioError {
     /// Audio stream error
     #[error("Audio stream error: {0}. The audio device may have been disconnected.")]
     StreamError(String),
+
+    /// Audio file could not be read or decoded
+    #[error("Audio file error: {0}")]
+    FileError(String),
 }
 
 /// DSP processing errors

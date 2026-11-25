@@ -8,11 +8,14 @@ use anyhow::Result;
 use crate::braille_quality::{self, BrailleQualitySettings};
 use crate::config::RenderingConfig;
 use crate::rendering::TerminalRenderer;
+#[cfg(feature = "video")]
 use crate::runtime_controls::{
     apply_quality_action, quality_control_action_from_key, ColorMode, QualityControlAction,
 };
 use crate::visualization::braille::BrailleGrid;
-use crate::visualization::{Color, GridBuffer};
+#[cfg(feature = "video")]
+use crate::visualization::Color;
+use crate::visualization::GridBuffer;
 #[cfg(feature = "video")]
 use std::time::Duration;
 
@@ -75,13 +78,10 @@ fn playback_navigation_hint(
     }
 }
 
-#[cfg(all(feature = "video", windows))]
+#[cfg(all(feature = "webcam", windows))]
 pub mod webcam;
 
-#[cfg(feature = "video")]
 pub mod internet_archive;
-
-#[cfg(feature = "video")]
 pub mod youtube;
 
 /// Run video playback mode.

@@ -2,7 +2,6 @@
 /target/
 **/*.rs.bk
 *.pdb
-Cargo.lock
 
 # IDE
 .vscode/
@@ -14,7 +13,9 @@ Cargo.lock
 # OS
 .DS_Store
 Thumbs.db
-\n# Local test target\n/target-test/
+
+# Local test target
+/target-test/
 
 
 # Private docs (local-only)
