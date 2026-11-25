@@ -631,7 +631,23 @@ mod tests {
         assert!(rendered.contains("A"));
         assert!(rendered.contains("B"));
         assert!(rendered.contains("C"));
-        assert!(rendered.contains("\u{1b}[38;2;255;0;0m"));
+        // Crossterm omits RGB color when NO_COLOR is set or TERM=dumb, but may
+        // still emit reset sequences. Require the truecolor red command only
+        // when color output is allowed.
+        let color_suppressed = std::env::var_os("NO_COLOR").is_some()
+            || std::env::var("TERM").ok().as_deref() == Some("dumb")
+            || std::env::var("FORCE_COLOR").ok().as_deref() == Some("0");
+        if color_suppressed {
+            assert!(
+                !rendered.contains("38;2;255;0;0"),
+                "expected RGB color to be suppressed, got {rendered:?}"
+            );
+        } else {
+            assert!(
+                rendered.contains("\u{1b}[38;2;255;0;0m"),
+                "expected a truecolor red sequence, got {rendered:?}"
+            );
+        }
     }
 
     #[test]

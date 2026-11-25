@@ -28,5 +28,6 @@ pub mod braille_quality;
 pub mod config;
 pub mod dsp;
 pub mod error;
+pub mod preview;
 pub mod rendering;
 pub mod visualization;

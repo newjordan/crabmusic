@@ -85,6 +85,8 @@ impl Visualizer for NightNightVisualizer {
                     // Twinkle phase per-star
                     let phase =
                         (Self::hash((x as i32) + 13, (y as i32) - 7) as f32).to_bits() as f32;
+                    // 6.28 keeps the original twinkle period; it is intentionally not TAU.
+                    #[allow(clippy::approx_constant)]
                     let sparkle = (self.time * 1.2 + (phase % 6.28)).sin().abs();
                     let intensity = (0.4 + 0.6 * sparkle * (0.5 + self.treble)).clamp(0.0, 1.0);
                     if let Some(color) = self.color_scheme.get_color(intensity) {

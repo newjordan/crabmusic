@@ -8,7 +8,7 @@
 
 ## Technology Stack Summary
 
-**Language**: Rust 1.75+ (stable channel)
+**Language**: Rust 1.87+ (stable channel)
 **Architecture**: Single-binary pipeline application
 **Platform**: Cross-platform (Linux, macOS, Windows)
 
@@ -18,7 +18,7 @@
 
 | Category | Technology | Version | Purpose | Rationale |
 |----------|------------|---------|---------|-----------|
-| **Language** | Rust | 1.75+ | Primary development language | Zero-cost abstractions, no GC pauses (critical for real-time audio), memory safety, excellent async support, strong audio/terminal ecosystem |
+| **Language** | Rust | 1.87+ | Primary development language | Zero-cost abstractions, no GC pauses (critical for real-time audio), memory safety, excellent async support, strong audio/terminal ecosystem |
 | **Audio Capture** | cpal | 0.15+ | Cross-platform audio I/O | Pure Rust, supports ALSA/PulseAudio/JACK/PipeWire (Linux), CoreAudio (macOS), WASAPI (Windows) |
 | **FFT Processing** | rustfft | 6.1+ | Fast Fourier Transform | High-performance pure Rust FFT, widely used, well-optimized for audio processing |
 | **Audio Analysis** | spectrum-analyzer | 1.0+ | Frequency spectrum extraction | Built on rustfft, provides frequency spectrum for audio with minimal code |

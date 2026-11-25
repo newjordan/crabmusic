@@ -8,7 +8,7 @@
 
 ## Core Standards
 
-**Language & Runtime**: Rust 1.75+ (stable channel only)
+**Language & Runtime**: Rust 1.87+ (stable channel only)
 
 **Style & Linting**:
 - Enforce with `rustfmt` (use default style, no custom config)
